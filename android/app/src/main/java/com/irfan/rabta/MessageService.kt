@@ -77,8 +77,8 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
     }
 
     // Router.UiListener: a message reached us over the mesh
-    override fun onMeshMessage(msgId: String, fromId: String, fromName: String, body: String, sentAt: Long, hops: Int) {
-        Inbox.receive(msgId, fromId, fromName, body, sentAt, fromId, fromName, "text", false)
+    override fun onMeshMessage(msgId: String, fromId: String, fromName: String, body: String, sentAt: Long, hops: Int, type: String, stored: () -> Unit) {
+        Inbox.receive(msgId, fromId, fromName, body, sentAt, fromId, fromName, type, false, stored)
     }
 
     // --- RabtaEvents.Listener ---

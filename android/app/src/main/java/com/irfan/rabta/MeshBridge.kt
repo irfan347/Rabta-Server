@@ -11,6 +11,6 @@ object MeshBridge {
     val peersConnected get() = router?.connected?.size ?: 0
 
     /** Send a 1-to-1 message over the offline mesh. False if mesh is off. */
-    fun sendDirect(toId: String, msgId: String, body: String): Boolean =
-        router?.sendDirect(toId, msgId, body) ?: false
+    fun sendDirect(toId: String, msgId: String, body: String, type: String = "text"): Boolean =
+        router?.sendDirect(toId, msgId, body, type) ?: false
 }

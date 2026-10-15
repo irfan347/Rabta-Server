@@ -19,12 +19,12 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 
-class ProfileActivity : Activity() {
+class ProfileActivity : ThemedActivity() {
 
-    private val GREEN = 0xFF128C7E.toInt()
-    private val WHITE = Color.WHITE
-    private val TXT   = 0xFF1A1A1A.toInt()
-    private val SUB   = 0xFF888888.toInt()
+    private val GREEN get() = AppTheme.ACCENT
+    private val WHITE get() = AppTheme.surface(this)
+    private val TXT get() = AppTheme.text(this)
+    private val SUB get() = AppTheme.sub(this)
     private val PICK  = 101
     private lateinit var picView: ImageView
     private val handler = Handler(Looper.getMainLooper())
@@ -45,10 +45,10 @@ class ProfileActivity : Activity() {
 
         val hdr = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(GREEN); setPadding(dp(8),dp(10),dp(16),dp(10)) }
         hdr.addView(TextView(this).apply { text = "←"; textSize = 22f; setTextColor(WHITE); setPadding(dp(4),dp(4),dp(16),dp(4)); isClickable=true; setOnClickListener { finish() } })
-        hdr.addView(TextView(this).apply { text = "Profile"; textSize = 20f; typeface = Typeface.DEFAULT_BOLD; setTextColor(WHITE) })
+        hdr.addView(TextView(this).apply { text = "Profile & settings"; textSize = 20f; typeface = Typeface.DEFAULT_BOLD; setTextColor(Color.WHITE) })
         root.addView(hdr)
 
-        val body = ScrollView(this).apply { setBackgroundColor(0xFFF5F5F5.toInt()) }
+        val body = ScrollView(this).apply { setBackgroundColor(AppTheme.bg(this)) }
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(24),dp(32),dp(24),dp(32)); gravity = Gravity.CENTER_HORIZONTAL }
         body.addView(col); root.addView(body)
 
@@ -76,19 +76,28 @@ class ProfileActivity : Activity() {
             card.addView(TextView(this).apply { text = value; textSize = 18f; setTextColor(TXT); setPadding(0,dp(4),0,dp(14)) })
         }
         infoRow("Name", Session.name)
-        card.addView(View(this).apply { setBackgroundColor(0xFFEEEEEE.toInt()) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
+        card.addView(View(this).apply { setBackgroundColor(AppTheme.line(this)) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
         card.addView(View(this).apply { minimumHeight = dp(8) })
         infoRow("Username", "@${Session.username}")
         infoRow("Rabta ID", Session.id)
         col.addView(card, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(20) })
 
+        col.addView(TextView(this).apply {
+            text="Appearance  ·  ${AppTheme.mode(this@ProfileActivity)}"; textSize=16f; setTextColor(TXT); background=pill(WHITE); setPadding(dp(20),dp(18),dp(20),dp(18))
+            setOnClickListener { AppTheme.choose(this@ProfileActivity) }
+        },LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(16) })
+        col.addView(TextView(this).apply {
+            text="Nearby mesh\nBluetooth & Wi-Fi · 8 hops · 24-hour expiry\n${MeshBridge.peersConnected} peers connected\nText is saved for later delivery. Keep Nearby permission enabled."
+            textSize=14f; setTextColor(SUB); setPadding(0,0,0,dp(20))
+        })
+        col.addView(TextView(this).apply { text="Offline security code"; setTextColor(GREEN); setPadding(0,0,0,dp(20)); setOnClickListener { MeshSecurity.showIdentity(this@ProfileActivity) } })
         // Logout
         col.addView(TextView(this).apply {
             text = "Logout"; textSize = 16f; typeface = Typeface.DEFAULT_BOLD; setTextColor(0xFFD32F2F.toInt()); gravity = Gravity.CENTER
             background = GradientDrawable().apply { setColor(WHITE); cornerRadius = dp(28).toFloat(); setStroke(dp(2), 0xFFD32F2F.toInt()) }
             setPadding(0, dp(14), 0, dp(14)); isClickable = true
             setOnClickListener {
-                Session.logout(); WsClient.disconnect()
+                MessageService.stop(this@ProfileActivity); Session.logout(); WsClient.disconnect()
                 startActivity(Intent(this@ProfileActivity, AuthActivity::class.java))
                 finishAffinity()
             }

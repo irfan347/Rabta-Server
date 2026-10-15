@@ -20,15 +20,15 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 
-class ConversationListActivity : Activity(), RabtaEvents.Listener {
+class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
 
-    private val GREEN  = 0xFF128C7E.toInt()
-    private val GREEN2 = 0xFF25D366.toInt()
-    private val WHITE  = Color.WHITE
-    private val TXT    = 0xFF1A1A1A.toInt()
-    private val SUB    = 0xFF888888.toInt()
-    private val DIV    = 0xFFEEEEEE.toInt()
-    private val BG     = 0xFFF0F0F0.toInt()
+    private val GREEN get() = AppTheme.ACCENT
+    private val GREEN2 get() = AppTheme.ACCENT
+    private val WHITE get() = AppTheme.surface(this)
+    private val TXT get() = AppTheme.text(this)
+    private val SUB get() = AppTheme.sub(this)
+    private val DIV get() = AppTheme.line(this)
+    private val BG get() = AppTheme.bg(this)
 
     private lateinit var convList: LinearLayout
     private lateinit var callsList: LinearLayout
@@ -81,40 +81,42 @@ class ConversationListActivity : Activity(), RabtaEvents.Listener {
     }
 
     private fun buildUi() {
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(BG) }
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(BG); isFocusableInTouchMode=true }
         setContentView(root)
 
         // ── Header ──
-        val hdr = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(GREEN); setPadding(dp(14),dp(10),dp(14),dp(10)) }
-        hdr.addView(TextView(this).apply { text = "Rabta"; textSize = 22f; typeface = Typeface.DEFAULT_BOLD; setTextColor(WHITE) },
+        val hdr = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(BG); setPadding(dp(20),dp(18),dp(20),dp(12)) }
+        hdr.addView(TextView(this).apply { text = "Rabta"; textSize = 30f; typeface = Typeface.DEFAULT_BOLD; setTextColor(TXT) },
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         onlineDot = View(this).apply { background = pill(0x55FFFFFF) }
         hdr.addView(onlineDot, LinearLayout.LayoutParams(dp(10), dp(10)).apply { marginEnd = dp(10) })
         // My avatar (opens Profile)
         myAvatarView = FrameLayout(this).apply { isClickable = true; setOnClickListener { startActivity(Intent(this@ConversationListActivity, ProfileActivity::class.java)) } }
-        val myInitials = initials(Session.name, dp(36))
-        myAvatarView.addView(myInitials, FrameLayout.LayoutParams(dp(36), dp(36)))
+        val myInitials = initials(Session.name, dp(40))
+        myAvatarView.addView(myInitials, FrameLayout.LayoutParams(dp(40), dp(40)))
         // Show own profile pic if set
         if (Session.profilePic.isNotEmpty()) {
             MediaHelper.base64ToBitmap(Session.profilePic)?.let { bmp ->
-                val iv = ImageView(this).apply { setImageBitmap(bmp); scaleType = ImageView.ScaleType.CENTER_CROP; background = pill(0xFF607D8B.toInt()) }
-                myAvatarView.addView(iv, FrameLayout.LayoutParams(dp(36), dp(36)))
+                val iv = ImageView(this).apply { setImageBitmap(bmp); scaleType = ImageView.ScaleType.CENTER_CROP; clipToOutline=true; background = pill(0xFF607D8B.toInt()) }
+                myAvatarView.addView(iv, FrameLayout.LayoutParams(dp(40), dp(40)))
             }
         }
+        hdr.addView(TextView(this).apply { UiIcons.set(this,"settings",SUB,label="Appearance and settings"); gravity=Gravity.CENTER; setOnClickListener { AppTheme.choose(this@ConversationListActivity) } },LinearLayout.LayoutParams(dp(48),dp(48)))
         hdr.addView(myAvatarView)
         root.addView(hdr)
-        connectionTv = TextView(this).apply { textSize=12f; setTextColor(WHITE); setBackgroundColor(GREEN); setPadding(dp(14),0,dp(14),dp(8)) }
+        connectionTv = TextView(this).apply { textSize=13f; setTextColor(SUB); setBackgroundColor(BG); setPadding(dp(20),0,dp(20),dp(16)) }
         root.addView(connectionTv)
         updateConnection()
 
         // ── Tabs ──
-        val tabBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setBackgroundColor(GREEN) }
-        tabChats = tab("CHATS", true)  { switchTab(0) }
-        tabCalls = tab("CALLS", false) { switchTab(1) }
+        val tabBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setBackgroundColor(BG); setPadding(dp(16),0,dp(16),dp(4)) }
+        tabChats = tab("Chats", true)  { switchTab(0) }
+        tabCalls = tab("Calls", false) { switchTab(1) }
         tabBar.addView(tabChats, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         tabBar.addView(tabCalls, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         root.addView(tabBar)
         searchField = EditText(this).apply {
+            imeOptions=android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
             hint="Search names or messages"; textSize=15f; setTextColor(TXT); setHintTextColor(SUB)
             setSingleLine(true); setPadding(dp(16),dp(12),dp(16),dp(12)); background=rect(WHITE,24)
             addTextChangedListener(object : android.text.TextWatcher {
@@ -126,7 +128,7 @@ class ConversationListActivity : Activity(), RabtaEvents.Listener {
                 override fun afterTextChanged(s: android.text.Editable?) {}
             })
         }
-        root.addView(searchField,LinearLayout.LayoutParams(-1,-2).apply { setMargins(dp(12),dp(10),dp(12),dp(10)) })
+        root.addView(searchField,LinearLayout.LayoutParams(-1,-2).apply { setMargins(dp(16),dp(12),dp(16),dp(12)) })
 
         // ── Chats content ──
         chatsScroll = ScrollView(this)
@@ -153,13 +155,13 @@ class ConversationListActivity : Activity(), RabtaEvents.Listener {
         fabFrame.addView(fab, FrameLayout.LayoutParams(dp(56), dp(56)).apply {
             gravity = Gravity.BOTTOM or Gravity.END; bottomMargin = dp(20); marginEnd = dp(20)
         })
-        root.addView(fabFrame)
+        content.addView(fabFrame,FrameLayout.LayoutParams(-1,dp(90)).apply { gravity=Gravity.BOTTOM })
     }
 
     private fun tab(label: String, selected: Boolean, onClick: () -> Unit) = TextView(this).apply {
-        text = label; textSize = 14f; typeface = Typeface.DEFAULT_BOLD; setTextColor(WHITE)
+        text = label; textSize = 14f; typeface = Typeface.DEFAULT_BOLD; setTextColor(TXT)
         gravity = Gravity.CENTER; setPadding(0, dp(12), 0, dp(10))
-        if (selected) setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0).also { background = rect(0x33FFFFFF, 0) }
+        if (selected) setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0).also { background = rect(AppTheme.sent(this@ConversationListActivity), 18) }
         setOnClickListener { onClick() }
     }
 
@@ -168,8 +170,8 @@ class ConversationListActivity : Activity(), RabtaEvents.Listener {
         searchField.visibility = if (idx == 0) View.VISIBLE else View.GONE
         chatsScroll.visibility = if (idx == 0) View.VISIBLE else View.GONE
         callsScroll.visibility = if (idx == 1) View.VISIBLE else View.GONE
-        tabChats.background = if (idx == 0) GradientDrawable().apply { setColor(0x33FFFFFF); } else null
-        tabCalls.background = if (idx == 1) GradientDrawable().apply { setColor(0x33FFFFFF); } else null
+        tabChats.background = if (idx == 0) rect(AppTheme.sent(this),18) else null
+        tabCalls.background = if (idx == 1) rect(AppTheme.sent(this),18) else null
         if (idx == 1) loadCalls()
     }
 
@@ -217,7 +219,7 @@ class ConversationListActivity : Activity(), RabtaEvents.Listener {
             av.addView(initials(c.peerName, dp(50)), FrameLayout.LayoutParams(dp(50),dp(50)))
             ProfileHelper.loadIfNeeded(c.peerId, Session.serverUrl, Session.token) { bmp ->
                 if (bmp != null) handler.post {
-                    val iv = ImageView(this).apply { setImageBitmap(bmp); scaleType = ImageView.ScaleType.CENTER_CROP; background = pill(0xFF607D8B.toInt()) }
+                    val iv = ImageView(this).apply { setImageBitmap(bmp); scaleType = ImageView.ScaleType.CENTER_CROP; clipToOutline=true; background = pill(0xFF607D8B.toInt()) }
                     av.addView(iv, FrameLayout.LayoutParams(dp(50),dp(50)))
                 }
             }
@@ -225,7 +227,7 @@ class ConversationListActivity : Activity(), RabtaEvents.Listener {
         row.addView(av)
         val mid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14),0,dp(8),0) }
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        top.addView(TextView(this).apply { text = c.peerName; textSize = 16f; typeface = Typeface.DEFAULT_BOLD; setTextColor(TXT) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        top.addView(TextView(this).apply { text = c.peerName; textSize = 17f; typeface = Typeface.DEFAULT_BOLD; setTextColor(TXT) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         if (c.lastTime > 0) top.addView(TextView(this).apply { text = fmtTime(c.lastTime); textSize = 12f; setTextColor(if (c.unread > 0) GREEN else SUB) })
         mid.addView(top)
         val bot = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0,dp(2),0,0) }
@@ -308,7 +310,7 @@ class ConversationListActivity : Activity(), RabtaEvents.Listener {
         val cols = listOf(0xFFE53935,0xFF9C27B0,0xFF3F51B5,0xFF009688,0xFF43A047,0xFFFF5722,0xFF607D8B)
         return TextView(this).apply {
             text = name.filter { it.isLetterOrDigit() }.take(1).uppercase().ifEmpty { "?" }
-            textSize = size*0.38f; typeface = Typeface.DEFAULT_BOLD; setTextColor(WHITE); gravity = Gravity.CENTER
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, size*0.38f); includeFontPadding=false; typeface = Typeface.DEFAULT_BOLD; setTextColor(Color.WHITE); gravity = Gravity.CENTER
             background = pill(cols[(name.hashCode() and 0x7FFFFFFF)%cols.size].toInt())
         }
     }
@@ -330,7 +332,7 @@ class ConversationListActivity : Activity(), RabtaEvents.Listener {
     private fun showNewChat() {
         val dl = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(WHITE); setPadding(dp(24),dp(20),dp(24),dp(16)) }
         dl.addView(TextView(this).apply { text = "New chat"; textSize = 20f; typeface = Typeface.DEFAULT_BOLD; setTextColor(TXT); setPadding(0,0,0,dp(16)) })
-        val inp = EditText(this).apply { hint = "@username"; textSize = 16f; setTextColor(TXT); setHintTextColor(SUB); setSingleLine(true); background = null; setPadding(dp(12),dp(12),dp(12),dp(12)); inputType = InputType.TYPE_CLASS_TEXT }
+        val inp = EditText(this).apply { hint = "@username or Rabta ID"; textSize = 16f; setTextColor(TXT); setHintTextColor(SUB); setSingleLine(true); background = null; setPadding(dp(12),dp(12),dp(12),dp(12)); inputType = InputType.TYPE_CLASS_TEXT }
         dl.addView(inp, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) })
         dl.addView(View(this).apply { setBackgroundColor(GREEN) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(2)))
         val status = TextView(this).apply { textSize = 13f; setTextColor(SUB); setPadding(dp(12),dp(8),0,0) }
@@ -341,6 +343,7 @@ class ConversationListActivity : Activity(), RabtaEvents.Listener {
         btns.addView(textBtn("Cancel", SUB) { dlg.dismiss() })
         btns.addView(textBtn("Find", GREEN) {
             val un = inp.text.toString().trim().lowercase(); if (un.isEmpty()) return@textBtn
+            if(Regex("[0-9a-f]{12}").matches(un)) { dlg.dismiss(); open(un.uppercase(),un.uppercase()); return@textBtn }
             status.text = "Dhoondh raha hai..."; status.setTextColor(GREEN)
             WsClient.findUser(Session.serverUrl, un, Session.token) { ok, msg, data ->
                 if (ok && data != null) {

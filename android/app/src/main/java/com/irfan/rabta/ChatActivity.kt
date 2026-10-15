@@ -33,17 +33,17 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class ChatActivity : Activity(), RabtaEvents.Listener {
+class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
 
     companion object { @Volatile var openPeer: String? = null }
 
-    private val GREEN   = 0xFF128C7E.toInt()
-    private val GREEN2  = 0xFF25D366.toInt()
-    private val BEIGE   = 0xFFECE5DD.toInt()
-    private val SENT    = 0xFFDCF8C6.toInt()
-    private val RECV    = Color.WHITE
-    private val TXT     = 0xFF111B21.toInt()
-    private val SUB     = 0xFF667781.toInt()
+    private val GREEN get() = AppTheme.ACCENT
+    private val GREEN2 get() = AppTheme.ACCENT
+    private val BEIGE get() = AppTheme.bg(this)
+    private val SENT get() = AppTheme.sent(this)
+    private val RECV get() = AppTheme.surface(this)
+    private val TXT get() = AppTheme.text(this)
+    private val SUB get() = AppTheme.sub(this)
     private val DARK    = 0xFF0C1317.toInt()
     private val DARK2   = 0xFF1F2C34.toInt()
     private val GRAY_BTN= 0xFF2A3942.toInt()
@@ -158,47 +158,48 @@ class ChatActivity : Activity(), RabtaEvents.Listener {
         val cols = listOf(0xFFE53935,0xFF9C27B0,0xFF3F51B5,0xFF009688,0xFF43A047,0xFFFF5722,0xFF607D8B)
         return TextView(this).apply {
             text = name.filter { it.isLetterOrDigit() }.take(1).uppercase().ifEmpty { "?" }
-            textSize = sz*0.38f; typeface = Typeface.DEFAULT_BOLD; setTextColor(Color.WHITE); gravity = Gravity.CENTER
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, sz*0.38f); includeFontPadding=false; typeface = Typeface.DEFAULT_BOLD; setTextColor(Color.WHITE); gravity = Gravity.CENTER
             background = oval(cols[(name.hashCode() and 0x7FFFFFFF)%cols.size].toInt())
         }
     }
 
     private fun buildUi() {
-        try { window.statusBarColor = 0xFF075E54.toInt() } catch (_: Exception) {}
-        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        window.statusBarColor = AppTheme.bg(this)
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN or WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(BEIGE); isFocusableInTouchMode=true }
         setContentView(root)
 
         // ── Header ──
-        val hdr = LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setBackgroundColor(GREEN); setPadding(dp(6),dp(8),dp(10),dp(8)) }
-        hdr.addView(TextView(this).apply { UiIcons.set(this,"back",label="Back"); textSize=22f; setTextColor(Color.WHITE); setPadding(dp(4),dp(4),dp(8),dp(4)); isClickable=true; setOnClickListener{finish()} })
+        val hdr = LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setBackgroundColor(RECV); setPadding(dp(6),dp(8),dp(10),dp(8)) }
+        hdr.addView(TextView(this).apply { UiIcons.set(this,"back",TXT,label="Back"); textSize=22f; setTextColor(Color.WHITE); setPadding(dp(4),dp(4),dp(8),dp(4)); isClickable=true; setOnClickListener{finish()} })
         hdr.addView(avatar(peerName, dp(40)), LinearLayout.LayoutParams(dp(40),dp(40)))
         val hdrCol = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(10),0,0,0) }
-        hdrCol.addView(TextView(this).apply { text=peerName; textSize=17f; typeface=Typeface.DEFAULT_BOLD; setTextColor(Color.WHITE) })
+        hdrCol.addView(TextView(this).apply { text=peerName; textSize=17f; typeface=Typeface.DEFAULT_BOLD; setTextColor(TXT); maxLines=1 })
         val subRow = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
-        statusTv  = TextView(this).apply { textSize=12f; setTextColor(0xCCFFFFFF.toInt()) }
-        typingTv  = TextView(this).apply { textSize=12f; setTextColor(0xCCFFFFFF.toInt()); text="typing..."; visibility=View.GONE }
+        statusTv  = TextView(this).apply { textSize=12f; setTextColor(SUB) }
+        typingTv  = TextView(this).apply { textSize=12f; setTextColor(SUB); text="typing..."; visibility=View.GONE }
         subRow.addView(statusTv); subRow.addView(typingTv)
         hdrCol.addView(subRow)
         hdr.addView(hdrCol, LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
         if (!isGroup) hdr.addView(headerBtn("📞") { startCall(true) })
         if (!isGroup) hdr.addView(headerBtn("🎥") { startVideoCall() })
+        hdr.addView(TextView(this).apply { UiIcons.set(this,"search",SUB,label="Search chat"); gravity=Gravity.CENTER; setOnClickListener { searchField.visibility=if(searchField.visibility==View.VISIBLE) View.GONE else View.VISIBLE } },LinearLayout.LayoutParams(dp(44),dp(48)))
         root.addView(hdr)
 
         // ── Call overlay (WhatsApp style) ──
-        callOverlay = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(DARK); visibility=View.GONE }
+        callOverlay = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; background=GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,intArrayOf(0xFF26213F.toInt(),DARK)); visibility=View.GONE }
         // Top: name + status
-        val callTop = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; gravity=Gravity.CENTER; setPadding(0,dp(56),0,0) }
+        val callTop = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; gravity=Gravity.CENTER; setPadding(0,dp(32),0,0) }
         callNameTv = TextView(this).apply { text=peerName; textSize=28f; typeface=Typeface.DEFAULT_BOLD; setTextColor(Color.WHITE); gravity=Gravity.CENTER }
         callStatusTv = TextView(this).apply { textSize=14f; setTextColor(0xBBFFFFFF.toInt()); gravity=Gravity.CENTER; setPadding(0,dp(6),0,0) }
         callTop.addView(callNameTv); callTop.addView(callStatusTv)
         callOverlay.addView(callTop)
         // Center: avatar
         callAvatarFrame = FrameLayout(this)
-        callAvatarFrame.addView(avatar(peerName, dp(160)), FrameLayout.LayoutParams(dp(160),dp(160)).apply { gravity=Gravity.CENTER })
+        callAvatarFrame.addView(avatar(peerName, dp(112)), FrameLayout.LayoutParams(dp(112),dp(112)).apply { gravity=Gravity.CENTER })
         callOverlay.addView(callAvatarFrame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,0,1f))
         // Bottom: button panel (WhatsApp style 2-row grid)
-        val panel = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(DARK2); setPadding(dp(24),dp(24),dp(24),dp(48)) }
+        val panel = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; background=pill(DARK2,32); setPadding(dp(20),dp(20),dp(20),dp(24)) }
         val row1 = LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER }
         val speakerBtn = callBtn("🔊","Speaker") { toggleSpeaker(it) }
         speakerControl=speakerBtn.getChildAt(0) as TextView
@@ -217,7 +218,7 @@ class ChatActivity : Activity(), RabtaEvents.Listener {
         callOverlay.addView(panel)
         root.addView(callOverlay,LinearLayout.LayoutParams(-1,0,1f))
         searchField=EditText(this).apply {
-            hint="Search in this chat"; setSingleLine(true); textSize=14f; setTextColor(TXT)
+            visibility=if(searchQuery.isBlank()) View.GONE else View.VISIBLE; setHintTextColor(SUB); background=pill(RECV,16); hint="Search in this chat"; setSingleLine(true); textSize=14f; setTextColor(TXT)
             setPadding(dp(14),dp(8),dp(14),dp(8)); setText(searchQuery)
             addTextChangedListener(object:TextWatcher {
                 override fun beforeTextChanged(s:CharSequence?,a:Int,b:Int,c:Int) {}
@@ -237,16 +238,17 @@ class ChatActivity : Activity(), RabtaEvents.Listener {
         root.addView(chatScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,0,1f))
 
         // ── Input bar ──
-        recordingPanel=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setBackgroundColor(Color.WHITE); visibility=View.GONE }
+        recordingPanel=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setBackgroundColor(RECV); visibility=View.GONE }
         recordingTv=TextView(this).apply { setTextColor(RED); textSize=13f; setPadding(dp(12),dp(12),0,dp(12)); accessibilityLiveRegion=View.ACCESSIBILITY_LIVE_REGION_POLITE }
         recordingPanel.addView(recordingTv,LinearLayout.LayoutParams(0,-2,1f))
         recordingPanel.addView(TextView(this).apply { text="Cancel"; setTextColor(RED); minHeight=dp(48); gravity=Gravity.CENTER; setPadding(dp(12),0,dp(12),0); setOnClickListener { stopVoiceRecord(false) } })
         root.addView(recordingPanel)
-        val bar = LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.BOTTOM; setBackgroundColor(0xFFF0F0F0.toInt()); setPadding(dp(6),dp(6),dp(6),dp(6)) }
-        bar.addView(headerBtn("📎") { pickImage() }.apply { background=null })
+        val bar = LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.BOTTOM; setBackgroundColor(RECV); setPadding(dp(6),dp(6),dp(6),dp(6)) }
+        bar.addView(headerBtn("📎") { showAttachments() }.apply { background=null })
+        bar.addView(TextView(this).apply { UiIcons.set(this,"sticker",GREEN,label="Stickers"); gravity=Gravity.CENTER; setOnClickListener { Stickers.picker(this@ChatActivity,{sendContent(it,"sticker")},{pickAttachment("image/*",104)}) } },LinearLayout.LayoutParams(dp(40),dp(48)))
         input = EditText(this).apply {
-            hint="Paigham..."; textSize=16f; setTextColor(TXT); setHintTextColor(0xFFAAAAAA.toInt()); maxLines=5
-            background = GradientDrawable().apply { setColor(Color.WHITE); cornerRadius=dp(24).toFloat() }
+            hint="Message"; textSize=16f; setTextColor(TXT); setHintTextColor(SUB); maxLines=5
+            background = GradientDrawable().apply { setColor(BEIGE); cornerRadius=dp(24).toFloat() }
             setPadding(dp(14),dp(10),dp(14),dp(10))
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
             addTextChangedListener(object:TextWatcher{
@@ -291,7 +293,7 @@ class ChatActivity : Activity(), RabtaEvents.Listener {
         col.addView(TextView(this).apply { this.text=label; textSize=12f; setTextColor(0xCCFFFFFF.toInt()); gravity=Gravity.CENTER; setPadding(0,dp(6),0,0) })
         return col
     }
-    private fun headerBtn(icon: String, onClick: () -> Unit) = TextView(this).apply { UiIcons.set(this,UiIcons.fromSymbol(icon) ?: "phone",if(icon=="📎") GREEN else Color.WHITE); textSize=20f; minWidth=dp(48); minHeight=dp(48); gravity=Gravity.CENTER; setPadding(dp(8),dp(4),dp(8),dp(4)); isClickable=true; setOnClickListener{onClick()} }
+    private fun headerBtn(icon: String, onClick: () -> Unit) = TextView(this).apply { UiIcons.set(this,UiIcons.fromSymbol(icon) ?: "phone",if(icon=="📎") GREEN else TXT); textSize=20f; minWidth=dp(48); minHeight=dp(48); gravity=Gravity.CENTER; setPadding(dp(8),dp(4),dp(8),dp(4)); isClickable=true; setOnClickListener{onClick()} }
 
     // ── Chat history ──
     private fun loadHistory(forceScroll: Boolean = false) {
@@ -310,7 +312,7 @@ class ChatActivity : Activity(), RabtaEvents.Listener {
                     if(day!=lastDay) { addDateSeparator(m.sentAt); lastDay=day }
                     val before=chatBox.childCount
                     addBubble(m.body,m.mine,fmtTime(m.sentAt),m.status,m.msgType,if(isGroup&&!m.mine)m.fromName else "")
-                    if(m.mine && m.status=="failed" && chatBox.childCount>before) {
+                    if(m.mine && m.status in setOf("failed","expired") && chatBox.childCount>before) {
                         val row=chatBox.getChildAt(chatBox.childCount-1) as ViewGroup
                         row.getChildAt(0).apply { isClickable=true; contentDescription="Message failed. Tap to retry"; setOnClickListener { Outbox.retry(m,isGroup) } }
                     }
@@ -324,7 +326,7 @@ class ChatActivity : Activity(), RabtaEvents.Listener {
     private fun addDateSeparator(time: Long) {
         val yesterday=java.util.Calendar.getInstance().apply { add(java.util.Calendar.DAY_OF_YEAR,-1) }
         val title=when(dayKey(time)) { dayKey(System.currentTimeMillis())->"Today"; dayKey(yesterday.timeInMillis)->"Yesterday"; else->SimpleDateFormat("dd MMM yyyy",Locale.getDefault()).format(Date(time)) }
-        chatBox.addView(TextView(this).apply { text=title; textSize=12f; setTextColor(SUB); gravity=Gravity.CENTER; setPadding(dp(12),dp(6),dp(12),dp(6)); background=pill(0xFFE1F3FB.toInt(),8) },LinearLayout.LayoutParams(-2,-2).apply { gravity=Gravity.CENTER; topMargin=dp(12); bottomMargin=dp(8) })
+        chatBox.addView(TextView(this).apply { text=title; textSize=12f; setTextColor(SUB); gravity=Gravity.CENTER; setPadding(dp(12),dp(6),dp(12),dp(6)); background=pill(RECV,12) },LinearLayout.LayoutParams(-2,-2).apply { gravity=Gravity.CENTER; topMargin=dp(12); bottomMargin=dp(8) })
     }
 
     // ── Message bubbles ──
@@ -344,11 +346,22 @@ class ChatActivity : Activity(), RabtaEvents.Listener {
             "image" -> {
                 val bmp = MediaHelper.base64ToBitmap(body)
                 if (bmp != null) {
-                    val iv = ImageView(this).apply { setImageBitmap(bmp); scaleType=ImageView.ScaleType.CENTER_CROP; adjustViewBounds=true; background=pill(0xFFEEEEEE.toInt(),8) }
+                    val iv = ImageView(this).apply { setImageBitmap(bmp); scaleType=ImageView.ScaleType.CENTER_CROP; adjustViewBounds=true; background=pill(AppTheme.line(this),8) }
                     bubble.addView(iv, LinearLayout.LayoutParams(dp(220),dp(200)))
                 } else bubble.addView(textLine("📷 Photo"))
             }
             "voice" -> { voiceNoteBubble(body,mine,time,status); return }
+            "file", "video" -> {
+                bubble.addView(textLine(if(msgType=="video") "▶  ${Attachments.name(body)}" else "▤  ${Attachments.name(body)}"))
+                bubble.addView(textLine("${Attachments.details(body)} · Tap to open").apply { textSize=12f; setTextColor(SUB) })
+                bubble.setOnClickListener { Attachments.open(this,body) }
+            }
+            "sticker" -> {
+                val iv=ImageView(this).apply { contentDescription="Sticker"; scaleType=ImageView.ScaleType.FIT_CENTER }
+                if(Stickers.valid(body)) iv.setImageDrawable(Stickers.drawable(body))
+                else runCatching { iv.setImageURI(android.net.Uri.fromFile(Attachments.file(this,body))) }
+                bubble.addView(iv,LinearLayout.LayoutParams(dp(150),dp(150)))
+            }
             else    -> bubble.addView(textLine(body))
         }
         if (msgType != "voice") bubble.addView(msgFooter(time, mine, status))
@@ -428,6 +441,8 @@ class ChatActivity : Activity(), RabtaEvents.Listener {
         sendContent(text, "text"); input.setText("")
     }
     private fun sendContent(body: String, msgType: String) {
+        if(!WsClient.connected && (isGroup || msgType !in setOf("text","sticker") || (msgType=="sticker" && !Stickers.valid(body)))) { toast("Videos, files and media need internet. Nearby supports text and built-in stickers."); return }
+        if(msgType=="text" && body.toByteArray().size>12000) { toast("Message is too long (12 KB maximum)"); return }
         Outbox.send(peerId,peerName,isGroup,body,msgType)
     }
 
@@ -435,7 +450,21 @@ class ChatActivity : Activity(), RabtaEvents.Listener {
     private fun pickImage() { startActivityForResult(Intent(Intent.ACTION_GET_CONTENT).apply { type="image/*"; addCategory(Intent.CATEGORY_OPENABLE) },101) }
     override fun onActivityResult(req:Int,res:Int,data:Intent?) {
         super.onActivityResult(req,res,data)
-        if(req!=101 || res!=RESULT_OK) return
+        if(res!=RESULT_OK) return
+        if(req in 102..104) {
+            val uri=data?.data ?: return
+            toast("Preparing attachment…")
+            Thread {
+                val result=runCatching { Attachments.pick(this,uri,req==104) }
+                handler.post {
+                    if(isDestroyed || isFinishing) return@post
+                    result.onSuccess { body -> android.app.AlertDialog.Builder(this).setTitle("Send ${Attachments.name(body)}?").setMessage("${Attachments.details(body)} · $peerName").setNegativeButton("Cancel",null).setPositiveButton("Send") { _,_ -> sendContent(body,when(req){102->"video";104->"sticker";else->"file"}) }.show() }
+                        .onFailure { toast(it.message ?: "Could not load file") }
+                }
+            }.start()
+            return
+        }
+        if(req!=101) return
         val uri=data?.data ?: return
         toast("Photo load ho rahi hai…")
         Thread {
@@ -449,6 +478,16 @@ class ChatActivity : Activity(), RabtaEvents.Listener {
                     .setNegativeButton("Cancel",null).setPositiveButton("Send") { _,_ -> sendContent(body,"image") }.show()
             }
         }.start()
+    }
+
+    private fun pickAttachment(mime:String,request:Int) {
+        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply { type=mime; addCategory(Intent.CATEGORY_OPENABLE) },request)
+    }
+    private fun showAttachments() {
+        android.app.AlertDialog.Builder(this).setTitle("Share with $peerName")
+            .setItems(arrayOf("Photo", "Video · up to 8 MB", "Document / file · up to 8 MB", "Stickers", "Offline security")) { _,which ->
+                when(which) { 0->pickImage(); 1->pickAttachment("video/*",102); 2->pickAttachment("*/*",103); 3->Stickers.picker(this,{sendContent(it,"sticker")},{pickAttachment("image/*",104)}); 4->MeshSecurity.showContact(this,peerId) }
+            }.show()
     }
 
     private fun startVoiceRecord() {

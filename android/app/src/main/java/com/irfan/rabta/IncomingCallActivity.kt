@@ -14,11 +14,11 @@ import android.widget.LinearLayout
 import android.widget.TextView
 
 /** Full-screen popup for incoming calls. Appears on lock screen too. */
-class IncomingCallActivity : Activity(), RabtaEvents.Listener {
+class IncomingCallActivity : ThemedActivity(), RabtaEvents.Listener {
 
     private val G   = 0xFF25D366.toInt()
     private val RED = 0xFFD93025.toInt()
-    private val BG  = 0xFF0D1F1A.toInt()
+    private val BG get() = AppTheme.bg(this)
 
     private lateinit var fromId: String
     private lateinit var fromName: String

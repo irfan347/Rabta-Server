@@ -20,7 +20,7 @@ import androidx.core.app.ActivityCompat
 import org.json.JSONObject
 import org.webrtc.*
 
-class VideoCallActivity : Activity(), RabtaEvents.Listener {
+class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
 
     companion object {
         const val PEER_ID    = "peerId"

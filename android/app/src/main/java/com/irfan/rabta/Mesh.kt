@@ -34,8 +34,9 @@ class Mesh(private val ctx: Context, private val cb: Listener) {
 
     private val client by lazy { Nearby.getConnectionsClient(ctx) }
     private var advName = "Rabta user"
-    val connected = LinkedHashMap<String, String>()   // endpointId -> display name
-    val userIdOf = HashMap<String, String>()          // endpointId -> stable user id
+    val connected = java.util.concurrent.ConcurrentHashMap<String, String>()   // endpointId -> display name
+    val userIdOf = java.util.concurrent.ConcurrentHashMap<String, String>()          // endpointId -> stable user id
+    private val pendingNames=java.util.concurrent.ConcurrentHashMap<String,Pair<String,String>>()
     private val pendingFiles = HashMap<Long, String>() // payloadId -> endpointId
 
     fun start(name: String, userId: String) {
@@ -43,7 +44,7 @@ class Mesh(private val ctx: Context, private val cb: Listener) {
         val advertisingOptions = AdvertisingOptions.Builder().setStrategy(Strategy.P2P_CLUSTER).build()
         val discoveryOptions = DiscoveryOptions.Builder().setStrategy(Strategy.P2P_CLUSTER).build()
         client.startAdvertising(advName, SERVICE_ID, lifecycle, advertisingOptions)
-            .addOnSuccessListener { cb.onStatus("Online - looking for people nearby") }
+            .addOnSuccessListener { cb.onStatus("Nearby discovery active") }
             .addOnFailureListener { cb.onStatus("Couldn't go online: ${it.message}") }
         client.startDiscovery(SERVICE_ID, discoveryCb, discoveryOptions)
             .addOnFailureListener { cb.onStatus("Discovery failed: ${it.message}") }
@@ -53,7 +54,7 @@ class Mesh(private val ctx: Context, private val cb: Listener) {
         try { client.stopAdvertising() } catch (_: Exception) {}
         try { client.stopDiscovery() } catch (_: Exception) {}
         try { client.stopAllEndpoints() } catch (_: Exception) {}
-        connected.clear(); userIdOf.clear()
+        connected.clear(); userIdOf.clear(); pendingNames.clear()
     }
 
     fun connect(endpointId: String) {
@@ -109,13 +110,15 @@ class Mesh(private val ctx: Context, private val cb: Listener) {
     private val lifecycle = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(endpointId: String, info: ConnectionInfo) {
             cb.onConnecting(endpointId, parseName(info.endpointName))
-            connected[endpointId] = parseName(info.endpointName)
-            userIdOf[endpointId] = parseUserId(info.endpointName)
+            pendingNames[endpointId] = parseName(info.endpointName) to parseUserId(info.endpointName)
             client.acceptConnection(endpointId, payloadCb)
         }
         override fun onConnectionResult(endpointId: String, result: ConnectionResolution) {
-            if (result.status.isSuccess)
-                cb.onConnected(endpointId, userIdOf[endpointId] ?: "", connected[endpointId] ?: "User")
+            if (result.status.isSuccess) {
+                val info=pendingNames.remove(endpointId) ?: return
+                connected[endpointId]=info.first; userIdOf[endpointId]=info.second
+                cb.onConnected(endpointId,info.second,info.first)
+            }
             else { connected.remove(endpointId); userIdOf.remove(endpointId); cb.onStatus("Connection failed") }
         }
         override fun onDisconnected(endpointId: String) {

@@ -61,6 +61,8 @@ class Db(ctx: Context) : SQLiteOpenHelper(ctx, "rabta.db", null, 4) {
         return writableDatabase.insertWithOnConflict("messages", null, cv, SQLiteDatabase.CONFLICT_IGNORE) != -1L
     }
 
+    fun hasMessage(id:String)=readableDatabase.rawQuery("SELECT 1 FROM messages WHERE id=?",arrayOf(id)).use { it.moveToFirst() }
+
     fun saveMessage(id: String, convId: String, fromId: String, body: String, sentAt: Long, mine: Boolean, status: String = "sent", msgType: String = "text", fromName: String = "") {
         saveIfNew(id, convId, fromId, fromName, body, sentAt, mine, status, msgType)
     }
@@ -81,7 +83,7 @@ class Db(ctx: Context) : SQLiteOpenHelper(ctx, "rabta.db", null, 4) {
     }
     fun status(id: String): String? = readableDatabase.rawQuery("SELECT status FROM messages WHERE id=? AND mine=1", arrayOf(id)).use { if (it.moveToFirst()) it.getString(0) else null }
     fun conversationForMessage(id: String): String? = readableDatabase.rawQuery("SELECT conv_id FROM messages WHERE id=?", arrayOf(id)).use { if (it.moveToFirst()) it.getString(0) else null }
-    fun failInterruptedSends() = writableDatabase.execSQL("UPDATE messages SET status='failed' WHERE mine=1 AND status IN ('sending','mesh')")
+    fun failInterruptedSends() = writableDatabase.execSQL("UPDATE messages SET status='failed' WHERE mine=1 AND status='sending'")
     fun applyReadReceipt(id: String, byId: String) {
         if (byId.isBlank()) return
         if (id == "all") writableDatabase.execSQL("UPDATE messages SET status='read' WHERE conv_id=? AND mine=1 AND status IN ('sent','delivered')", arrayOf(byId))

@@ -9,7 +9,8 @@ const { WebSocketServer } = require('ws');
 const app = express();
 app.use(express.json({ limit: '2mb' }));
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws' });
+const MAX_BODY = 12 * 1024 * 1024;
+const wss = new WebSocketServer({ server, path: '/ws', maxPayload: MAX_BODY + 4096 });
 
 const TOKEN_SECRET = process.env.TOKEN_SECRET || crypto.randomBytes(32).toString('hex');
 const UN_RE = /^[a-zA-Z0-9_]{3,20}$/;
@@ -40,11 +41,14 @@ async function initDb() {
       to_id TEXT NOT NULL, body TEXT, type TEXT DEFAULT 'text',
       sent_at BIGINT, delivered_at BIGINT
     );
+    ALTER TABLE ru_messages ADD COLUMN IF NOT EXISTS group_id TEXT;
+    ALTER TABLE ru_messages ADD COLUMN IF NOT EXISTS group_name TEXT;
     CREATE INDEX IF NOT EXISTS idx_rum_to ON ru_messages (to_id, delivered_at);
     CREATE TABLE IF NOT EXISTS rg_groups(id TEXT PRIMARY KEY, name TEXT, creator TEXT, members TEXT, created_at BIGINT);
   `);
   const rows = (await pool.query('SELECT id,username,pass_hash,name FROM ru_users LIMIT 10000')).rows;
   for (const r of rows) memUsers.set(r.id, r);
+  for (const g of (await pool.query('SELECT * FROM rg_groups')).rows) groups.set(g.id, { ...g, members: new Set(g.members.split(',')) });
 }
 
 // ---------- crypto ----------
@@ -122,6 +126,7 @@ app.get('/api/me', (req, res) => {
 
 // ---------- WebSocket ----------
 const online = new Map(); // userId -> ws
+const videoCalls = new Map();
 const groups = new Map();  // groupId -> {id,name,creator,members:Set}
 
 async function deliverPending(userId, ws) {
@@ -129,23 +134,26 @@ async function deliverPending(userId, ws) {
   if (pool) {
     const r = await pool.query('SELECT * FROM ru_messages WHERE to_id=$1 AND delivered_at IS NULL ORDER BY sent_at ASC LIMIT 200', [userId]);
     msgs = r.rows;
-    if (msgs.length) await pool.query('UPDATE ru_messages SET delivered_at=$1 WHERE to_id=$2 AND delivered_at IS NULL', [Date.now(), userId]);
+    if (msgs.length) await pool.query('UPDATE ru_messages SET delivered_at=$1 WHERE id=ANY($2::int[])', [Date.now(), msgs.map(m => m.id)]);
   } else {
     msgs = memMessages.filter(m => m.to_id === userId && !m.delivered_at);
     msgs.forEach(m => { m.delivered_at = Date.now(); });
   }
   for (const m of msgs) {
-    ws.send(JSON.stringify({ type: 'msg', id: m.msg_id, from: m.from_id, fromName: m.from_name, body: m.body, msgType: m.type || 'text', t: Number(m.sent_at), offline: true }));
+    ws.send(JSON.stringify({ type: m.group_id ? 'group_msg' : 'msg', groupId: m.group_id || '', groupName: m.group_name || '', id: m.msg_id, from: m.from_id, fromName: m.from_name, body: m.body, msgType: m.type || 'text', t: Number(m.sent_at), offline: true }));
   }
 }
 
-async function storeMessage(fromId, fromName, toId, msgId, body, type, sentAt) {
+async function storeMessage(fromId, fromName, toId, msgId, body, type, sentAt, groupId = null, groupName = null) {
   if (pool) {
-    await pool.query('INSERT INTO ru_messages(msg_id,from_id,from_name,to_id,body,type,sent_at) VALUES($1,$2,$3,$4,$5,$6,$7)',
-      [msgId, fromId, fromName, toId, (body||'').substring(0,65535), type, sentAt]).catch(() => {});
+    await pool.query('INSERT INTO ru_messages(msg_id,from_id,from_name,to_id,body,type,sent_at,group_id,group_name) SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9 WHERE NOT EXISTS (SELECT 1 FROM ru_messages WHERE msg_id=$1 AND from_id=$2 AND to_id=$4)',
+      [msgId, fromId, fromName, toId, body, type, sentAt, groupId, groupName]);
   } else {
-    memMessages.push({ id: memMsgId++, msg_id: msgId, from_id: fromId, from_name: fromName, to_id: toId, body, type, sent_at: sentAt, delivered_at: null });
-    if (memMessages.length > 10000) memMessages.splice(0, memMessages.length - 10000);
+    if (memMessages.some(m => m.msg_id === msgId && m.from_id === fromId && m.to_id === toId)) return;
+    const pending = memMessages.filter(m => !m.delivered_at);
+    if (pending.length >= 1000 || pending.reduce((n,m) => n + Buffer.byteLength(m.body || ''), 0) + Buffer.byteLength(body) > 64*1024*1024) throw new Error('Offline storage full');
+    memMessages.push({ group_id: groupId, group_name: groupName, id: memMsgId++, msg_id: msgId, from_id: fromId, from_name: fromName, to_id: toId, body, type, sent_at: sentAt, delivered_at: null });
+    while(memMessages.length > 2000 && memMessages[0].delivered_at) memMessages.shift();
   }
 }
 
@@ -168,18 +176,40 @@ wss.on('connection', (ws, req) => {
 
   ws.on('message', async (raw) => {
     let msg; try { msg = JSON.parse(raw.toString()); } catch { return; }
+    if (msg.type === 'msg' || msg.type === 'group_msg') {
+      if (!/^[0-9A-F]{12}$/.test(String(msg.id || '')) || typeof msg.body !== 'string' || !msg.body || Buffer.byteLength(msg.body) > MAX_BODY || !['text','image','voice','video','file','sticker'].includes(msg.msgType || 'text')) {
+        ws.send(JSON.stringify({type:'ack',id:msg.id,status:'error'})); return;
+      }
+    }
     if (msg.type === 'msg') {
       const { id: msgId, to, body, msgType = 'text', t } = msg;
       if (!msgId || !to || !body) return;
+      if (!memUsers.has(to)) { ws.send(JSON.stringify({type:'ack',id:msgId,status:'error'})); return; }
       const sentAt = Number(t) || Date.now();
       const recipient = online.get(to);
       if (recipient && recipient.readyState === 1) {
         recipient.send(JSON.stringify({ type: 'msg', id: msgId, from: userId, fromName: user.name, body, msgType, t: sentAt }));
         ws.send(JSON.stringify({ type: 'ack', id: msgId, status: 'delivered' }));
       } else {
-        await storeMessage(userId, user.name, to, msgId, body, msgType, sentAt);
+        try { await storeMessage(userId, user.name, to, msgId, body, msgType, sentAt); } catch (_) { ws.send(JSON.stringify({type:'ack',id:msgId,status:'error'})); return; }
         ws.send(JSON.stringify({ type: 'ack', id: msgId, status: 'stored' }));
       }
+    } else if (['video_offer','video_answer','ice_candidate','video_end'].includes(msg.type)) {
+      const now = Date.now();
+      for (const [id,call] of videoCalls) if(call.expires <= now) videoCalls.delete(id);
+      const callId = String(msg.callId || ''); const target = online.get(msg.to);
+      if(!/^[0-9A-F]{12}$/.test(callId)) return;
+      if(msg.type === 'video_offer') {
+        if(!target || target.readyState !== 1 || typeof msg.sdp !== 'string' || msg.sdp.length > 65536 || videoCalls.has(callId)) return;
+        if([...videoCalls.values()].filter(c => c.from === userId || c.to === userId).length >= 2) return;
+        videoCalls.set(callId,{from:userId,to:msg.to,expires:now+2*60*60*1000});
+      }
+      const call=videoCalls.get(callId);
+      if(!call || !((call.from===userId && call.to===msg.to) || (call.to===userId && call.from===msg.to))) return;
+      if(msg.type==='video_answer' && call.to!==userId) return;
+      if(typeof msg.sdp==='string' && msg.sdp.length>65536) return;
+      if(target && target.readyState===1) target.send(JSON.stringify({type:msg.type,from:userId,fromName:user.name,callId,sdp:msg.sdp,sdpMid:msg.sdpMid,sdpMLineIndex:msg.sdpMLineIndex}));
+      if(msg.type==='video_end') videoCalls.delete(callId);
     } else if (msg.type === 'call_init') {
       // Notify the other person of an incoming call
       const callee = online.get(msg.to);
@@ -204,7 +234,7 @@ wss.on('connection', (ws, req) => {
         if (mid===userId) continue;
         const r = online.get(mid);
         if (r && r.readyState===1) r.send(JSON.stringify(out));
-        else await storeMessage(userId, user.name, mid, msg.id, msg.body, msg.msgType||'text', now);
+        else { try { await storeMessage(userId, user.name, mid, msg.id, msg.body, msg.msgType||'text', now, g.id, g.name); } catch (_) { ws.send(JSON.stringify({type:'ack',id:msg.id,status:'error'})); return; } }
       }
       ws.send(JSON.stringify({ type:'ack', id:msg.id, status:'sent' }));
     } else if (msg.type === 'ping') {
@@ -237,3 +267,4 @@ app.get('/health', (req, res) => res.json({ ok: true, db: !!pool, online: online
 const PORT = process.env.PORT || 3000;
 initDb().catch(e => console.error('DB init:', e.message))
   .finally(() => server.listen(PORT, () => console.log('Rabta server on', PORT)));
+

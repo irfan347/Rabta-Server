@@ -5,25 +5,29 @@ import java.util.concurrent.Executors
 
 object Inbox {
     private var db: Db? = null
+    private lateinit var context: Context
     private val worker = Executors.newSingleThreadExecutor()
 
-    fun init(ctx: Context) { if (db == null) db = Db.get(ctx.applicationContext) }
+    fun init(ctx: Context) { context=ctx.applicationContext; if (db == null) db = Db.get(ctx.applicationContext) }
 
     /** convId = peerId for DMs, groupId for groups. Returns true if new. */
     fun receive(msgId: String, fromId: String, fromName: String, body: String, sentAt: Long,
-                convId: String, convName: String, msgType: String = "text", isGroup: Boolean = false) {
+                convId: String, convName: String, msgType: String = "text", isGroup: Boolean = false, stored: () -> Unit = {}) {
         val d = db ?: return
         if (msgId.isEmpty() || fromId.isEmpty()) return
         // Skip audio frame data accidentally routed as messages
         if (msgType == "text" && body.length > 2000 && body.matches(Regex("[A-Za-z0-9+/=]+"))) return
         worker.execute {
             try {
-                val isNew = d.saveIfNew(msgId, convId, fromId, fromName, body, sentAt, false, "received", msgType)
+                if(d.hasMessage(msgId)) { stored(); return@execute }
+                val localBody=Attachments.receive(context,body,msgType)
+                val isNew = d.saveIfNew(msgId, convId, fromId, fromName, localBody, sentAt, false, "received", msgType)
+                stored()
                 if (isNew) {
-                    val preview = when (msgType) { "image" -> "📷 Photo"; "voice" -> "🎤 Voice note"; "file" -> "📎 File"; else -> body }
+                    val preview = when (msgType) { "image" -> "📷 Photo"; "voice" -> "🎤 Voice note"; "file" -> "File"; "video" -> "Video"; "sticker" -> "Sticker"; else -> body }
                     val showBadge = ChatActivity.openPeer != convId
                     d.upsertConversation(convId, convName, preview, sentAt, showBadge, isGroup)
-                    RabtaEvents.postMessage(fromId, fromName, msgId, body, sentAt, msgType, if (isGroup) convId else "")
+                    RabtaEvents.postMessage(fromId, fromName, msgId, localBody, sentAt, msgType, if (isGroup) convId else "")
                 }
             } catch (_: Exception) {}
         }

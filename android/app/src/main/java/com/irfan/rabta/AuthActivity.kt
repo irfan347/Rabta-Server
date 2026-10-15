@@ -16,7 +16,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import org.json.JSONObject
 
-class AuthActivity : Activity() {
+class AuthActivity : ThemedActivity() {
 
     private lateinit var usernameField: EditText
     private lateinit var pinField: EditText
@@ -47,7 +47,7 @@ class AuthActivity : Activity() {
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setBackgroundColor(0xFF128C7E.toInt())
+            setBackgroundColor(AppTheme.ACCENT)
             setPadding(dp(32), dp(24), dp(32), dp(24))
         }
         top.addView(TextView(this).apply {
@@ -65,7 +65,7 @@ class AuthActivity : Activity() {
         root.addView(top)
 
         // ---- BOTTOM (white card) ----
-        val bot = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(Color.WHITE) }
+        val bot = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(AppTheme.bg(this)) }
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(28), dp(28), dp(28), dp(28))
@@ -75,19 +75,19 @@ class AuthActivity : Activity() {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         fun label(t: String) = TextView(this).apply {
-            text = t; textSize = 13f; setTextColor(0xFF128C7E.toInt())
+            text = t; textSize = 13f; setTextColor(AppTheme.ACCENT)
             typeface = Typeface.DEFAULT_BOLD; setPadding(dp(4), 0, 0, dp(4))
         }
         fun field(hint: String, pwd: Boolean = false) = EditText(this).apply {
             this.hint = hint; textSize = 16f
-            setTextColor(0xFF1A1A1A.toInt()); setHintTextColor(0xFFAAAAAA.toInt())
+            setTextColor(AppTheme.text(this)); setHintTextColor(AppTheme.sub(this))
             setSingleLine(true); background = null
             setPadding(dp(12), dp(14), dp(12), dp(14))
             inputType = if (pwd) InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
                         else InputType.TYPE_CLASS_TEXT
         }
         fun divider() = View(this).apply {
-            setBackgroundColor(0xFFE0E0E0.toInt())
+            setBackgroundColor(AppTheme.line(this))
         }.also { col.addView(it, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1))) }
         fun lp(t: Int = 0, b: Int = 0) = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
@@ -108,7 +108,7 @@ class AuthActivity : Activity() {
         val pinRow=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL }
         pinRow.addView(pinField,LinearLayout.LayoutParams(0,-2,1f))
         pinRow.addView(TextView(this).apply {
-            text="Show"; contentDescription="Show PIN"; setTextColor(0xFF128C7E.toInt()); gravity=Gravity.CENTER
+            text="Show"; contentDescription="Show PIN"; setTextColor(AppTheme.ACCENT); gravity=Gravity.CENTER
             minWidth=dp(48); minHeight=dp(48); isClickable=true
             setOnClickListener {
                 val visible=pinField.transformationMethod is android.text.method.PasswordTransformationMethod
@@ -126,14 +126,14 @@ class AuthActivity : Activity() {
         col.addView(statusText, lp(t = 14, b = 4))
 
         // Buttons
-        loginBtn = bigBtn("LOGIN", 0xFF128C7E.toInt()) { doLogin() }
+        loginBtn = bigBtn("LOGIN", AppTheme.ACCENT) { doLogin() }
         registerBtn = bigBtn("SIGN UP", Color.WHITE, outline = true) { doRegister() }
         col.addView(loginBtn, lp(t = 16, b = 10))
         col.addView(registerBtn)
 
         col.addView(TextView(this).apply {
             text = "Pakistan ka pehla offline + online chat app"
-            textSize = 12f; setTextColor(0xFFAAAAAA.toInt()); gravity = Gravity.CENTER
+            textSize = 12f; setTextColor(AppTheme.sub(this)); gravity = Gravity.CENTER
             setPadding(0, dp(24), 0, 0)
         })
     }
@@ -142,10 +142,10 @@ class AuthActivity : Activity() {
         TextView(this).apply {
             this.text = text; textSize = 15f; typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER; setPadding(0, dp(16), 0, dp(16))
-            setTextColor(if (outline) 0xFF128C7E.toInt() else Color.WHITE)
+            setTextColor(if (outline) AppTheme.ACCENT else Color.WHITE)
             background = if (outline) GradientDrawable().apply {
-                setColor(Color.WHITE); cornerRadius = dp(28).toFloat()
-                setStroke(dp(2), 0xFF128C7E.toInt())
+                setColor(AppTheme.surface(this@AuthActivity)); cornerRadius = dp(28).toFloat()
+                setStroke(dp(2), AppTheme.ACCENT)
             } else pill(bg, 28)
             isClickable = true; isFocusable = true
             setOnClickListener { onClick() }
@@ -169,7 +169,7 @@ class AuthActivity : Activity() {
 
     private fun doLogin() {
         if (!validate()) return
-        statusText.text = "Login ho raha hai..."; statusText.setTextColor(0xFF128C7E.toInt()); setLoading(true)
+        statusText.text = "Login ho raha hai..."; statusText.setTextColor(AppTheme.ACCENT); setLoading(true)
         WsClient.login(this, Config.SERVER, usernameField.text.toString().trim().lowercase(), pinField.text.toString().trim()) { ok, msg, data ->
             setLoading(false)
             if (ok && data != null) saveAndGo(data) else { statusText.text = msg; statusText.setTextColor(0xFFD32F2F.toInt()) }
@@ -179,7 +179,7 @@ class AuthActivity : Activity() {
     private fun doRegister() {
         if (!validate()) return
         val un = usernameField.text.toString().trim().lowercase()
-        statusText.text = "Account ban raha hai..."; statusText.setTextColor(0xFF128C7E.toInt()); setLoading(true)
+        statusText.text = "Account ban raha hai..."; statusText.setTextColor(AppTheme.ACCENT); setLoading(true)
         WsClient.register(this, Config.SERVER, un, pinField.text.toString().trim(), un) { ok, msg, data ->
             setLoading(false)
             if (ok && data != null) saveAndGo(data) else { statusText.text = msg; statusText.setTextColor(0xFFD32F2F.toInt()) }

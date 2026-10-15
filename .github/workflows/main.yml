@@ -134,6 +134,8 @@ jobs:
           if [ -d "$ANDROID_PROJECT_DIR/tests" ]; then
             python3 -m unittest discover -s "$ANDROID_PROJECT_DIR/tests" -v
           fi
+      - name: Test server attachment storage and signaling
+        run: node --test tests/server.test.js
       - name: Build and test APK
         env:
           ANDROID_PROJECT_DIR: ${{ steps.project.outputs.directory }}
