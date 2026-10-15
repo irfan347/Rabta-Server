@@ -32,16 +32,44 @@ object Stickers {
             @Deprecated("Deprecated") override fun getOpacity()=PixelFormat.TRANSLUCENT
         }
     }
+    private fun items(c:android.content.Context,key:String):List<String> = runCatching {
+        val a=org.json.JSONArray(c.getSharedPreferences("stickers",0).getString(key,"[]"))
+        (0 until a.length()).map { a.getString(it) }
+    }.getOrDefault(emptyList())
+    private fun save(c:android.content.Context,key:String,values:List<String>) { c.getSharedPreferences("stickers",0).edit().putString(key,org.json.JSONArray(values).toString()).apply() }
+    fun remember(c:android.content.Context,body:String) { save(c,"recent",(listOf(body)+items(c,"recent")).distinct().take(12)) }
     fun picker(a:Activity,send:(String)->Unit,import:()->Unit) {
         val dp={n:Int -> (n*a.resources.displayMetrics.density).toInt()}
         val col=LinearLayout(a).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(8),dp(12),dp(8)) }
+        col.addView(TextView(a).apply { text="Tap to send · Hold to favorite"; textSize=12f; setTextColor(AppTheme.sub(a)); setPadding(0,0,0,dp(12)) })
+        val tabs=RadioGroup(a).apply { orientation=RadioGroup.HORIZONTAL }
         val scroll=ScrollView(a); val grid=GridLayout(a).apply { columnCount=3 }
         lateinit var dialog:AlertDialog
-        labels.forEachIndexed { i,label -> grid.addView(ImageView(a).apply {
-            setImageDrawable(drawable("rbt:$i")); contentDescription=label; setPadding(dp(4),dp(4),dp(4),dp(4)); setOnClickListener { send("rbt:$i"); dialog.dismiss() }
-        },GridLayout.LayoutParams().apply { width=dp(88); height=dp(88) }) }
-        scroll.addView(grid); col.addView(scroll)
-        dialog=AlertDialog.Builder(a).setTitle("Rabta expressions").setView(col).setNeutralButton("Import sticker") { _,_ -> import() }.setNegativeButton("Close",null).create()
+        fun show(category:Int) {
+            grid.removeAllViews()
+            val values=when(category) { 1->items(a,"recent"); 2->items(a,"favorites"); else->labels.indices.map { "rbt:$it" } }
+            if(values.isEmpty()) { grid.addView(TextView(a).apply { text="No stickers here yet"; setTextColor(AppTheme.sub(a)); setPadding(dp(12),dp(24),dp(12),dp(24)) }); return }
+            for(body in values) {
+                val icon=ImageView(a).apply {
+                    contentDescription=if(valid(body)) labels[body.removePrefix("rbt:").toInt()] else "Custom sticker"
+                    scaleType=ImageView.ScaleType.FIT_CENTER; setPadding(dp(4),dp(4),dp(4),dp(4))
+                    if(valid(body)) setImageDrawable(drawable(body)) else runCatching { setImageURI(android.net.Uri.fromFile(Attachments.file(a,body))) }
+                    setOnClickListener { remember(a,body); send(body); dialog.dismiss() }
+                    setOnLongClickListener {
+                        val favorites=items(a,"favorites"); val remove=body in favorites
+                        save(a,"favorites",if(remove) favorites-body else (favorites+body).takeLast(24))
+                        Toast.makeText(a,if(remove) "Removed from favorites" else "Added to favorites",Toast.LENGTH_SHORT).show()
+                        if(category==2) show(2)
+                        true
+                    }
+                }
+                grid.addView(icon,GridLayout.LayoutParams().apply { width=dp(88); height=dp(88) })
+            }
+        }
+        listOf("Rabta","Recent","Favorites").forEachIndexed { i,label -> tabs.addView(RadioButton(a).apply { id=100+i; text=label; textSize=12f }) }
+        tabs.setOnCheckedChangeListener { _,id -> show(id-100) }; col.addView(tabs)
+        scroll.addView(grid); col.addView(scroll); tabs.check(100)
+        dialog=AlertDialog.Builder(a).setTitle("Stickers").setView(col).setNeutralButton("Import sticker") { _,_ -> import() }.setNegativeButton("Close",null).create()
         dialog.show()
     }
 }

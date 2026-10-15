@@ -148,7 +148,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         // ── FAB ──
         val fabFrame = FrameLayout(this).apply { minimumHeight = dp(1) }
         val fab = TextView(this).apply {
-            UiIcons.set(this,"compose",label="New chat or group"); textSize = 22f; setTextColor(WHITE); gravity = Gravity.CENTER
+            UiIcons.set(this,"compose",label="New chat or group"); textSize = 22f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
             background = pill(GREEN2); elevation = dp(6).toFloat()
             isClickable = true; setOnClickListener { showFabMenu() }
         }
@@ -234,7 +234,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         bot.addView(TextView(this).apply { text = c.lastMsg.ifEmpty { "Tap to chat" }; textSize = 14f; setTextColor(SUB); maxLines = 1 }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         if (c.unread > 0) bot.addView(TextView(this).apply {
             text = if (c.unread > 99) "99+" else c.unread.toString()
-            textSize = 12f; typeface = Typeface.DEFAULT_BOLD; setTextColor(WHITE); gravity = Gravity.CENTER
+            textSize = 12f; typeface = Typeface.DEFAULT_BOLD; setTextColor(Color.WHITE); gravity = Gravity.CENTER
             background = pill(GREEN2); setPadding(dp(7),dp(2),dp(7),dp(2))
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(6) })
         mid.addView(bot)

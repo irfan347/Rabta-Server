@@ -124,7 +124,7 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
         muteBtn = cBtn("🎤", 0x99444444.toInt(), dp(60)) { toggleMute() }
         val endBtn = cBtn("📵", 0xFFD32F2F.toInt(), dp(70)) { hangUp() }
         val flipBtn = cBtn("🔄", 0x99444444.toInt(), dp(60)) { flipCamera() }
-        speakerBtn=cBtn("🔊",0xFF128C7E.toInt(),dp(60)) { toggleSpeaker() }
+        speakerBtn=cBtn("🔊",AppTheme.ACCENT,dp(60)) { toggleSpeaker() }
         listOf(muteBtn,endBtn,flipBtn,speakerBtn).forEach { ctrl.addView(it,LinearLayout.LayoutParams(dp(56),dp(56)).apply { marginStart=dp(8); marginEnd=dp(8) }) }
         muteBtn.contentDescription="Mute microphone"; endBtn.contentDescription="End call"; flipBtn.contentDescription="Switch camera"; speakerBtn.contentDescription="Speaker on"
         root.addView(ctrl, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
@@ -253,12 +253,12 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
     private fun toggleMute() {
         muted = !muted; localAudioTrack?.setEnabled(!muted)
         UiIcons.set(muteBtn,if(muted) "muted" else "mic",label=if(muted) "Unmute microphone" else "Mute microphone")
-        muteBtn.background=oval(if(muted) 0xFF128C7E.toInt() else 0x99444444.toInt()); muteBtn.isSelected=muted
+        muteBtn.background=oval(if(muted) AppTheme.ACCENT else 0x99444444.toInt()); muteBtn.isSelected=muted
     }
     private fun toggleSpeaker() {
         speakerOn=!speakerOn
         (getSystemService(AUDIO_SERVICE) as android.media.AudioManager).isSpeakerphoneOn=speakerOn
-        speakerBtn.background=oval(if(speakerOn) 0xFF128C7E.toInt() else 0x99444444.toInt()); speakerBtn.isSelected=speakerOn
+        speakerBtn.background=oval(if(speakerOn) AppTheme.ACCENT else 0x99444444.toInt()); speakerBtn.isSelected=speakerOn
         speakerBtn.contentDescription=if(speakerOn) "Speaker on" else "Speaker off"
     }
 

@@ -50,7 +50,7 @@ object Outbox : RabtaEvents.Listener {
         val mesh = !net && !group && type in setOf("text","sticker") && try { MeshBridge.sendDirect(peerId,id,body,type) } catch (_: Exception) { false }
         if (!net) {
             attempts.remove(id)
-            d.updateStatus(id, if (mesh) "mesh" else "failed")
+            d.updateStatus(id, if (mesh) (if(MeshBridge.hasKey(peerId)) "mesh" else "mesh_wait") else "failed")
             RabtaEvents.postHistoryChanged(peerId)
         } else worker.schedule(Runnable {
             if (attempts[id] == attempt && d.status(id) == "sending") {

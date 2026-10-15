@@ -38,6 +38,7 @@ class Router(private val ctx:Context,private val ui:UiListener):Mesh.Listener {
         }
     }
     fun stop() { running=false; main.removeCallbacks(pulse); mesh.stop(); worker.execute { store.close() }; worker.shutdown() }
+    fun hasKey(peer:String)=running && security.key(peer)!=null
     fun sendDirect(toId:String,msgId:String,body:String,type:String="text"):Boolean {
         if(!running || !MeshPolicy.validId(toId) || !MeshPolicy.validId(msgId) || body.toByteArray().size>12000) return false
         if(type!="text" && !(type=="sticker" && Stickers.valid(body))) return false
@@ -67,7 +68,7 @@ class Router(private val ctx:Context,private val ui:UiListener):Mesh.Listener {
             try {
                 val plain=JSONObject().put("body",p.body).put("type",p.type).put("name",myName).toString()
                 val env=packet(p.id,p.to,"message",p.sent,plain)
-                if(store.put(p.id,env.toString(),env.getLong("x"),true)) { store.mark(p.id,env.getLong("x")); store.removePending(p.id) }
+                if(store.put(p.id,env.toString(),env.getLong("x"),true)) { store.mark(p.id,env.getLong("x")); store.removePending(p.id); RabtaEvents.postAck(p.id,"mesh") }
             } catch(_:Exception) { main.post { ui.onStatus("Message waiting for offline security key") } }
         }
     }

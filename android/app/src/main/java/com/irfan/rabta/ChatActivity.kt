@@ -362,6 +362,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
                 val iv=ImageView(this).apply { contentDescription="Sticker"; scaleType=ImageView.ScaleType.FIT_CENTER }
                 if(Stickers.valid(body)) iv.setImageDrawable(Stickers.drawable(body))
                 else runCatching { iv.setImageURI(android.net.Uri.fromFile(Attachments.file(this,body))) }
+                iv.setOnLongClickListener { Stickers.remember(this,body); toast("Sticker saved to Recent"); true }
                 bubble.addView(iv,LinearLayout.LayoutParams(dp(150),dp(150)))
             }
             else    -> bubble.addView(textLine(body))
@@ -445,6 +446,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     private fun sendContent(body: String, msgType: String) {
         if(!WsClient.connected && (isGroup || msgType !in setOf("text","sticker") || (msgType=="sticker" && !Stickers.valid(body)))) { toast("Videos, files and media need internet. Nearby supports text and built-in stickers."); return }
         if(msgType=="text" && body.toByteArray().size>12000) { toast("Message is too long (12 KB maximum)"); return }
+        if(msgType=="sticker") Stickers.remember(this,body)
         Outbox.send(peerId,peerName,isGroup,body,msgType)
     }
 
