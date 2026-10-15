@@ -1,0 +1,155 @@
+package com.irfan.rabta
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.IBinder
+
+/** Background service: keeps WebSocket alive and shows notifications. */
+class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
+
+    companion object {
+        const val MSG_CHANNEL  = "rabta_messages"
+        const val CALL_CHANNEL = "rabta_calls"
+        const val CALL_NOTIF   = 2
+        private var msgId      = 100
+
+        fun start(ctx: Context) {
+            try { ctx.startForegroundService(Intent(ctx, MessageService::class.java)) } catch (_: Exception) {}
+        }
+        fun stop(ctx: Context) {
+            try { ctx.stopService(Intent(ctx, MessageService::class.java)) } catch (_: Exception) {}
+        }
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    private var router: Router? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        Session.init(this)          // service may be restarted by Android without the app open
+        createChannels()
+        startForeground(1, persistentNotification())
+        RabtaEvents.add(this)
+        if (Session.loggedIn) WsClient.connect(Session)
+        startMeshIfAllowed()
+    }
+
+    override fun onDestroy() {
+        RabtaEvents.remove(this)
+        MeshBridge.detach(); router?.stop(); router = null
+        super.onDestroy()
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (Session.loggedIn && !WsClient.connected) WsClient.connect(Session)
+        startMeshIfAllowed()        // e.g. after the user granted Bluetooth permission
+        return START_STICKY
+    }
+
+    // ---------- offline mesh ----------
+    private fun meshPermissions(): List<String> {
+        val l = mutableListOf(android.Manifest.permission.ACCESS_FINE_LOCATION)
+        if (Build.VERSION.SDK_INT >= 31) {
+            l += android.Manifest.permission.BLUETOOTH_SCAN
+            l += android.Manifest.permission.BLUETOOTH_ADVERTISE
+            l += android.Manifest.permission.BLUETOOTH_CONNECT
+        }
+        if (Build.VERSION.SDK_INT >= 33) l += android.Manifest.permission.NEARBY_WIFI_DEVICES
+        return l
+    }
+
+    private fun startMeshIfAllowed() {
+        if (router?.running == true || !Session.loggedIn) return
+        if (meshPermissions().any { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }) return
+        try {
+            val r = Router(this, this)
+            r.start(Session.id, Session.name)
+            if (r.running) { router = r; MeshBridge.attach(r) }
+        } catch (_: Exception) {}
+    }
+
+    // Router.UiListener: a message reached us over the mesh
+    override fun onMeshMessage(msgId: String, fromId: String, fromName: String, body: String, sentAt: Long, hops: Int) {
+        Inbox.receive(msgId, fromId, fromName, body, sentAt, fromId, fromName, "text", false)
+    }
+
+    // --- RabtaEvents.Listener ---
+    override fun onMessage(fromId: String, fromName: String, msgId: String, body: String, t: Long, msgType: String, groupId: String) {
+        if (ChatActivity.openPeer != fromId) showMessageNotification(fromId, fromName, body)
+    }
+
+    override fun onIncomingCall(fromId: String, fromName: String) { showCallNotification(fromId, fromName, false) }
+    override fun onVideoOffer(fromId: String, fromName: String, callId: String, sdp: String) { showCallNotification(fromId, fromName, true, callId, sdp) }
+
+    override fun onCallEnd(fromId: String) {
+        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).cancel(CALL_NOTIF)
+    }
+
+    // --- Notifications ---
+    private fun showMessageNotification(fromId: String, fromName: String, body: String) {
+        val chatIntent = Intent(this, ChatActivity::class.java)
+            .putExtra("peerId", fromId).putExtra("peerName", fromName)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        val pi = PendingIntent.getActivity(this, fromId.hashCode(), chatIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val n = Notification.Builder(this, MSG_CHANNEL)
+            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setContentTitle(fromName)
+            .setContentText(body)
+            .setAutoCancel(true)
+            .setContentIntent(pi)
+            .setWhen(System.currentTimeMillis())
+            .setShowWhen(true)
+            .build()
+        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(msgId++, n)
+    }
+
+    private fun showCallNotification(fromId: String, fromName: String, isVideo: Boolean = false, callId: String = "", offerSdp: String? = null) {
+        val callIntent = Intent(this, IncomingCallActivity::class.java)
+            .putExtra("fromId", fromId).putExtra("fromName", fromName)
+            .putExtra("isVideo", isVideo).putExtra("callId", callId)
+            .also { if (offerSdp != null) it.putExtra("offerSdp", offerSdp) }
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        val pi = PendingIntent.getActivity(this, 0, callIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val n = Notification.Builder(this, CALL_CHANNEL)
+            .setSmallIcon(android.R.drawable.ic_menu_call)
+            .setContentTitle(if (isVideo) "Incoming Video Call" else "Incoming Call")
+            .setContentText("$fromName is ${if (isVideo) "video " else ""}calling...")
+            .setCategory(Notification.CATEGORY_CALL)
+            .setFullScreenIntent(pi, true)
+            .setAutoCancel(false)
+            .setOngoing(true)
+            .build()
+        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(CALL_NOTIF, n)
+        // Also launch the full-screen activity directly
+        try { startActivity(callIntent) } catch (_: Exception) {}
+    }
+
+    private fun persistentNotification(): Notification {
+        val pi = PendingIntent.getActivity(this, 0, Intent(this, ConversationListActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+        return Notification.Builder(this, MSG_CHANNEL)
+            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setContentTitle("Rabta")
+            .setContentText("Messages ki waiting mein...")
+            .setContentIntent(pi)
+            .setOngoing(true)
+            .build()
+    }
+
+    private fun createChannels() {
+        val nm = getSystemService(NotificationManager::class.java) ?: return
+        nm.createNotificationChannel(NotificationChannel(MSG_CHANNEL, "Messages", NotificationManager.IMPORTANCE_HIGH).apply {
+            description = "New message notifications"; enableLights(true); enableVibration(true)
+        })
+        nm.createNotificationChannel(NotificationChannel(CALL_CHANNEL, "Calls", NotificationManager.IMPORTANCE_MAX).apply {
+            description = "Incoming call notifications"
+        })
+    }
+}
