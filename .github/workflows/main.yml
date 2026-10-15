@@ -154,3 +154,45 @@ jobs:
           name: Rabta-test-reports
           path: ${{ steps.project.outputs.directory }}/app/build/reports/tests/
           if-no-files-found: ignore
+
+  interface:
+    if: github.event_name == 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Enable emulator acceleration
+        run: sudo chmod 666 /dev/kvm
+      - name: Exercise interface and capture real Android screenshots
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: |
+            gradle --project-dir android :app:connectedDebugAndroidTest --no-daemon
+            adb pull /sdcard/Android/data/com.irfan.rabta/files/screenshots interface-screenshots
+      - name: Upload interface screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rabta-interface-screenshots
+          path: interface-screenshots/
+          if-no-files-found: ignore
+      - name: Upload device test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rabta-device-tests
+          path: android/app/build/reports/androidTests/
+          if-no-files-found: ignore

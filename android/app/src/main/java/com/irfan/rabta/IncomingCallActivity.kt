@@ -16,7 +16,7 @@ import android.widget.TextView
 /** Full-screen popup for incoming calls. Appears on lock screen too. */
 class IncomingCallActivity : ThemedActivity(), RabtaEvents.Listener {
 
-    private val G   = 0xFF25D366.toInt()
+    private val G = AppTheme.ACCENT
     private val RED = 0xFFD93025.toInt()
     private val BG get() = AppTheme.bg(this@IncomingCallActivity)
 
@@ -80,7 +80,7 @@ class IncomingCallActivity : ThemedActivity(), RabtaEvents.Listener {
 
         root.addView(TextView(this).apply {
             text = fromName; textSize = 28f; typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.WHITE); gravity = Gravity.CENTER
+            setTextColor(AppTheme.text(this@IncomingCallActivity)); gravity = Gravity.CENTER
             setPadding(0, dp(20), 0, dp(8))
         })
         root.addView(TextView(this).apply {

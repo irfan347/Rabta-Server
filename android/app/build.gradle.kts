@@ -11,6 +11,7 @@ android {
         targetSdk = 34
         versionCode = 31
         versionName = "1.8"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -19,6 +20,8 @@ android {
     kotlinOptions { jvmTarget = "17" }
 }
 dependencies {
+    androidTestImplementation("androidx.test:runner:1.5.2")
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
     testImplementation("junit:junit:4.13.2")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("com.google.android.gms:play-services-nearby:19.3.0")
