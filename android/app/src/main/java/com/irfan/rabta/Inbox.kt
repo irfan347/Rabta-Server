@@ -22,13 +22,13 @@ object Inbox {
                 if(d.hasMessage(msgId)) { stored(); return@execute }
                 val localBody=Attachments.receive(context,body,msgType)
                 val isNew = d.saveIfNew(msgId, convId, fromId, fromName, localBody, sentAt, false, "received", msgType)
-                stored()
                 if (isNew) {
                     val preview = when (msgType) { "image" -> "📷 Photo"; "voice" -> "🎤 Voice note"; "file" -> "File"; "video" -> "Video"; "sticker" -> "Sticker"; else -> body }
                     val showBadge = ChatActivity.openPeer != convId
                     d.upsertConversation(convId, convName, preview, sentAt, showBadge, isGroup)
                     RabtaEvents.postMessage(fromId, fromName, msgId, localBody, sentAt, msgType, if (isGroup) convId else "")
                 }
+                stored()
             } catch (_: Exception) {}
         }
     }

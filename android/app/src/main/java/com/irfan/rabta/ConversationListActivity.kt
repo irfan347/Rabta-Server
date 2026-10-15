@@ -24,11 +24,11 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
 
     private val GREEN get() = AppTheme.ACCENT
     private val GREEN2 get() = AppTheme.ACCENT
-    private val WHITE get() = AppTheme.surface(this)
-    private val TXT get() = AppTheme.text(this)
-    private val SUB get() = AppTheme.sub(this)
-    private val DIV get() = AppTheme.line(this)
-    private val BG get() = AppTheme.bg(this)
+    private val WHITE get() = AppTheme.surface(this@ConversationListActivity)
+    private val TXT get() = AppTheme.text(this@ConversationListActivity)
+    private val SUB get() = AppTheme.sub(this@ConversationListActivity)
+    private val DIV get() = AppTheme.line(this@ConversationListActivity)
+    private val BG get() = AppTheme.bg(this@ConversationListActivity)
 
     private lateinit var convList: LinearLayout
     private lateinit var callsList: LinearLayout
@@ -170,8 +170,8 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         searchField.visibility = if (idx == 0) View.VISIBLE else View.GONE
         chatsScroll.visibility = if (idx == 0) View.VISIBLE else View.GONE
         callsScroll.visibility = if (idx == 1) View.VISIBLE else View.GONE
-        tabChats.background = if (idx == 0) rect(AppTheme.sent(this),18) else null
-        tabCalls.background = if (idx == 1) rect(AppTheme.sent(this),18) else null
+        tabChats.background = if (idx == 0) rect(AppTheme.sent(this@ConversationListActivity),18) else null
+        tabCalls.background = if (idx == 1) rect(AppTheme.sent(this@ConversationListActivity),18) else null
         if (idx == 1) loadCalls()
     }
 

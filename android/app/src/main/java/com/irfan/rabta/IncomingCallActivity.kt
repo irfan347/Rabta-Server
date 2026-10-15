@@ -18,7 +18,7 @@ class IncomingCallActivity : ThemedActivity(), RabtaEvents.Listener {
 
     private val G   = 0xFF25D366.toInt()
     private val RED = 0xFFD93025.toInt()
-    private val BG get() = AppTheme.bg(this)
+    private val BG get() = AppTheme.bg(this@IncomingCallActivity)
 
     private lateinit var fromId: String
     private lateinit var fromName: String

@@ -23,7 +23,9 @@ class MeshStore(c:Context,id:String):SQLiteOpenHelper(c,"mesh_v2_$id.db",null,1)
     fun all():List<String> = readableDatabase.rawQuery("SELECT json FROM packets ORDER BY own DESC,expires ASC",null).use { c -> buildList { while(c.moveToNext()) add(c.getString(0)) } }
     fun contains(id:String)=readableDatabase.rawQuery("SELECT 1 FROM packets WHERE id=?",arrayOf(id)).use { it.moveToFirst() }
     fun seen(id:String)=readableDatabase.rawQuery("SELECT 1 FROM seen WHERE id=?",arrayOf(id)).use { it.moveToFirst() }
-    fun mark(id:String,expires:Long) { writableDatabase.insertWithOnConflict("seen",null,ContentValues().apply { put("id",id);put("expires",expires) },SQLiteDatabase.CONFLICT_REPLACE) }
+    fun mark(id:String,expires:Long) {
+        if(readableDatabase.rawQuery("SELECT COUNT(*) FROM seen",null).use { it.moveToFirst(); it.getInt(0) } >= 10000) return
+        writableDatabase.insertWithOnConflict("seen",null,ContentValues().apply { put("id",id);put("expires",expires) },SQLiteDatabase.CONFLICT_REPLACE) }
     fun remove(id:String) { writableDatabase.delete("packets","id=?",arrayOf(id)); writableDatabase.delete("pending","id=?",arrayOf(id)) }
     data class Pending(val id:String,val to:String,val body:String,val type:String,val sent:Long)
     fun pending():List<Pending> = readableDatabase.rawQuery("SELECT id,recipient,body,type,sent FROM pending",null).use { c -> buildList { while(c.moveToNext()) add(Pending(c.getString(0),c.getString(1),c.getString(2),c.getString(3),c.getLong(4))) } }

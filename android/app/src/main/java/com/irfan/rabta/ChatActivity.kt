@@ -39,11 +39,11 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
 
     private val GREEN get() = AppTheme.ACCENT
     private val GREEN2 get() = AppTheme.ACCENT
-    private val BEIGE get() = AppTheme.bg(this)
-    private val SENT get() = AppTheme.sent(this)
-    private val RECV get() = AppTheme.surface(this)
-    private val TXT get() = AppTheme.text(this)
-    private val SUB get() = AppTheme.sub(this)
+    private val BEIGE get() = AppTheme.bg(this@ChatActivity)
+    private val SENT get() = AppTheme.sent(this@ChatActivity)
+    private val RECV get() = AppTheme.surface(this@ChatActivity)
+    private val TXT get() = AppTheme.text(this@ChatActivity)
+    private val SUB get() = AppTheme.sub(this@ChatActivity)
     private val DARK    = 0xFF0C1317.toInt()
     private val DARK2   = 0xFF1F2C34.toInt()
     private val GRAY_BTN= 0xFF2A3942.toInt()
@@ -64,6 +64,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     private lateinit var callNameTv: TextView
     private lateinit var callStatusTv: TextView
     private lateinit var callAvatarFrame: FrameLayout
+    private lateinit var headerBar: LinearLayout
     private lateinit var composerBar: LinearLayout
     private lateinit var searchField: EditText
     private lateinit var recordingPanel: LinearLayout
@@ -164,7 +165,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     }
 
     private fun buildUi() {
-        window.statusBarColor = AppTheme.bg(this)
+        window.statusBarColor = AppTheme.bg(this@ChatActivity)
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN or WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(BEIGE); isFocusableInTouchMode=true }
         setContentView(root)
@@ -184,6 +185,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         if (!isGroup) hdr.addView(headerBtn("📞") { startCall(true) })
         if (!isGroup) hdr.addView(headerBtn("🎥") { startVideoCall() })
         hdr.addView(TextView(this).apply { UiIcons.set(this,"search",SUB,label="Search chat"); gravity=Gravity.CENTER; setOnClickListener { searchField.visibility=if(searchField.visibility==View.VISIBLE) View.GONE else View.VISIBLE } },LinearLayout.LayoutParams(dp(44),dp(48)))
+        headerBar=hdr
         root.addView(hdr)
 
         // ── Call overlay (WhatsApp style) ──
@@ -346,7 +348,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             "image" -> {
                 val bmp = MediaHelper.base64ToBitmap(body)
                 if (bmp != null) {
-                    val iv = ImageView(this).apply { setImageBitmap(bmp); scaleType=ImageView.ScaleType.CENTER_CROP; adjustViewBounds=true; background=pill(AppTheme.line(this),8) }
+                    val iv = ImageView(this).apply { setImageBitmap(bmp); scaleType=ImageView.ScaleType.CENTER_CROP; adjustViewBounds=true; background=pill(AppTheme.line(this@ChatActivity),8) }
                     bubble.addView(iv, LinearLayout.LayoutParams(dp(220),dp(200)))
                 } else bubble.addView(textLine("📷 Photo"))
             }
@@ -458,7 +460,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
                 val result=runCatching { Attachments.pick(this,uri,req==104) }
                 handler.post {
                     if(isDestroyed || isFinishing) return@post
-                    result.onSuccess { body -> android.app.AlertDialog.Builder(this).setTitle("Send ${Attachments.name(body)}?").setMessage("${Attachments.details(body)} · $peerName").setNegativeButton("Cancel",null).setPositiveButton("Send") { _,_ -> sendContent(body,when(req){102->"video";104->"sticker";else->"file"}) }.show() }
+                    result.onSuccess { body -> android.app.AlertDialog.Builder(this).setTitle("Send ${Attachments.name(body)}?").setMessage("${Attachments.details(body)} · $peerName").setOnCancelListener { Attachments.discard(this,body) }.setNegativeButton("Cancel") { _,_ -> Attachments.discard(this,body) }.setPositiveButton("Send") { _,_ -> sendContent(body,when(req){102->"video";104->"sticker";else->"file"}) }.show() }
                         .onFailure { toast(it.message ?: "Could not load file") }
                 }
             }.start()
@@ -520,6 +522,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         val am=getSystemService(AUDIO_SERVICE) as AudioManager
         previousAudioMode=am.mode; previousSpeaker=am.isSpeakerphoneOn
         am.mode=AudioManager.MODE_IN_COMMUNICATION; am.isSpeakerphoneOn=false
+        headerBar.visibility=View.GONE; window.statusBarColor=DARK; window.decorView.systemUiVisibility=0
         callOverlay.visibility=View.VISIBLE; chatScroll.visibility=View.GONE; composerBar.visibility=View.GONE; searchField.visibility=View.GONE
         callStatusTv.text=if(initiate) "Ringing…" else "Connecting…"
         callId=db.logCallStart(peerId,peerName,if(initiate)"outgoing" else "incoming")
@@ -564,7 +567,8 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         if(callId>0) db.logCallEnd(callId,seconds)
         callId=-1L; connectedAt=0L
         try { (getSystemService(AUDIO_SERVICE) as AudioManager).apply { isSpeakerphoneOn=previousSpeaker; mode=previousAudioMode } } catch (_:Exception) {}
-        callOverlay.visibility=View.GONE; chatScroll.visibility=View.VISIBLE; composerBar.visibility=View.VISIBLE; searchField.visibility=View.VISIBLE
+        headerBar.visibility=View.VISIBLE; window.statusBarColor=BEIGE; window.decorView.systemUiVisibility=if(AppTheme.dark(this)) 0 else View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        callOverlay.visibility=View.GONE; chatScroll.visibility=View.VISIBLE; composerBar.visibility=View.VISIBLE; searchField.visibility=if(searchQuery.isBlank()) View.GONE else View.VISIBLE
     }
 
     override fun onRequestPermissionsResult(r:Int, p:Array<out String>, g:IntArray) {
@@ -594,9 +598,5 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         if(inCall) netCall?.onAudio(data)
     }
     override fun onCallEnd(fromId:String) { if(fromId==peerId) handler.post{endCall(false);toast("Call khatam")} }
-    override fun onVideoOffer(fromId:String,fromName:String,callId:String,sdp:String) {
-        if (fromId!=peerId) return
-        handler.post { startActivity(Intent(this,VideoCallActivity::class.java).putExtra(VideoCallActivity.PEER_ID,fromId).putExtra(VideoCallActivity.PEER_NAME,fromName).putExtra(VideoCallActivity.IS_CALLER,false).putExtra(VideoCallActivity.CALL_ID,callId).putExtra(VideoCallActivity.OFFER_SDP,sdp)) }
-    }
     override fun onVideoEnd(callId:String) {}
 }

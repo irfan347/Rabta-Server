@@ -22,9 +22,9 @@ import android.widget.Toast
 class ProfileActivity : ThemedActivity() {
 
     private val GREEN get() = AppTheme.ACCENT
-    private val WHITE get() = AppTheme.surface(this)
-    private val TXT get() = AppTheme.text(this)
-    private val SUB get() = AppTheme.sub(this)
+    private val WHITE get() = AppTheme.surface(this@ProfileActivity)
+    private val TXT get() = AppTheme.text(this@ProfileActivity)
+    private val SUB get() = AppTheme.sub(this@ProfileActivity)
     private val PICK  = 101
     private lateinit var picView: ImageView
     private val handler = Handler(Looper.getMainLooper())
@@ -48,7 +48,7 @@ class ProfileActivity : ThemedActivity() {
         hdr.addView(TextView(this).apply { text = "Profile & settings"; textSize = 20f; typeface = Typeface.DEFAULT_BOLD; setTextColor(Color.WHITE) })
         root.addView(hdr)
 
-        val body = ScrollView(this).apply { setBackgroundColor(AppTheme.bg(this)) }
+        val body = ScrollView(this).apply { setBackgroundColor(AppTheme.bg(this@ProfileActivity)) }
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(24),dp(32),dp(24),dp(32)); gravity = Gravity.CENTER_HORIZONTAL }
         body.addView(col); root.addView(body)
 
@@ -76,7 +76,7 @@ class ProfileActivity : ThemedActivity() {
             card.addView(TextView(this).apply { text = value; textSize = 18f; setTextColor(TXT); setPadding(0,dp(4),0,dp(14)) })
         }
         infoRow("Name", Session.name)
-        card.addView(View(this).apply { setBackgroundColor(AppTheme.line(this)) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
+        card.addView(View(this).apply { setBackgroundColor(AppTheme.line(this@ProfileActivity)) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
         card.addView(View(this).apply { minimumHeight = dp(8) })
         infoRow("Username", "@${Session.username}")
         infoRow("Rabta ID", Session.id)

@@ -83,7 +83,7 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
 
     // --- RabtaEvents.Listener ---
     override fun onMessage(fromId: String, fromName: String, msgId: String, body: String, t: Long, msgType: String, groupId: String) {
-        if (ChatActivity.openPeer != fromId) showMessageNotification(fromId, fromName, body)
+        if (ChatActivity.openPeer != fromId) showMessageNotification(fromId, fromName, when(msgType) { "file"->"File"; "video"->"Video"; "image"->"Photo"; "voice"->"Voice note"; "sticker"->"Sticker"; else->body.take(160) })
     }
 
     override fun onIncomingCall(fromId: String, fromName: String) { showCallNotification(fromId, fromName, false) }

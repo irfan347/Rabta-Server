@@ -65,7 +65,7 @@ class AuthActivity : ThemedActivity() {
         root.addView(top)
 
         // ---- BOTTOM (white card) ----
-        val bot = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(AppTheme.bg(this)) }
+        val bot = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(AppTheme.bg(this@AuthActivity)) }
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(28), dp(28), dp(28), dp(28))
@@ -80,14 +80,14 @@ class AuthActivity : ThemedActivity() {
         }
         fun field(hint: String, pwd: Boolean = false) = EditText(this).apply {
             this.hint = hint; textSize = 16f
-            setTextColor(AppTheme.text(this)); setHintTextColor(AppTheme.sub(this))
+            setTextColor(AppTheme.text(this@AuthActivity)); setHintTextColor(AppTheme.sub(this@AuthActivity))
             setSingleLine(true); background = null
             setPadding(dp(12), dp(14), dp(12), dp(14))
             inputType = if (pwd) InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
                         else InputType.TYPE_CLASS_TEXT
         }
         fun divider() = View(this).apply {
-            setBackgroundColor(AppTheme.line(this))
+            setBackgroundColor(AppTheme.line(this@AuthActivity))
         }.also { col.addView(it, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1))) }
         fun lp(t: Int = 0, b: Int = 0) = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
@@ -132,8 +132,8 @@ class AuthActivity : ThemedActivity() {
         col.addView(registerBtn)
 
         col.addView(TextView(this).apply {
-            text = "Pakistan ka pehla offline + online chat app"
-            textSize = 12f; setTextColor(AppTheme.sub(this)); gravity = Gravity.CENTER
+            text = "Stay close, online or nearby."
+            textSize = 12f; setTextColor(AppTheme.sub(this@AuthActivity)); gravity = Gravity.CENTER
             setPadding(0, dp(24), 0, 0)
         })
     }
