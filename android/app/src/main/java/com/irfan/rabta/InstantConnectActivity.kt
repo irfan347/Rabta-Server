@@ -11,6 +11,7 @@ import android.view.View
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Switch
 import com.google.zxing.BarcodeFormat
 import com.journeyapps.barcodescanner.BarcodeEncoder
 import java.util.concurrent.Executors
@@ -31,13 +32,16 @@ class InstantConnectActivity:ThemedActivity() {
     private var image:ImageView?=null
     private var approval:TextView?=null
     private var reviewRaw:String?=null
+    private lateinit var nfc:InstantNfcController
+    private var nfcShare:Switch?=null
+    private var nfcInfo:TextView?=null
     private val tick=object:Runnable {
         override fun run() {
             if(!visible)return
             if(deadline>0) {
                 val left=(deadline-System.currentTimeMillis()).coerceAtLeast(0)
                 expiry.text=if(left>0)"Expires in ${left/60000}:${"%02d".format((left/1000)%60)}" else "This invitation has expired. Create or scan a fresh invitation."
-                if(left==0L){image?.visibility=View.GONE;approval?.isEnabled=false;deadline=0}
+                if(left==0L){image?.visibility=View.GONE;approval?.isEnabled=false;deadline=0;stopNfc()}
             }
             main.postDelayed(this,1000)
         }
@@ -53,6 +57,15 @@ class InstantConnectActivity:ThemedActivity() {
             content.addView(RabtaUi.text(this,"Sign in to your existing Rabta account first."))
             content.addView(RabtaUi.button(this,"Sign in") { startActivity(Intent(this,AuthActivity::class.java));finish() });return
         }
+        nfc=InstantNfcController(this,{ raw ->
+            if(busy)status.text="Pairing is busy. Wait for it to finish, then tap again." else process(raw)
+        },{message -> status.text=message})
+        nfcInfo=FeatureUi.text(this,nfc.summary());body.addView(nfcInfo)
+        if(nfc.supported) {
+            body.addView(button("Read NFC pairing code") { nfc.read() })
+            body.addView(button("Stop NFC sharing / reading") { status.text="NFC stopped. Your pairing state is saved; use QR or restart NFC." })
+            body.addView(button("Android NFC settings") { runCatching { startActivity(Intent(android.provider.Settings.ACTION_NFC_SETTINGS)) }.onFailure { status.text="NFC settings are unavailable. Use QR pairing." } })
+        }
         body.addView(button("Scan pairing QR",true) { startActivityForResult(Intent(this,InstantScanActivity::class.java),903) })
         body.addView(button("New temporary invitation") {
             AlertDialog.Builder(this).setTitle("Create a new invitation?").setMessage("A fresh invitation expires in 3 minutes and replaces any unfinished invitation on this phone.")
@@ -64,30 +77,32 @@ class InstantConnectActivity:ThemedActivity() {
         val raw=state?.getString("review")?:intent.getStringExtra("pairing_code")
         if(raw!=null)process(raw) else showStored()
     }
-    override fun onResume() { super.onResume();if(::store.isInitialized&&Session.id!=store.account){finish();return};visible=true;main.post(tick) }
-    override fun onPause() { visible=false;main.removeCallbacks(tick);super.onPause() }
-    override fun onDestroy() { version++;worker.shutdown();super.onDestroy() }
+    override fun onResume() { super.onResume();if(::store.isInitialized&&Session.id!=store.account){finish();return};visible=true;if(::nfc.isInitialized)nfcInfo?.text=nfc.summary();main.post(tick) }
+    override fun onPause() { visible=false;main.removeCallbacks(tick);stopNfc();super.onPause() }
+    override fun onDestroy() { version++;stopNfc();worker.shutdown();super.onDestroy() }
     override fun onSaveInstanceState(state:Bundle) { reviewRaw?.let { state.putString("review",it) };super.onSaveInstanceState(state) }
     override fun onActivityResult(code:Int,result:Int,data:Intent?) {
         super.onActivityResult(code,result,data)
         if(code==903&&result==Activity.RESULT_OK)data?.getStringExtra("pairing_code")?.let { process(it) }
     }
-    private fun button(label:String,primary:Boolean=false,action:()->Unit)=RabtaUi.button(this,label,primary) { if(!busy)action() }.also { buttons.add(it);it.isEnabled=!busy }
+    private fun stopNfc() { if(::nfc.isInitialized)nfc.stop();nfcShare?.isChecked=false }
+    private fun updateButtons() { buttons.forEach { it.isEnabled=!busy&&(it!==approval||deadline>System.currentTimeMillis()) };nfcShare?.isEnabled=!busy&&deadline>System.currentTimeMillis() }
+    private fun button(label:String,primary:Boolean=false,action:()->Unit)=RabtaUi.button(this,label,primary) { if(!busy){stopNfc();action()} }.also { buttons.add(it);it.isEnabled=!busy }
     private fun <T> work(label:String,action:()->T,success:(T)->Unit) {
         if(busy||isDestroyed||Session.id!=store.account)return
-        busy=true;buttons.forEach { it.isEnabled=false };status.text=label
+        busy=true;updateButtons();status.text=label
         val request=++version
         worker.execute {
             val result=runCatching(action)
             main.post {
                 if(isDestroyed||request!=version||Session.id!=store.account)return@post
-                busy=false;buttons.forEach { it.isEnabled=true }
+                busy=false;updateButtons()
                 result.onSuccess { status.text="";success(it) }.onFailure { status.text=it.message?:"Pairing failed. Please retry with a fresh invitation." }
             }
         }
     }
     private fun reset(title:String,description:String) {
-        content.removeAllViews();buttons.removeAll { it.parent==null };deadline=0;image=null;approval=null;expiry.text=""
+        stopNfc();nfcShare=null;content.removeAllViews();buttons.removeAll { it.parent==null };deadline=0;image=null;approval=null;expiry.text=""
         content.addView(RabtaUi.text(this,title,23f,true))
         content.addView(FeatureUi.text(this,description))
     }
@@ -107,6 +122,14 @@ class InstantConnectActivity:ThemedActivity() {
         deadline=packet.record.expires
         val qr=ImageView(this).apply { contentDescription="Temporary Instant Connect QR code";adjustViewBounds=true;setBackgroundColor(android.graphics.Color.WHITE);setPadding(12,12,12,12) }
         image=qr;content.addView(qr,LinearLayout.LayoutParams(-1,RabtaUi.dp(this,300)).apply { bottomMargin=RabtaUi.dp(this@InstantConnectActivity,16) })
+        if(::nfc.isInitialized&&nfc.canShare&&nfc.enabled) {
+            nfcShare=Switch(this).apply {
+                text="Share this pairing code by NFC";setTextColor(AppTheme.text(this@InstantConnectActivity));minHeight=RabtaUi.dp(this@InstantConnectActivity,56)
+                contentDescription="Share current temporary pairing code by NFC";isEnabled=!busy
+                setOnCheckedChangeListener { _,checked -> if(checked) { if(!visible||!nfc.share(packet.raw))isChecked=false } else nfc.stop() }
+            }.also { content.addView(it) }
+            content.addView(FeatureUi.text(this,"Keep this screen open. The other person selects Read NFC pairing code and taps. Repeat for reply/confirmation, or use QR at any step. NFC never carries chat messages."))
+        }
         work("Rendering signed QR…",{BarcodeEncoder().encodeBitmap(packet.raw,BarcodeFormat.QR_CODE,800,800)}) { bitmap:Bitmap -> if(image===qr)qr.setImageBitmap(bitmap) }
     }
     private fun showOffer(offer:InstantInvitation.Verified) {
@@ -150,6 +173,7 @@ class InstantConnectActivity:ThemedActivity() {
                     else -> work("Verifying issuer confirmation & saving key…",{store.finish(raw)}) { peer -> val current=store.view();showPaired(current);openChat(peer,current.peerName) }
                 }
             }.also { content.addView(it) }
+            updateButtons()
             content.addView(button("Reject / go back") { reviewRaw=null;showStored() })
         }
     }

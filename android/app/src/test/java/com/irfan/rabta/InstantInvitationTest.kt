@@ -56,4 +56,11 @@ class InstantInvitationTest {
         rejected { InstantInvitation.reply(first,first.record.id,"Self",a,time+1) }
         rejected { InstantInvitation.offer("../bad","User",a,time) }
     }
+    @Test fun allowedClockSkewDoesNotPreventASignedReply() {
+        val offer=offer()
+        val reply=InstantInvitation.reply(offer,"DDDDEEEEFFFF","B",b,time-15000)
+        val complete=InstantInvitation.confirmation(offer,reply,a,time+1000)
+        InstantInvitation.verifyConfirmation(offer,reply,complete,time-14000)
+        assertEquals(offer.record.issued,reply.record.issued)
+    }
 }

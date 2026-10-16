@@ -65,10 +65,10 @@ class InstantPairingStore(private val context:Context,val account:String,private
         val time=now();val offer=verify(prefs.getString("offer",null)?:error("Invitation is no longer active"))
         val confirmation=InstantInvitation.confirmation(offer,reply,security.pair(),time)
         // Consume durably before pinning. A crash/save failure cannot make an invitation reusable.
-        require(prefs.edit().remove("offer").putString("used",cache(offer.hash,offer.record.expires,time)).putString("confirmation",confirmation.raw)
+        require(prefs.edit().remove("offer").putString("used",cache(offer.hash,offer.record.expires,time)).remove("confirmation")
             .putString("peer_id",reply.record.id).putString("peer_name",reply.record.name).putBoolean("paired",false).putLong("last_time",time).commit()){"Could not consume invitation"}
         require(security.pin(reply.record.id,reply.record.key)){"Pairing key could not be saved. Create a new invitation; the previous invitation remains consumed"}
-        require(prefs.edit().putBoolean("paired",true).commit()){"Could not confirm saved pairing"}
+        require(prefs.edit().putString("confirmation",confirmation.raw).putBoolean("paired",true).commit()){"Could not confirm saved pairing"}
         confirmation
     }
     fun finish(raw:String):String=synchronized(lock) {

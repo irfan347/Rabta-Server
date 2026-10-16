@@ -41,7 +41,7 @@ object InstantInvitation {
     fun reply(offer:Verified,id:String,name:String,pair:KeyPair,now:Long):Verified {
         val source=verify(offer.raw,now);require(source.record.kind==OFFER){"Scan an invitation first"}
         require(id!=source.record.id){"You cannot pair with yourself"}
-        return sign(Record(REPLY,id,cleanName(name),MeshCrypto.b64(pair.public.encoded),nonce(),source.hash,"",now,source.record.expires),pair,now)
+        return sign(Record(REPLY,id,cleanName(name),MeshCrypto.b64(pair.public.encoded),nonce(),source.hash,"",maxOf(now,source.record.issued),source.record.expires),pair,now)
     }
     fun confirmation(offer:Verified,reply:Verified,pair:KeyPair,now:Long):Verified {
         verifyReply(offer,reply,now)

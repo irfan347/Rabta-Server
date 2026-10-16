@@ -29,4 +29,18 @@ JVM tests cover signed three-step records, Unicode names, exact expiry/future-ti
 
 Physical tests remain required: two phones in airplane mode, camera focus under different lighting, screen rotation/process restart at each step, expired/replaced/copied codes, comparison-code mismatch, cancel/reject, changed keys, and preserved messages after pairing. Use disposable test accounts; do not clear production storage. Pairing can succeed offline without a current messaging link; validate later message delivery separately with an approved Radar connection.
 
-NFC is a subsequent optional phase after the QR build/tests. Modern Android has no general Android Beam phone-to-phone exchange; support must use actual reader/card-emulation capabilities and transfer only these bounded public pairing records.
+The QR-only phase passed APK/JVM checks and **30/30 device tests on both API 29 and API 34** before NFC implementation: [verified QR CI run](https://github.com/irfan347/Rabta-Server/actions/runs/38966529318), commit `3bc5254`. Checkpoint: `checkpoint/instant-qr-verified`. The final combined checks are recorded separately in the PR.
+
+## Optional NFC handoff
+
+Modern Android has no general Android Beam exchange. Instant Connect therefore uses actual NFC reader mode and ISO-DEP host card emulation, with optional NFC/HCE manifest features so QR-only devices can still install the app.
+
+- Availability comes from the device adapter, enabled state and HCE feature. Unsupported phones show a QR fallback; reader-only phones can read another phone's code but cannot advertise HCE sharing. Android NFC settings and a real stop action are available where NFC exists.
+- On a code screen, explicitly enable **Share this pairing code by NFC**. On the other unlocked phone, select **Read NFC pairing code** and tap the phones. Review/approve the received identity through exactly the QR flow. Alternate roles for reply and issuer confirmation; QR and NFC may be mixed at any step.
+- Sharing is RAM-only and limited to the current signed offer, reply or confirmation, never messages or private/authentication credentials. It is off by default and stops on pause, expiry, account change, screen replacement or Stop NFC. Returning to the screen requires explicitly sharing again. The HCE service also requires an unlocked device and foreground preference.
+- A system-only `BIND_NFC_SERVICE` service exposes a proprietary read-only AID. It transfers at most 4096 bytes in chunks of at most 200 bytes and rejects writes, invalid offsets, missing/expired shares and changed content mid-transfer. A remote NFC read cannot approve pairing or consume an invitation. Signatures, exact response binding, expiry and durable replay checks still run locally before pairing.
+- Once paired, ordinary communication uses existing Internet or an explicitly approved Nearby connection; NFC does not implement a replacement messaging transport or silently enable Radar.
+
+Added tests cover bounded NFC APDUs, interruption/change/oversize rejection, the actual HCE handler transferring a signed public record, stale account/session rejection, required service protection/unlock metadata, optional hardware flags, failed durable consumption, scanner permission/cancel UI and allowed QR clock skew. Confirmation is persisted for sharing only after the contact key is saved successfully.
+
+Physical NFC taps have **not been run** here. Test two NFC/HCE phones with current builds: roles swapped at each of the three steps, mixed QR/NFC handoffs, screen lock/background/rotation, source expiry/cancellation/account change mid-read, disabled NFC, reader-only/unsupported phones, interrupted/rapid taps and subsequent offline/online message delivery. Verify the UI never reports pairing or connection merely from reading a tag, and never serves a code after the sharing screen pauses.
