@@ -16,6 +16,7 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.LinearLayout
+import android.widget.EditText
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
@@ -157,6 +158,56 @@ object RabtaUi {
         }
         ViewCompat.requestApplyInsets(root)
         enter(root)
+    }
+
+    fun inputSheet(a:Activity,title:String,hint:String,submitLabel:String,onSubmit:(String,TextView,Dialog)->Unit) {
+        val dialog=Dialog(a)
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        val root=LinearLayout(a).apply {
+            orientation=LinearLayout.VERTICAL
+            background=shape(a,AppTheme.surface(a),28).apply {
+                val r=dp(a,28).toFloat();cornerRadii=floatArrayOf(r,r,r,r,0f,0f,0f,0f)
+            }
+            setPadding(dp(a,20),dp(a,12),dp(a,20),dp(a,12))
+        }
+        root.addView(View(a).apply { background=shape(a,AppTheme.line(a),2) },LinearLayout.LayoutParams(dp(a,36),dp(a,4)).apply {
+            gravity=Gravity.CENTER_HORIZONTAL;bottomMargin=dp(a,20)
+        })
+        root.addView(text(a,title,23f,true).apply { setPadding(0,0,0,dp(a,8));isAccessibilityHeadingCompat() })
+        root.addView(text(a,"Find people by their username or Rabta ID.",14f,color=AppTheme.sub(a)).apply { setPadding(0,0,0,dp(a,16)) })
+        val field=EditText(a).apply {
+            this.hint=hint;textSize=16f;setTextColor(AppTheme.text(a));setHintTextColor(AppTheme.sub(a));setSingleLine(true)
+            inputType=android.text.InputType.TYPE_CLASS_TEXT
+            background=shape(a,AppTheme.bg(a),16,AppTheme.line(a));setPadding(dp(a,16),dp(a,14),dp(a,16),dp(a,14))
+            minHeight=dp(a,52);contentDescription=hint
+        }
+        root.addView(field,LinearLayout.LayoutParams(-1,-2))
+        val status=text(a,"",14f,color=AppTheme.sub(a)).apply { minHeight=dp(a,32);gravity=Gravity.CENTER_VERTICAL;accessibilityLiveRegion=View.ACCESSIBILITY_LIVE_REGION_POLITE }
+        root.addView(status)
+        val actions=LinearLayout(a).apply { orientation=LinearLayout.HORIZONTAL;gravity=Gravity.END or Gravity.CENTER_VERTICAL }
+        fun action(label:String,primary:Boolean,run:()->Unit)=text(a,label,15f,true,if(primary) Color.WHITE else AppTheme.text(a)).apply {
+            gravity=Gravity.CENTER;minHeight=dp(a,48);minWidth=dp(a,TOUCH);setPadding(dp(a,16),dp(a,10),dp(a,16),dp(a,10))
+            background=ripple(a,if(primary) AppTheme.ACCENT else Color.TRANSPARENT,16);isFocusable=true;setOnClickListener { run() }
+        }
+        actions.addView(action("Cancel",false) { dialog.dismiss() })
+        actions.addView(action(submitLabel,true) { onSubmit(field.text.toString().trim(),status,dialog) })
+        root.addView(actions,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(a,8) })
+        dialog.setContentView(root)
+        dialog.window?.apply {
+            setBackgroundDrawableResource(android.R.color.transparent);addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            setDimAmount(0.5f);setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+            WindowCompat.setDecorFitsSystemWindows(this,false)
+        }
+        dialog.show()
+        dialog.window?.apply {
+            setGravity(Gravity.BOTTOM);setLayout(-1,-2);navigationBarColor=AppTheme.surface(a)
+            WindowInsetsControllerCompat(this,decorView).isAppearanceLightNavigationBars=!AppTheme.dark(a)
+        }
+        ViewCompat.setOnApplyWindowInsetsListener(root) { v,wi ->
+            val bars=wi.getInsets(WindowInsetsCompat.Type.navigationBars() or WindowInsetsCompat.Type.displayCutout())
+            v.setPadding(dp(a,20)+bars.left,dp(a,12),dp(a,20)+bars.right,dp(a,12)+bars.bottom);wi
+        }
+        ViewCompat.requestApplyInsets(root);enter(root)
     }
 
     fun edgeToEdge(a: Activity) {

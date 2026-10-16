@@ -51,7 +51,24 @@ class DesignSystemTest {
         Db.get(ctx).apply {
             upsertConversation("DA7A00000001","Design direct contact","A real local fixture",System.currentTimeMillis(),false)
             upsertConversation("design-system-group","Design circle","Group conversation",System.currentTimeMillis(),false,true)
+            clearUnread("DA7A00000001");clearUnread("design-system-group")
+            upsertConversation("design-unread-contact","Unread fixture contact","Unread local fixture",System.currentTimeMillis(),true)
         }
+    }
+    @Test fun homeFiltersShowOnlyMatchingLocalConversations() {
+        prepare()
+        val a=inst.startActivitySync(Intent(ctx,ConversationListActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        try {
+            fun filter(label:String)=all(a.window.decorView).first { it.contentDescription=="$label filter" }
+            fun visible(name:String)=all(a.window.decorView).filterIsInstance<TextView>().any { it.isShown&&it.text==name }
+            waitUntil { visible("Design direct contact")&&visible("Design circle")&&visible("Unread fixture contact") }
+            ui { filter("Unread").performClick() }
+            waitUntil { visible("Unread fixture contact")&&!visible("Design direct contact")&&!visible("Design circle") }
+            ui { filter("Groups").performClick() }
+            waitUntil { visible("Design circle")&&!visible("Design direct contact")&&!visible("Unread fixture contact") }
+            ui { filter("All").performClick() }
+            waitUntil { visible("Design direct contact")&&visible("Design circle")&&visible("Unread fixture contact") }
+        } finally { ui { a.finish() };MessageService.stop(ctx) }
     }
     @Test fun navigationUsesRealGroupsAndKeepsStatusReachable() {
         prepare()
