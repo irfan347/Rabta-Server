@@ -20,7 +20,7 @@ class SettingsActivity : ThemedActivity() {
 
         section("ACCOUNT") {
             row("Profile", "${Session.name} · @${Session.username}", "profile") {
-                startActivity(Intent(this, ProfileActivity::class.java))
+                startActivity(Intent(this@SettingsActivity, ProfileActivity::class.java))
             }
             row("Encrypted backup", "Save a password protected copy of local chats", "backup") {
                 startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/octet-stream")
@@ -34,25 +34,25 @@ class SettingsActivity : ThemedActivity() {
         }
 
         section("PRIVACY & SECURITY") {
-            toggle("Hide notification previews", "App lock also hides previews", Privacy.prefs(this).getBoolean("hide_previews", false)) { enabled ->
-                Privacy.prefs(this).edit().putBoolean("hide_previews", enabled).apply()
+            toggle("Hide notification previews", "App lock also hides previews", Privacy.prefs(this@SettingsActivity).getBoolean("hide_previews", false)) { enabled ->
+                Privacy.prefs(this@SettingsActivity).edit().putBoolean("hide_previews", enabled).apply()
             }
-            row("App lock", if (Privacy.prefs(this).getBoolean("lock", false)) "Enabled · device screen lock" else "Use your device unlock") {
+            row("App lock", if (Privacy.prefs(this@SettingsActivity).getBoolean("lock", false)) "Enabled · device screen lock" else "Use your device unlock") {
                 toggleAppLock()
             }
             row("Blocked contacts", "${blockedContacts().size} blocked", "privacy") { showBlockedContacts() }
         }
 
         section("APPEARANCE") {
-            row("Theme", AppTheme.mode(this), "appearance") { AppTheme.choose(this) }
-            row("Language", if (L.prefs(this).getString("language", "en") == "ur") "اردو" else "English", "language") {
-                RabtaUi.sheet(this, "Language", listOf("English", "اردو").mapIndexed { i, label ->
-                    RabtaUi.SheetAction(label, if ((i == 1) == (L.prefs(this).getString("language", "en") == "ur")) "Selected" else null) {
-                        L.prefs(this).edit().putString("language", if (i == 0) "en" else "ur").apply(); recreate()
+            row("Theme", AppTheme.mode(this@SettingsActivity), "appearance") { AppTheme.choose(this@SettingsActivity) }
+            row("Language", if (L.prefs(this@SettingsActivity).getString("language", "en") == "ur") "اردو" else "English", "language") {
+                RabtaUi.sheet(this@SettingsActivity, "Language", listOf("English", "اردو").mapIndexed { i, label ->
+                    RabtaUi.SheetAction(label, if ((i == 1) == (L.prefs(this@SettingsActivity).getString("language", "en") == "ur")) "Selected" else null) {
+                        L.prefs(this@SettingsActivity).edit().putString("language", if (i == 0) "en" else "ur").apply(); recreate()
                     }
                 })
             }
-            row("Text size", "${(L.prefs(this).getFloat("scale", 1f) * 100).toInt()}%", "text") { chooseTextSize() }
+            row("Text size", "${(L.prefs(this@SettingsActivity).getFloat("scale", 1f) * 100).toInt()}%", "text") { chooseTextSize() }
         }
 
         section("NOTIFICATIONS") {
@@ -74,11 +74,11 @@ class SettingsActivity : ThemedActivity() {
 
         section("CONNECTIONS") {
             row("Nearby mesh", "${MeshBridge.peersConnected} connected · ${MeshBridge.status}", "nearby") {
-                startActivity(Intent(this, NearbyActivity::class.java))
+                startActivity(Intent(this@SettingsActivity, NearbyActivity::class.java))
             }
-            row("Connection details", "Internet and Nearby diagnostics", "connection") { ConnectionHelp.show(this) }
+            row("Connection details", "Internet and Nearby diagnostics", "connection") { ConnectionHelp.show(this@SettingsActivity) }
             row("Video relay", "Check whether this server offers relay support", "video") {
-                FeatureApi.run(this, { FeatureApi.request("/api/ice").optBoolean("relayConfigured") }) { configured ->
+                FeatureApi.run(this@SettingsActivity, { FeatureApi.request("/api/ice").optBoolean("relayConfigured") }) { configured ->
                     themedInfo("Video relay", if (configured) "Relay is configured. Calls may use it when direct connections fail." else "No relay is configured. Some networks may prevent video calls.")
                 }
             }

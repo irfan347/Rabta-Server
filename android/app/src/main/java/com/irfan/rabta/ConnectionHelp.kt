@@ -32,7 +32,7 @@ object ConnectionHelp {
             },
             RabtaUi.SheetAction("Nearby permissions", "Review Bluetooth, Wi-Fi and location access") { NearbySetup.request(activity) },
             RabtaUi.SheetAction("Android app permissions", "Open Rabta's system permission controls") {
-                activity.startActivity(Intent(Intent.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${activity.packageName}")))
+                activity.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${activity.packageName}")))
             },
             RabtaUi.SheetAction("Bluetooth settings", "Bluetooth pairing alone does not connect Rabta chats") {
                 activity.startActivity(Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS))
