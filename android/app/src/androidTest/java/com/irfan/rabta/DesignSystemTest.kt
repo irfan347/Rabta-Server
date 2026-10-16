@@ -78,6 +78,8 @@ class DesignSystemTest {
             try {
                 fun nav(label:String)=all(a.window.decorView).first { it.contentDescription==label && it is ViewGroup }
                 waitUntil { all(a.window.decorView).filterIsInstance<TextView>().any { it.text=="Design direct contact" } }
+                // Local rows can load before the first traversal; wait for real navigation bounds.
+                waitUntil { listOf("Chats","Nearby","Spaces","Calls").all { nav(it).isLaidOut&&nav(it).height>0&&nav(it).width>0 } }
                 ui {
                     assertFalse(a.currentFocus is EditText)
                     for(label in listOf("Chats","Nearby","Spaces","Calls")) {
