@@ -119,6 +119,35 @@ class DesignSystemTest {
             assertEquals(1.61f,L.context(context).resources.configuration.fontScale,0.01f)
         } finally { prefs.edit().putString("mode",previousMode).putFloat("scale",previousScale).commit() }
     }
+    @Test fun largeTextNavigationSurvivesRecreation() {
+        prepare()
+        val prefs=ctx.getSharedPreferences("appearance",0)
+        prefs.edit().putFloat("scale",1.3f).putString("mode","Dark").commit()
+        var a=inst.startActivitySync(Intent(ctx,ConversationListActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        try {
+            waitUntil { all(a.window.decorView).any { it.isShown && it.contentDescription=="Main navigation" } }
+            ui {
+                val nav=all(a.window.decorView).first { it.contentDescription=="Main navigation" } as ViewGroup
+                for(i in 0 until nav.childCount) {
+                    val item=nav.getChildAt(i) as ViewGroup
+                    val label=item.getChildAt(1) as TextView
+                    assertTrue("Scaled navigation fits horizontally",item.right<=nav.width)
+                    assertTrue("Scaled labels have room for their text",label.layout.getEllipsisCount(0)==0)
+                }
+                all(a.window.decorView).first { it.contentDescription=="Spaces" && it is ViewGroup }.performClick()
+            }
+            waitUntil { all(a.window.decorView).filterIsInstance<TextView>().any { it.isShown && it.text=="Design circle" } }
+            capture("26-spaces-large-text")
+            ui { a.recreate() }
+            waitUntil {
+                val next=androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()
+                    .getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED).firstOrNull { it is ConversationListActivity && it!==a }
+                if(next!=null) { a=next;true } else false
+            }
+            waitUntil { all(a.window.decorView).filterIsInstance<TextView>().any { it.isShown && it.text=="Design circle" } }
+            ui { assertTrue(all(a.window.decorView).first { it.contentDescription=="Spaces" && it is ViewGroup }.isSelected) }
+        } finally { ui { a.finish() };prefs.edit().putFloat("scale",1f).commit();MessageService.stop(ctx) }
+    }
     @Test fun chatComposerStaysAboveKeyboard() {
         prepare()
         android.os.ParcelFileDescriptor.AutoCloseInputStream(inst.uiAutomation.executeShellCommand("settings put secure show_ime_with_hard_keyboard 1")).use { it.readBytes() }

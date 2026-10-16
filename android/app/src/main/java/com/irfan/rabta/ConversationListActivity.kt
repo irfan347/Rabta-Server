@@ -423,7 +423,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
                     try { dlg.dismiss() } catch (_: Exception) {}
                     val pid = data.optString("id"); val pn = data.optString("name").ifEmpty { data.optString("username") }
                     if (pid.isNotEmpty()) open(pid, pn)
-                } else { status.text = msg; status.setTextColor(0xFFD32F2F.toInt()) }
+                } else { status.text = msg; status.setTextColor(AppTheme.error(this)) }
             }
         })
         dl.addView(btns); dlg.show(); dlg.window?.setBackgroundDrawable(RabtaUi.shape(this,WHITE,24))

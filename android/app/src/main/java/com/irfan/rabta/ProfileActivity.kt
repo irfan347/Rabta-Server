@@ -93,8 +93,8 @@ class ProfileActivity : ThemedActivity() {
         col.addView(TextView(this).apply { text="Offline security code"; setTextColor(GREEN); setPadding(0,0,0,dp(20)); setOnClickListener { MeshSecurity.showIdentity(this@ProfileActivity) } })
         // Logout
         col.addView(TextView(this).apply {
-            text = "Logout"; textSize = 16f; typeface = Typeface.DEFAULT_BOLD; setTextColor(0xFFD32F2F.toInt()); gravity = Gravity.CENTER
-            background = GradientDrawable().apply { setColor(WHITE); cornerRadius = dp(28).toFloat(); setStroke(dp(2), 0xFFD32F2F.toInt()) }
+            text = "Logout"; textSize = 16f; typeface = Typeface.DEFAULT_BOLD; setTextColor(AppTheme.error(this@ProfileActivity)); gravity = Gravity.CENTER
+            background = GradientDrawable().apply { setColor(WHITE); cornerRadius = dp(28).toFloat(); setStroke(dp(1), AppTheme.error(this@ProfileActivity)) }
             setPadding(0, dp(14), 0, dp(14)); isClickable = true
             setOnClickListener {
                 MessageService.stop(this@ProfileActivity); Session.logout(); WsClient.disconnect()

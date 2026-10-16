@@ -547,7 +547,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         val am=getSystemService(AUDIO_SERVICE) as AudioManager
         previousAudioMode=am.mode; previousSpeaker=am.isSpeakerphoneOn
         am.mode=AudioManager.MODE_IN_COMMUNICATION; am.isSpeakerphoneOn=false
-        headerBar.visibility=View.GONE; RabtaUi.systemBars(this,true)
+        headerBar.visibility=View.GONE; (headerBar.parent as View).setBackgroundColor(DARK); RabtaUi.systemBars(this,true)
         callOverlay.visibility=View.VISIBLE; chatScroll.visibility=View.GONE; composerBar.visibility=View.GONE; searchField.visibility=View.GONE
         callStatusTv.text=if(initiate) "Calling…" else "Connecting…"
         callId=db.logCallStart(peerId,peerName,if(initiate)"outgoing" else "incoming")
@@ -594,7 +594,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         if(callId>0) db.logCallEnd(callId,seconds); if(callId>0&&connectedAt==0L)db.callOutcome(callId,outcome)
         callId=-1L; connectedAt=0L
         try { (getSystemService(AUDIO_SERVICE) as AudioManager).apply { isSpeakerphoneOn=previousSpeaker; mode=previousAudioMode } } catch (_:Exception) {}
-        headerBar.visibility=View.VISIBLE; RabtaUi.systemBars(this,AppTheme.dark(this))
+        headerBar.visibility=View.VISIBLE; (headerBar.parent as View).setBackgroundColor(BEIGE); RabtaUi.systemBars(this,AppTheme.dark(this))
         callOverlay.visibility=View.GONE; chatScroll.visibility=View.VISIBLE; composerBar.visibility=View.VISIBLE; searchField.visibility=if(searchQuery.isBlank()) View.GONE else View.VISIBLE
     }
 
