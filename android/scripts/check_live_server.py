@@ -6,7 +6,7 @@ print('Checking configured server:', url)
 try:
     with urllib.request.urlopen(url+'/health', timeout=90) as r:
         health=json.load(r)
-        print('Health:', r.status, 'ok=',health.get('ok'), 'persistent_database=',health.get('db'))
+        print('Health:', r.status, 'ok=',health.get('ok'), 'persistent_database=',health.get('db'), 'keys=',sorted(health))
 except Exception as e:
     print('Health check failed:', type(e).__name__, str(e)[:180])
 try:
@@ -29,6 +29,14 @@ try:
                 if len(frame)==2 and frame[0]&15==8:
                     payload=stream.read(frame[1]&127)
                     print('Unauthenticated socket rejected with close code:',struct.unpack('!H',payload[:2])[0])
-                else:print('No immediate authentication rejection; inspect server protocol')
+                elif len(frame)==2:
+                    opcode=frame[0]&15;size=frame[1]&127
+                    if size==126:size=struct.unpack('!H',stream.read(2))[0]
+                    if size==127:size=struct.unpack('!Q',stream.read(8))[0]
+                    print('First unauthenticated frame opcode:',opcode,'bytes:',size)
+                    if opcode==1 and size<=4096:
+                        message=json.loads(stream.read(size))
+                        print('First message type:',message.get('type'),'keys:',sorted(message))
+                else:print('Socket ended before an authentication frame')
 except Exception as e:
     print('WebSocket check failed:',type(e).__name__,str(e)[:180])
