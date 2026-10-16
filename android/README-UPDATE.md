@@ -86,7 +86,8 @@ This PR also changes root `index.js`:
 
 The backend must be deployed to the existing service for offline online-storage
 fixes and video signaling to take effect. This branch does not deploy the server.
-Existing `package (1).json` / hosting start configuration is unchanged. Video calls
+A canonical root `package.json` is supplied for `npm install` / `npm start`; the
+old `package (1).json` is retained. Video calls
 still need a working network path; the existing WebRTC client has no configured
 TURN relay, so some NAT/carrier combinations will not connect.
 
