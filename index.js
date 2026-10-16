@@ -200,7 +200,7 @@ wss.on('connection', (ws, req) => {
   online.set(userId, ws);
   updateLastSeen(userId);
 
-  ws.send(JSON.stringify({ type: 'ready', id: userId, name: user.name }));
+  ws.send(JSON.stringify({ type: 'ready', id: userId, name: user.name, protocol: 2 }));
   deliverPending(userId, ws).catch(() => {});
   for(const call of [...voiceCalls.values(),...videoCalls.values()]) if(call.to===userId) deliverCall(call);
 

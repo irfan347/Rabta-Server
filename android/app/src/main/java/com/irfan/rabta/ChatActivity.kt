@@ -535,6 +535,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     // ── Voice Call ──
     private fun startCall(initiate: Boolean) {
         if(inCall || isGroup) return
+        if(WsClient.connected&&WsClient.protocol<2){toast("Server update required for calls. Open Connection details.");return}
         if(!hasMic()) { pendingInitiate=initiate; ActivityCompat.requestPermissions(this,arrayOf(Manifest.permission.RECORD_AUDIO),99); return }
         if(!WsClient.connected) { toast("Call ke liye internet chahiye"); return }
         if(recording) stopVoiceRecord(false)
@@ -562,6 +563,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     }
     private fun startVideoCall() {
         if(isGroup) return
+        if(WsClient.connected&&WsClient.protocol<2){toast("Server update required for video calls");return}
         if(inCall) endCall()
         if (!WsClient.connected) { toast("Video call ke liye internet chahiye"); return }
         val cId = ByteArray(6).also{SecureRandom().nextBytes(it)}.joinToString(""){"%02X".format(it)}

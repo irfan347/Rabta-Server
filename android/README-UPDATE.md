@@ -1,4 +1,4 @@
-# Rabta 1.9
+# Rabta 1.9.1
 
 Android source is in `android/`; the root `.github/workflows/main.yml` builds it with
 Java 17, Gradle 8.7, SDK 34 and build-tools 34.0.0. APK artifacts come from Actions.
@@ -155,3 +155,24 @@ storage rather than an object storage service.
 CI status: https://github.com/irfan347/Rabta-Server/pull/1
 Real Bluetooth/Wi-Fi relay delivery, process death, expiry over time, large-file
 sending and calls must also be tested on physical phones before release.
+
+## Connection recovery (1.9.1)
+
+Online is shown only after an authenticated `ready` response. The client handles
+server-initiated closing, rejects stale callbacks from earlier sockets, retries
+ordinary disconnections and stops retrying rejected/expired credentials. Tap the
+connection line → Sign in again to renew the same account without deleting local
+history. The server must retain its `TOKEN_SECRET` and PostgreSQL data across
+restarts; a successful build cannot establish the live host's configuration.
+
+The updated backend advertises call protocol 2. An older server can still support
+basic online text, but the app explicitly reports that calls require a backend
+update instead of starting calls that cannot negotiate successfully.
+
+Nearby displays permission, radio, Location and Play-services problems instead of
+claiming discovery is running. It retries failed startup/peer requests, rechecks
+radio readiness every 15 seconds, and provides manual Retry and settings controls.
+Both phones need compatible Rabta versions and distinct accounts. Enable Bluetooth,
+Wi-Fi, Location and Nearby permissions and keep Rabta open for the first test.
+Bluetooth system pairing alone does not establish a Rabta Nearby connection.
+Physical two-phone discovery and delivery still need device testing.

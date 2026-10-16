@@ -18,6 +18,7 @@ object WsClient {
     private val handler = Handler(Looper.getMainLooper())
     private var ws: WebSocket? = null
     @Volatile var connected = false; private set
+    @Volatile var protocol=0; private set
     @Volatile var authRequired = false; private set
     @Volatile var status = "Offline"; private set
     private var reconnectDelay = 2000L
@@ -71,7 +72,7 @@ object WsClient {
                     if(o.optString("type")=="ready") {
                         if(o.optString("id")!=expectedId){lost(attempt,"Server rejected account identity",true);return@main}
                         readyTimeout?.let {handler.removeCallbacks(it)};readyTimeout=null
-                        connected=true;status="Online";reconnectDelay=2000L;RabtaEvents.postConnected()
+                        protocol=o.optInt("protocol",1);connected=true;status=if(protocol>=2)"Online" else "Online — backend update needed for calls";reconnectDelay=2000L;RabtaEvents.postConnected()
                     } else if(connected)handle(o)
                 }
                 override fun onClosing(socket:WebSocket,code:Int,reason:String)=main {
