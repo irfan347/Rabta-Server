@@ -29,7 +29,8 @@ class InstantNfcTest {
         try {
             val offer=store.create("NFC fixture")
             inst.runOnMainSync { MessageService.stop(ctx);Session.id=account;Session.name="NFC fixture";Session.username="nfc_fixture";Session.token="never-transferred-fixture";Session.serverUrl="https://127.0.0.1:8443" }
-            val host=InstantNfcHostService()
+            lateinit var host:InstantNfcHostService
+            inst.runOnMainSync { host=InstantNfcHostService() }
             assertTrue(runCatching { InstantNfcProtocol.payload(host.processCommandApdu(InstantNfcProtocol.select,null)) }.isFailure)
             InstantNfcSession.arm(owner,account,offer.raw)
             InstantNfcProtocol.payload(host.processCommandApdu(InstantNfcProtocol.select,null))
