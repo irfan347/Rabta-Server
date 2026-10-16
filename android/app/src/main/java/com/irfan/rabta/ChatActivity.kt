@@ -138,6 +138,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         RabtaEvents.add(this)
         loadHistory()
         if (intent.getBooleanExtra("autoAnswer", false)) uiHandler.post { startCall(false) }
+        consumeCallRequest()
     }
 
     override fun onNewIntent(newIntent: Intent) {
@@ -145,6 +146,17 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         if(newIntent.getStringExtra("peerId")!=peerId) { setIntent(newIntent); recreate(); return }
         setIntent(newIntent)
         if(newIntent.getBooleanExtra("autoAnswer",false)) startCall(false)
+        consumeCallRequest()
+    }
+
+    private fun consumeCallRequest() {
+        val kind=intent.getStringExtra("requestedCallKind") ?: return
+        intent.removeExtra("requestedCallKind")
+        uiHandler.post {
+            if(!isFinishing && !isDestroyed && !Privacy.blocked(this,peerId)) {
+                when(kind) { "voice" -> startCall(true);"video" -> startVideoCall() }
+            }
+        }
     }
 
     override fun onResume() {

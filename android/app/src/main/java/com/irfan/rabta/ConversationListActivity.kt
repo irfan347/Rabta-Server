@@ -45,8 +45,20 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
     private val queries=mutableMapOf<Int,String>()
     private var resumed=false
     private var callVersion=0
+    private lateinit var conversationSearchRow: LinearLayout
+    private lateinit var callSearchRow: LinearLayout
+    private lateinit var callSearch: EditText
+    private lateinit var clearCallSearch: TextView
+    private var callQuery=""
+    private var callRecords: List<Db.CallRecord> = emptyList()
+    private var visibleCalls=100
+    private val callSearchTask=Runnable { renderCalls() }
     private val homeBack=object:androidx.activity.OnBackPressedCallback(false) {
-        override fun handleOnBackPressed() { switchTab(0) }
+        override fun handleOnBackPressed() {
+            if(activeTab==3 && callSearch.hasFocus()) { hideKeyboard();return }
+            if(activeTab==3 && callQuery.isNotEmpty()) { callSearch.setText("");return }
+            switchTab(0)
+        }
     }
     private lateinit var myAvatarView: FrameLayout
     private val uiHandler = Handler(Looper.getMainLooper())
@@ -84,6 +96,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         activeFilter=savedInstanceState?.getInt("chatFilter",0)?.coerceIn(0,2)?:0
         queries[0]=savedInstanceState?.getString("chatQuery").orEmpty()
         queries[2]=savedInstanceState?.getString("spaceQuery").orEmpty()
+        callQuery=savedInstanceState?.getString("callQuery").orEmpty()
         buildUi()
         onBackPressedDispatcher.addCallback(this,homeBack)
         askPermissions()
@@ -99,13 +112,14 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
     }
     override fun onPause() {
         resumed=false;if(::nearbyPanel.isInitialized)nearbyPanel.pause()
-        RabtaEvents.remove(this);uiHandler.removeCallbacks(connectionTick);uiHandler.removeCallbacks(searchTask)
+        RabtaEvents.remove(this);uiHandler.removeCallbacks(connectionTick);uiHandler.removeCallbacks(searchTask);uiHandler.removeCallbacks(callSearchTask)
         super.onPause()
     }
     override fun onDestroy() { RabtaEvents.remove(this);uiHandler.removeCallbacksAndMessages(null);super.onDestroy() }
     override fun onSaveInstanceState(state:Bundle) {
         queries[activeTab]=searchQuery
         state.putInt("destination",activeTab);state.putString("chatQuery",queries[0]);state.putString("spaceQuery",queries[2])
+        state.putString("callQuery",callQuery)
         state.putInt("chatFilter",activeFilter)
         super.onSaveInstanceState(state)
     }
@@ -199,7 +213,9 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
             importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
         },LinearLayout.LayoutParams(dp(24),dp(24)).apply { marginEnd=dp(10) })
         searchRow.addView(searchField,LinearLayout.LayoutParams(0,-2,1f))
+        conversationSearchRow=searchRow
         root.addView(searchRow,LinearLayout.LayoutParams(-1,-2).apply { setMargins(dp(20),0,dp(20),dp(8)) })
+        buildCallSearch(root)
         chatFilters=LinearLayout(this).apply {
             orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL
             setPadding(dp(16),dp(2),dp(16),dp(8));contentDescription="Chat filters"
@@ -275,7 +291,10 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         if(!::bottomNav.isInitialized)return
         hideKeyboard()
         val searchable=destination==0||destination==2
+        pageTitle.textSize=if(destination==3) 24f else 28f
         pageTitle.text=L.t(this,listOf("Chats","Nearby","Spaces","Calls")[destination])
+        conversationSearchRow.visibility=if(searchable) View.VISIBLE else View.GONE
+        callSearchRow.visibility=if(destination==3 && callRecords.isNotEmpty()) View.VISIBLE else View.GONE
         searchField.visibility=if(searchable) View.VISIBLE else View.GONE
         chatFilters.visibility=if(destination==0) View.VISIBLE else View.GONE
         searchField.hint=L.t(this,if(destination==2) "Search your groups" else "Search names or messages")
@@ -388,61 +407,163 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         it.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)).apply { marginStart = dp(78) }
     }
 
-    // ── Calls ──
+    // Calls use their own query and the existing, unmodified local call records.
+    private fun buildCallSearch(root:LinearLayout) {
+        callSearchRow=LinearLayout(this).apply {
+            gravity=Gravity.CENTER_VERTICAL;setPadding(dp(12),0,dp(4),0)
+            background=RabtaUi.shape(this@ConversationListActivity,
+                if(AppTheme.dark(this@ConversationListActivity)) 0xFF171D2C.toInt() else WHITE,12,
+                if(AppTheme.dark(this@ConversationListActivity)) 0xFF2A3142.toInt() else DIV)
+            visibility=View.GONE
+        }
+        callSearchRow.addView(TextView(this).apply {
+            gravity=Gravity.CENTER;UiIcons.set(this,"search",SUB,20,"Search calls")
+            importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        },LinearLayout.LayoutParams(dp(20),dp(24)))
+        callSearch=EditText(this).apply {
+            hint="Search calls";contentDescription="Search calls";textSize=14f
+            setTextColor(TXT);setHintTextColor(SUB);setSingleLine(true);background=null
+            setPadding(dp(10),0,dp(4),0);minimumHeight=0;minimumWidth=0
+            imeOptions=android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+            inputType=InputType.TYPE_CLASS_TEXT
+            setText(callQuery)
+            setOnEditorActionListener { _,action,_ ->
+                if(action==android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH) { hideKeyboard();true } else false
+            }
+        }
+        callSearchRow.addView(callSearch,LinearLayout.LayoutParams(0,-1,1f))
+        clearCallSearch=RabtaUi.iconButton(this,"close","Clear call search") { callSearch.setText("") }.apply {
+            UiIcons.set(this,"close",SUB,18,"Clear call search")
+            visibility=if(callQuery.isEmpty()) View.GONE else View.VISIBLE
+        }
+        callSearchRow.addView(clearCallSearch,LinearLayout.LayoutParams(dp(40),dp(44)))
+        callSearch.addTextChangedListener(object:android.text.TextWatcher {
+            override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int) {}
+            override fun afterTextChanged(s:android.text.Editable?) {}
+            override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int) {
+                callQuery=s?.toString().orEmpty();visibleCalls=100
+                clearCallSearch.visibility=if(callQuery.isEmpty()) View.GONE else View.VISIBLE
+                callsScroll.scrollTo(0,0)
+                uiHandler.removeCallbacks(callSearchTask)
+                if(activeTab==3)uiHandler.postDelayed(callSearchTask,150)
+            }
+        })
+        root.addView(callSearchRow,LinearLayout.LayoutParams(-1,dp(44)).apply { setMargins(dp(20),0,dp(20),dp(8)) })
+    }
+
     private fun loadCalls() {
         val version=++callVersion
         if(callsList.childCount==0)callsList.addView(RabtaUi.loading(this,"Loading calls…"))
         Thread {
-            val result=runCatching { db.calls() }
+            val result=runCatching { db.calls(Int.MAX_VALUE) }
             uiHandler.post {
-                if(isDestroyed||isFinishing||version!=callVersion)return@post
-                callsList.removeAllViews()
+                if(isDestroyed||isFinishing||version!=callVersion||activeTab!=3)return@post
                 result.onFailure {
-                    callsList.addView(RabtaUi.empty(this,"phone","Could not load calls","Try loading your call history again.","Retry") { loadCalls() })
-                }.onSuccess { calls ->
-                    if(calls.isEmpty()) callsList.addView(RabtaUi.empty(this,"phone","Keep the conversation going","Your voice and video call history appears here.","New chat") { showNewChat() })
-                    else calls.forEach { callsList.addView(callRow(it)) }
-                }
+                    callsList.removeAllViews();callSearchRow.visibility=View.GONE
+                    callsList.addView(callState("phone","Could not load calls","Your saved call history is unchanged.","Retry") { loadCalls() })
+                }.onSuccess { calls -> callRecords=calls;renderCalls() }
             }
         }.start()
     }
 
-    private fun callRow(c: Db.CallRecord): View {
-        val missed = c.type == "missed"
-        val nameColor = if (missed) AppTheme.error(this) else TXT
-        val arrowColor = if (missed) AppTheme.error(this) else AppTheme.accent(this)
-        val arrowIcon = if (c.type == "outgoing") "↗" else "↙"
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            background=RabtaUi.ripple(this@ConversationListActivity,WHITE,18);setPadding(dp(14),dp(16),dp(14),dp(16))
-            layoutParams=LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(8) }
-            isClickable = true; isFocusable = true
-            setOnClickListener { open(c.peerId, c.peerName) }
+    private fun callState(icon:String,title:String,detail:String,action:String?=null,run:()->Unit={}):View =
+        LinearLayout(this).apply {
+            orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER_HORIZONTAL
+            setPadding(0,dp(32),0,dp(24))
+            addView(TextView(this@ConversationListActivity).apply {
+                gravity=Gravity.CENTER;UiIcons.set(this,icon,SUB,24,title)
+                importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            },LinearLayout.LayoutParams(dp(36),dp(36)))
+            addView(RabtaUi.text(this@ConversationListActivity,title,17f,true).apply {
+                gravity=Gravity.CENTER;setPadding(0,dp(12),0,dp(6))
+                accessibilityLiveRegion=View.ACCESSIBILITY_LIVE_REGION_POLITE
+            })
+            addView(RabtaUi.text(this@ConversationListActivity,detail,13f,color=SUB).apply { gravity=Gravity.CENTER })
+            if(action!=null)addView(textBtn(action,AppTheme.accent(this@ConversationListActivity),run),LinearLayout.LayoutParams(-2,dp(48)).apply { topMargin=dp(16) })
         }
-        // Avatar
-        val av = FrameLayout(this)
-        av.addView(initials(c.peerName, dp(52)), FrameLayout.LayoutParams(dp(52),dp(52)))
-        row.addView(av)
-        // Name + call info
-        val mid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14),0,0,0) }
-        mid.addView(TextView(this).apply { text = c.peerName; textSize = 16f; typeface = Typeface.DEFAULT_BOLD; setTextColor(nameColor); maxLines = 1 })
-        val durStr = if (c.duration > 0) " · ${c.duration/60}:${(c.duration%60).toString().padStart(2,'0')}" else ""
-        mid.addView(LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            addView(TextView(this@ConversationListActivity).apply { text = arrowIcon; textSize = 14f; setTextColor(arrowColor); setPadding(0,0,dp(4),0) })
-            addView(TextView(this@ConversationListActivity).apply { text = c.type.replaceFirstChar { it.uppercase() }+" · "+fmtTime(c.startedAt)+durStr; textSize = 13f; setTextColor(SUB) })
+
+    private fun renderCalls() {
+        if(activeTab!=3)return
+        callSearchRow.visibility=if(callRecords.isEmpty()) View.GONE else View.VISIBLE
+        callsList.removeAllViews()
+        if(callRecords.isEmpty()) {
+            if(callSearch.hasFocus())hideKeyboard()
+            callsList.addView(callState("phone","No calls yet","Your call history will appear here.","Start a call") { showCallContacts() })
+            return
+        }
+        val query=callQuery.trim()
+        val matches=callRecords.filter { it.peerName.contains(query,true)||it.peerId.contains(query,true) }
+        if(matches.isEmpty()) {
+            callsList.addView(callState("search","No calls found","Try another name or Rabta ID.","Clear search") { callSearch.setText("") })
+            return
+        }
+        matches.take(visibleCalls).forEach { callsList.addView(callRow(it)) }
+        if(matches.size>visibleCalls)callsList.addView(textBtn("Show more calls",AppTheme.accent(this)) { visibleCalls+=100;renderCalls() })
+        callsList.addView(textBtn("Start a call",AppTheme.accent(this)) { showCallContacts() })
+    }
+
+    private fun callRow(c: Db.CallRecord): View {
+        val missed=c.type.contains("missed",true)
+        val video=c.type.contains("video",true)
+        val name=c.peerName.ifBlank { c.peerId }
+        val row=LinearLayout(this).apply {
+            gravity=Gravity.CENTER_VERTICAL;setPadding(0,dp(8),0,dp(8))
+            background=RabtaUi.ripple(this@ConversationListActivity,Color.TRANSPARENT,12)
+            isFocusable=true;setOnClickListener { open(c.peerId,name) }
+            contentDescription="$name, ${c.type}, ${callTime(c.startedAt)}"
+        }
+        row.addView(initials(name,dp(42)),LinearLayout.LayoutParams(dp(42),dp(42)))
+        val mid=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;setPadding(dp(12),0,dp(6),0) }
+        mid.addView(RabtaUi.text(this,name,15f,true,if(missed) AppTheme.error(this) else TXT).apply {
+            maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END
         })
-        row.addView(mid, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        // Right: time + call-back icon
-        val right = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.END or Gravity.CENTER_VERTICAL }
-        right.addView(TextView(this).apply {
-            UiIcons.set(this, if (c.type == "video") "video" else "phone", GREEN, label="Open call conversation")
-            textSize = 20f; setTextColor(GREEN); gravity = Gravity.CENTER
-            background = android.graphics.drawable.GradientDrawable().apply { setColor(AppTheme.sent(this@ConversationListActivity)); cornerRadius = dp(24).toFloat() }
-            setPadding(dp(12),dp(10),dp(12),dp(10))
+        val medium=if(video) "video" else "voice"
+        val direction=when {
+            missed -> "↙ Missed call"
+            c.type.startsWith("outgoing") -> "↗ Outgoing $medium"
+            c.type.startsWith("incoming") -> "↙ Incoming $medium"
+            else -> c.type.replaceFirstChar { it.uppercase() }
+        }
+        val duration=if(c.duration>0) " · ${c.duration/60}:${(c.duration%60).toString().padStart(2,'0')}" else ""
+        mid.addView(RabtaUi.text(this,"$direction · ${callTime(c.startedAt)}$duration",12f,color=if(missed) AppTheme.error(this) else SUB).apply {
+            maxLines=2;setPadding(0,dp(4),0,0)
         })
-        row.addView(right)
+        row.addView(mid,LinearLayout.LayoutParams(0,-2,1f))
+        row.addView(RabtaUi.iconButton(this,if(video) "video" else "phone","Call back $name") {
+            callContact(c.peerId,name,video)
+        })
         return row
+    }
+
+    private fun callTime(time:Long):String =
+        android.text.format.DateUtils.formatDateTime(this,time,android.text.format.DateUtils.FORMAT_SHOW_DATE or android.text.format.DateUtils.FORMAT_SHOW_TIME or android.text.format.DateUtils.FORMAT_ABBREV_MONTH)
+
+    private fun callContact(id:String,name:String,video:Boolean=false) {
+        hideKeyboard()
+        if(Privacy.blocked(this,id)) { android.widget.Toast.makeText(this,"Unblock this contact before calling",android.widget.Toast.LENGTH_SHORT).show();return }
+        if(!WsClient.connected || WsClient.protocol<2) { ConnectionHelp.show(this);return }
+        startActivity(Intent(this,ChatActivity::class.java).putExtra("peerId",id).putExtra("peerName",name)
+            .putExtra("requestedCallKind",if(video) "video" else "voice"))
+    }
+
+    private fun showCallContacts() {
+        hideKeyboard()
+        Thread {
+            val result=runCatching {
+                (db.searchConversations("").filter { !it.isGroup }.map { it.peerId to it.peerName }+
+                    db.calls(Int.MAX_VALUE).map { it.peerId to it.peerName }).distinctBy { it.first }
+                    .filter { it.first!=Session.id && !Privacy.blocked(this,it.first) }
+                    .sortedBy { it.second.lowercase(java.util.Locale.ROOT) }
+            }
+            uiHandler.post {
+                if(isDestroyed||isFinishing)return@post
+                result.onSuccess { contacts ->
+                    RabtaUi.sheet(this,"Start a call",contacts.map { (id,name) ->
+                        RabtaUi.SheetAction(name.ifBlank { id },"Voice call · $id") { callContact(id,name) }
+                    }+RabtaUi.SheetAction("Find by username or Rabta ID") { showNewChat(forCall=true) })
+                }.onFailure { android.widget.Toast.makeText(this,"Could not load contacts. Try again.",android.widget.Toast.LENGTH_SHORT).show() }
+            }
+        }.start()
     }
 
     // ── Helpers ──
@@ -477,16 +598,17 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         ))
     }
 
-    private fun showNewChat() {
-        RabtaUi.inputSheet(this,"New chat","@username or Rabta ID","Find") { raw,status,dlg ->
+    private fun showNewChat(forCall:Boolean=false) {
+        fun selected(id:String,name:String) { if(forCall)callContact(id,name) else open(id,name) }
+        RabtaUi.inputSheet(this,if(forCall) "Start a call" else "New chat","@username or Rabta ID","Find") { raw,status,dlg ->
             val un=raw.lowercase()
             if(un.isEmpty()) { status.text="Enter a username or Rabta ID";status.setTextColor(AppTheme.error(this));return@inputSheet }
-            if(Regex("[0-9a-f]{12}").matches(un)) { dlg.dismiss();open(un.uppercase(),un.uppercase());return@inputSheet }
+            if(Regex("[0-9a-f]{12}").matches(un)) { dlg.dismiss();selected(un.uppercase(),un.uppercase());return@inputSheet }
             status.text="Searching for account…";status.setTextColor(SUB)
             WsClient.findUser(Session.serverUrl,un,Session.token) { ok,msg,data ->
                 if(ok&&data!=null) {
                     val pid=data.optString("id");val pn=data.optString("name").ifEmpty { data.optString("username") }
-                    if(pid.isNotEmpty()) { dlg.dismiss();open(pid,pn) }
+                    if(pid.isNotEmpty()) { dlg.dismiss();selected(pid,pn) }
                     else { status.text="No account was found";status.setTextColor(AppTheme.error(this)) }
                 } else { status.text=msg;status.setTextColor(AppTheme.error(this)) }
             }
