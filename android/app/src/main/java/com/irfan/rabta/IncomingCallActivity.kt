@@ -86,7 +86,7 @@ class IncomingCallActivity : ThemedActivity(), RabtaEvents.Listener {
         })
         root.addView(TextView(this).apply {
             text = if(isVideo) "Incoming video call…" else "Incoming voice call…"; textSize = 16f
-            setTextColor(0xFF8696A0.toInt()); gravity = Gravity.CENTER
+            setTextColor(AppTheme.sub(this@IncomingCallActivity)); gravity = Gravity.CENTER
             setPadding(0, 0, 0, dp(60))
         })
 
@@ -100,7 +100,7 @@ class IncomingCallActivity : ThemedActivity(), RabtaEvents.Listener {
                 background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(bg) }
                 setPadding(dp(22), dp(22), dp(22), dp(22)); isClickable = true; setOnClickListener { onClick() }
             }, LinearLayout.LayoutParams(dp(72), dp(72)))
-            col.addView(TextView(this).apply { text = label; textSize = 13f; setTextColor(0xFF8696A0.toInt()); gravity = Gravity.CENTER; setPadding(0, dp(8), 0, 0) })
+            col.addView(TextView(this).apply { text = label; textSize = 13f; setTextColor(AppTheme.sub(this@IncomingCallActivity)); gravity = Gravity.CENTER; setPadding(0, dp(8), 0, 0) })
             return col
         }
 

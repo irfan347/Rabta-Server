@@ -163,6 +163,10 @@ jobs:
   interface:
     if: github.event_name == 'pull_request'
     needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [29, 34]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -179,25 +183,24 @@ jobs:
       - name: Exercise interface and capture real Android screenshots
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 29
+          api-level: ${{ matrix.api }}
           target: google_apis
           arch: x86_64
           profile: pixel_2
           disable-animations: true
           script: |
-            gradle --project-dir android :app:connectedDebugAndroidTest --no-daemon
-            adb pull /sdcard/Download/rabta-interface interface-screenshots
+            bash -c 'result=0; gradle --project-dir android :app:connectedDebugAndroidTest --no-daemon || result=$?; adb pull /sdcard/Download/rabta-interface interface-screenshots || true; exit "$result"'
       - name: Upload interface screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Rabta-interface-screenshots
+          name: Rabta-interface-screenshots-api-${{ matrix.api }}
           path: interface-screenshots/
           if-no-files-found: ignore
       - name: Upload device test reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Rabta-device-tests
+          name: Rabta-device-tests-api-${{ matrix.api }}
           path: android/app/build/reports/androidTests/
           if-no-files-found: ignore

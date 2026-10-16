@@ -30,11 +30,11 @@ class StatusActivity:ThemedActivity() {
             }.show()
     }
     private fun refresh() {
-        feed.removeAllViews();feed.addView(FeatureUi.text(this,"Loading updates…"))
-        Thread { val result=runCatching { FeatureApi.request("/api/status").getJSONArray("statuses") };runOnUiThread {if(!isDestroyed&&!isFinishing)result.onSuccess {render(it)}.onFailure {feed.removeAllViews();feed.addView(FeatureUi.text(this,"Could not load updates. Check your connection and tap Refresh."))} } }.start()
+        feed.removeAllViews();feed.addView(RabtaUi.loading(this,"Loading updates…"))
+        Thread { val result=runCatching { FeatureApi.request("/api/status").getJSONArray("statuses") };runOnUiThread {if(!isDestroyed&&!isFinishing)result.onSuccess {render(it)}.onFailure {feed.removeAllViews();feed.addView(RabtaUi.empty(this,"status","Could not load updates","Check your internet connection and try again.","Retry") { refresh() })} } }.start()
     }
     private fun render(items:JSONArray) {
-        feed.removeAllViews();if(items.length()==0)feed.addView(FeatureUi.text(this,"No updates yet"))
+        feed.removeAllViews();if(items.length()==0)feed.addView(RabtaUi.empty(this,"status","No updates yet","Share an update, or check back for updates from your contacts."))
         for(i in 0 until items.length()) {val s=items.getJSONObject(i);val own=s.getString("owner")==Session.id;val minutes=((s.getLong("expires")-System.currentTimeMillis())/60000).coerceAtLeast(0)
             feed.addView(FeatureUi.button(this,s.optString("name")+" · "+s.getString("kind")+"\n"+(if(own)"My status · " else "")+"${minutes/60}h ${minutes%60}m left") { view(s) })
             if(own){val viewers=s.optJSONArray("viewers")?:JSONArray();feed.addView(FeatureUi.button(this,"${viewers.length()} views · Manage") { AlertDialog.Builder(this).setTitle("Status views").setMessage((0 until viewers.length()).map { id -> val v=viewers.getString(id);Db.get(this).conversations().find { it.peerId==v }?.peerName?:v }.joinToString("\n").ifEmpty { "No views yet" }).setNegativeButton("Close",null).setPositiveButton("Delete status") { _,_ -> FeatureApi.run(this,{FeatureApi.request("/api/status/${s.getString("id")}","DELETE")}){refresh()} }.show() })}

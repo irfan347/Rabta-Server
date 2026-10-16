@@ -106,6 +106,7 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
     private fun buildUi() {
         val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         setContentView(root)
+        RabtaUi.systemBars(this,true)
 
         remoteView = SurfaceViewRenderer(this)
         root.addView(remoteView, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))

@@ -40,17 +40,17 @@ class ProfileActivity : ThemedActivity() {
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
 
     private fun buildUi() {
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL;setBackgroundColor(AppTheme.bg(this@ProfileActivity)) }
         setContentView(root)
 
-        val hdr = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(GREEN); setPadding(dp(8),dp(10),dp(16),dp(10)) }
-        hdr.addView(TextView(this).apply { text = "←"; textSize = 22f; setTextColor(WHITE); setPadding(dp(4),dp(4),dp(16),dp(4)); isClickable=true; setOnClickListener { finish() } })
-        hdr.addView(TextView(this).apply { text = "Profile & settings"; textSize = 20f; typeface = Typeface.DEFAULT_BOLD; setTextColor(Color.WHITE) })
+        val hdr = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(AppTheme.bg(this@ProfileActivity)); setPadding(dp(8),dp(10),dp(16),dp(10)) }
+        hdr.addView(RabtaUi.iconButton(this,"back","Back") { finish() })
+        hdr.addView(TextView(this).apply { text = "Profile & settings"; textSize = 22f; typeface = Typeface.DEFAULT_BOLD; setTextColor(TXT) })
         root.addView(hdr)
 
         val body = ScrollView(this).apply { setBackgroundColor(AppTheme.bg(this@ProfileActivity)) }
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(24),dp(32),dp(24),dp(32)); gravity = Gravity.CENTER_HORIZONTAL }
-        body.addView(col); root.addView(body)
+        body.addView(col); root.addView(body,LinearLayout.LayoutParams(-1,0,1f))
 
         // Avatar / pic
         picView = ImageView(this).apply {
@@ -62,17 +62,17 @@ class ProfileActivity : ThemedActivity() {
             MediaHelper.base64ToBitmap(Session.profilePic)?.let { picView.setImageBitmap(it) }
         } else {
             // initials
-            picView.background = pill(0xFF128C7E.toInt())
+            picView.background = pill(AppTheme.ACCENT)
         }
         val picFrame = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
         picFrame.addView(picView, LinearLayout.LayoutParams(dp(120), dp(120)))
-        picFrame.addView(TextView(this).apply { text = "📷 Tap to change"; textSize = 13f; setTextColor(SUB); gravity = Gravity.CENTER; setPadding(0,dp(8),0,0) })
+        picFrame.addView(TextView(this).apply { text = "Tap to change photo"; textSize = 13f; setTextColor(SUB); gravity = Gravity.CENTER; setPadding(0,dp(8),0,0) })
         col.addView(picFrame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(28) })
 
         // Info
         val card = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = GradientDrawable().apply { setColor(WHITE); cornerRadius = dp(16).toFloat() }; setPadding(dp(20),dp(16),dp(20),dp(16)) }
         fun infoRow(label: String, value: String) {
-            card.addView(TextView(this).apply { text = label; textSize = 12f; setTextColor(GREEN); typeface = Typeface.DEFAULT_BOLD })
+            card.addView(TextView(this).apply { text = label; textSize = 12f; setTextColor(AppTheme.accent(this@ProfileActivity)); typeface = Typeface.DEFAULT_BOLD })
             card.addView(TextView(this).apply { text = value; textSize = 18f; setTextColor(TXT); setPadding(0,dp(4),0,dp(14)) })
         }
         infoRow("Name", Session.name)

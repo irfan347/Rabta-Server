@@ -23,6 +23,7 @@ class AuthActivity : ThemedActivity() {
     private lateinit var statusText: TextView
     private lateinit var loginBtn: TextView
     private lateinit var registerBtn: TextView
+    private lateinit var loading: View
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -40,7 +41,7 @@ class AuthActivity : ThemedActivity() {
 
     private fun buildUi() {
         // Graphite branded header, themed form below
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL;setBackgroundColor(AppTheme.bg(this@AuthActivity));isFocusableInTouchMode=true }
         window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         setContentView(ScrollView(this).apply { isFillViewport=true; addView(root) })
 
@@ -73,13 +74,13 @@ class AuthActivity : ThemedActivity() {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         fun label(t: String) = TextView(this).apply {
-            text = t; textSize = 13f; setTextColor(AppTheme.ACCENT)
+            text = t; textSize = 13f; setTextColor(AppTheme.accent(this@AuthActivity))
             typeface = Typeface.DEFAULT_BOLD; setPadding(dp(4), 0, 0, dp(4))
         }
         fun field(hint: String, pwd: Boolean = false) = EditText(this).apply {
             this.hint = hint; textSize = 16f
             setTextColor(AppTheme.text(this@AuthActivity)); setHintTextColor(AppTheme.sub(this@AuthActivity))
-            setSingleLine(true); background = null
+            setSingleLine(true); minHeight=dp(52);background=RabtaUi.shape(this@AuthActivity,AppTheme.surface(this@AuthActivity),14,AppTheme.line(this@AuthActivity))
             setPadding(dp(12), dp(14), dp(12), dp(14))
             inputType = if (pwd) InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
                         else InputType.TYPE_CLASS_TEXT
@@ -106,7 +107,7 @@ class AuthActivity : ThemedActivity() {
         val pinRow=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL }
         pinRow.addView(pinField,LinearLayout.LayoutParams(0,-2,1f))
         pinRow.addView(TextView(this).apply {
-            text="Show"; contentDescription="Show PIN"; setTextColor(AppTheme.ACCENT); gravity=Gravity.CENTER
+            text="Show"; contentDescription="Show PIN"; setTextColor(AppTheme.accent(this@AuthActivity)); gravity=Gravity.CENTER
             minWidth=dp(48); minHeight=dp(48); isClickable=true
             setOnClickListener {
                 val visible=pinField.transformationMethod is android.text.method.PasswordTransformationMethod
@@ -119,10 +120,12 @@ class AuthActivity : ThemedActivity() {
 
         // Status
         statusText = TextView(this).apply {
-            textSize = 13f; setTextColor(0xFFD32F2F.toInt()); gravity = Gravity.CENTER
+            textSize = 14f; setTextColor(AppTheme.error(this@AuthActivity)); gravity = Gravity.CENTER;accessibilityLiveRegion=View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
         col.addView(statusText, lp(t = 14, b = 4))
 
+        loading=RabtaUi.loading(this,"Connecting…").apply { visibility=View.GONE }
+        col.addView(loading)
         // Buttons
         loginBtn = bigBtn("LOGIN", AppTheme.ACCENT) { doLogin() }
         registerBtn = bigBtn("SIGN UP", Color.WHITE, outline = true) { doRegister() }
@@ -136,18 +139,8 @@ class AuthActivity : ThemedActivity() {
         })
     }
 
-    private fun bigBtn(text: String, bg: Int, outline: Boolean = false, onClick: () -> Unit) =
-        TextView(this).apply {
-            this.text = text; textSize = 15f; typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER; setPadding(0, dp(16), 0, dp(16))
-            setTextColor(if (outline) AppTheme.ACCENT else Color.WHITE)
-            background = if (outline) GradientDrawable().apply {
-                setColor(AppTheme.surface(this@AuthActivity)); cornerRadius = dp(28).toFloat()
-                setStroke(dp(2), AppTheme.ACCENT)
-            } else pill(bg, 28)
-            isClickable = true; isFocusable = true
-            setOnClickListener { onClick() }
-        }
+    private fun bigBtn(text:String,bg:Int,outline:Boolean=false,onClick:()->Unit) =
+        RabtaUi.button(this,if(text=="LOGIN") "Sign in" else "Create account",!outline,onClick).apply { gravity=Gravity.CENTER }
 
     private fun validate(): Boolean {
         val u = usernameField.text.toString().trim()
@@ -161,26 +154,28 @@ class AuthActivity : ThemedActivity() {
     }
 
     private fun setLoading(on: Boolean) {
+        loginBtn.isEnabled = !on; registerBtn.isEnabled = !on
         loginBtn.isClickable = !on; registerBtn.isClickable = !on
+        loading.visibility=if(on) View.VISIBLE else View.GONE
         loginBtn.alpha = if (on) 0.5f else 1f; registerBtn.alpha = if (on) 0.5f else 1f
     }
 
     private fun doLogin() {
         if (!validate()) return
-        statusText.text = "Login ho raha hai..."; statusText.setTextColor(AppTheme.ACCENT); setLoading(true)
+        statusText.text = "Login ho raha hai..."; statusText.setTextColor(AppTheme.accent(this@AuthActivity)); setLoading(true)
         WsClient.login(this, Config.SERVER, usernameField.text.toString().trim().lowercase(), pinField.text.toString().trim()) { ok, msg, data ->
             setLoading(false)
-            if (ok && data != null) saveAndGo(data) else { statusText.text = msg; statusText.setTextColor(0xFFD32F2F.toInt()) }
+            if (ok && data != null) saveAndGo(data) else { statusText.text = msg; statusText.setTextColor(AppTheme.error(this)) }
         }
     }
 
     private fun doRegister() {
         if (!validate()) return
         val un = usernameField.text.toString().trim().lowercase()
-        statusText.text = "Account ban raha hai..."; statusText.setTextColor(AppTheme.ACCENT); setLoading(true)
+        statusText.text = "Account ban raha hai..."; statusText.setTextColor(AppTheme.accent(this@AuthActivity)); setLoading(true)
         WsClient.register(this, Config.SERVER, un, pinField.text.toString().trim(), un) { ok, msg, data ->
             setLoading(false)
-            if (ok && data != null) saveAndGo(data) else { statusText.text = msg; statusText.setTextColor(0xFFD32F2F.toInt()) }
+            if (ok && data != null) saveAndGo(data) else { statusText.text = msg; statusText.setTextColor(AppTheme.error(this)) }
         }
     }
 

@@ -11,6 +11,11 @@ import androidx.core.graphics.PathParser
 /** Bundled vector paths: the same controls on every Android version. */
 object UiIcons {
     private val paths = mapOf(
+        "chats" to "M4,4h16v12H8l-4,4z M7,7v2h10V7z M7,11v2h7v-2z",
+        "nearby" to "M11,10h2v4h-2z M8,8l1.4,1.4a4,4 0,0 0,0,5.2L8,16a6,6 0,0 1,0,-8z M16,8a6,6 0,0 1,0,8l-1.4,-1.4a4,4 0,0 0,0,-5.2z M5,5l1.4,1.4a8,8 0,0 0,0,11.2L5,19a10,10 0,0 1,0,-14z M19,5a10,10 0,0 1,0,14l-1.4,-1.4a8,8 0,0 0,0,-11.2z",
+        "spaces" to "M3,3h8v8H3z M13,3h8v8h-8z M3,13h8v8H3z M13,13h8v8h-8z",
+        "status" to "M12,2a10,10 0,1 0,10,10h-2a8,8 0,1 1,-8,-8z M18,2h2v3h3v2h-3v3h-2V7h-3V5h3z",
+        "more" to "M12,3a2,2 0,1 1,0,4 2,2 0,1 1,0,-4z M12,10a2,2 0,1 1,0,4 2,2 0,1 1,0,-4z M12,17a2,2 0,1 1,0,4 2,2 0,1 1,0,-4z",
         "settings" to "M4,4h16v2H4z M4,11h16v2H4z M4,18h16v2H4z M8,2h2v6H8z M15,9h2v6h-2z M8,16h2v6H8z",
         "search" to "M10,2a8,8 0,1 0,5,14l6,6 1,-1 -6,-6A8,8 0,0 0,10,2z M10,4a6,6 0,1 1,0,12 6,6 0,0 1,0,-12z",
         "sticker" to "M4,3h16v12l-6,6H4z M14,14v5l5,-5z M7,7h2v2H7z M15,7h2v2h-2z M8,11h8v2H8z",

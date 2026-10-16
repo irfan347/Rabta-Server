@@ -37,7 +37,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
 
     companion object { @Volatile var openPeer: String? = null }
 
-    private val GREEN get() = AppTheme.ACCENT
+    private val GREEN get() = AppTheme.accent(this)
     private val GREEN2 get() = AppTheme.ACCENT
     private val BEIGE get() = AppTheme.bg(this@ChatActivity)
     private val SENT get() = AppTheme.sent(this@ChatActivity)
@@ -158,7 +158,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     private fun fmtTime(t: Long) = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(t))
 
     private fun avatar(name: String, sz: Int): TextView {
-        val cols = listOf(0xFFE53935,0xFF9C27B0,0xFF3F51B5,0xFF009688,0xFF43A047,0xFFFF5722,0xFF607D8B)
+        val cols = listOf(0xFF6248A5,0xFF325E71,0xFF3D577E,0xFF286F68)
         return TextView(this).apply {
             text = name.filter { it.isLetterOrDigit() }.take(1).uppercase().ifEmpty { "?" }
             setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, sz*0.38f); includeFontPadding=false; typeface = Typeface.DEFAULT_BOLD; setTextColor(Color.WHITE); gravity = Gravity.CENTER
@@ -167,14 +167,13 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     }
 
     private fun buildUi() {
-        window.statusBarColor = AppTheme.bg(this@ChatActivity)
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN or WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(BEIGE); isFocusableInTouchMode=true }
         setContentView(root)
 
         // ── Header ──
         val hdr = LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setBackgroundColor(RECV); setPadding(dp(6),dp(8),dp(10),dp(8)) }
-        hdr.addView(TextView(this).apply { UiIcons.set(this,"back",TXT,label="Back"); textSize=22f; setTextColor(Color.WHITE); setPadding(dp(4),dp(4),dp(8),dp(4)); isClickable=true; setOnClickListener{finish()} })
+        hdr.addView(RabtaUi.iconButton(this,"back","Back") { finish() })
         hdr.addView(avatar(peerName, dp(40)), LinearLayout.LayoutParams(dp(40),dp(40)))
         val hdrCol = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(10),0,0,0) }
         hdrCol.addView(TextView(this).apply { text=peerName; textSize=17f; typeface=Typeface.DEFAULT_BOLD; setTextColor(TXT); maxLines=1 })
@@ -186,12 +185,12 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         hdr.addView(hdrCol, LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
         if (!isGroup) hdr.addView(headerBtn("📞") { startCall(true) })
         if (!isGroup) hdr.addView(headerBtn("🎥") { startVideoCall() })
-        hdr.addView(TextView(this).apply { UiIcons.set(this,"search",SUB,label="Search chat"); gravity=Gravity.CENTER; setOnClickListener { searchField.visibility=if(searchField.visibility==View.VISIBLE) View.GONE else View.VISIBLE } },LinearLayout.LayoutParams(dp(44),dp(48)))
+        hdr.addView(TextView(this).apply { UiIcons.set(this,"search",SUB,label="Search chat"); gravity=Gravity.CENTER; setOnClickListener { searchField.visibility=if(searchField.visibility==View.VISIBLE) View.GONE else View.VISIBLE } },LinearLayout.LayoutParams(dp(48),dp(48)))
         hdrCol.setOnClickListener { if(!isGroup) MessageActions.contact(this,peerId) }
         headerBar=hdr
         root.addView(hdr)
 
-        // ── Call overlay (WhatsApp style) ──
+        // ── Call overlay ──
         callOverlay = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; background=GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,intArrayOf(0xFF26213F.toInt(),DARK)); visibility=View.GONE }
         // Top: name + status
         val callTop = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; gravity=Gravity.CENTER; setPadding(0,dp(32),0,0) }
@@ -203,7 +202,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         callAvatarFrame = FrameLayout(this)
         callAvatarFrame.addView(avatar(peerName, dp(112)), FrameLayout.LayoutParams(dp(112),dp(112)).apply { gravity=Gravity.CENTER })
         callOverlay.addView(callAvatarFrame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,0,1f))
-        // Bottom: button panel (WhatsApp style 2-row grid)
+        // Bottom: call controls
         val panel = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; background=pill(DARK2,32); setPadding(dp(20),dp(20),dp(20),dp(24)) }
         val row1 = LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER }
         val speakerBtn = callBtn("🔊","Speaker") { toggleSpeaker(it) }
@@ -252,7 +251,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         root.addView(recordingPanel)
         val bar = LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.BOTTOM; setBackgroundColor(RECV); setPadding(dp(6),dp(6),dp(6),dp(6)) }
         bar.addView(headerBtn("📎") { showAttachments() }.apply { background=null })
-        bar.addView(TextView(this).apply { UiIcons.set(this,"sticker",GREEN,label="Stickers"); gravity=Gravity.CENTER; setOnClickListener { Stickers.picker(this@ChatActivity,{sendContent(it,"sticker")},{pickAttachment("image/*",104)}) } },LinearLayout.LayoutParams(dp(40),dp(48)))
+        bar.addView(TextView(this).apply { UiIcons.set(this,"sticker",GREEN,label="Stickers"); gravity=Gravity.CENTER; setOnClickListener { Stickers.picker(this@ChatActivity,{sendContent(it,"sticker")},{pickAttachment("image/*",104)}) } },LinearLayout.LayoutParams(dp(48),dp(48)))
         input = EditText(this).apply {
             hint=L.t(this@ChatActivity,"Message"); textSize=16f; setTextColor(TXT); setHintTextColor(SUB); maxLines=5
             background = GradientDrawable().apply { setColor(BEIGE); cornerRadius=dp(24).toFloat() }
@@ -275,17 +274,17 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             UiIcons.set(this,"send",label="Send message"); textSize=20f; setTextColor(Color.WHITE); gravity=Gravity.CENTER
             background=oval(GREEN2); isClickable=true; setOnClickListener{sendMsg()}; visibility=View.GONE
         }
-        bar.addView(sendBtn, LinearLayout.LayoutParams(dp(46),dp(46)))
+        bar.addView(sendBtn, LinearLayout.LayoutParams(dp(48),dp(48)))
         micBtn = TextView(this).apply {
             UiIcons.set(this,"mic",label="Hold to record; release to send"); textSize=20f; gravity=Gravity.CENTER; background=oval(GREEN2)
             setOnTouchListener { _,ev -> when(ev.action){ MotionEvent.ACTION_DOWN->{ checkAudioPermission{startVoiceRecord()}; true }; MotionEvent.ACTION_MOVE->{ if(ev.x < -dp(48)) stopVoiceRecord(false); true }; MotionEvent.ACTION_UP->{ stopVoiceRecord(true); true }; MotionEvent.ACTION_CANCEL->{ stopVoiceRecord(false); true }; else->false } }
         }
-        bar.addView(micBtn, LinearLayout.LayoutParams(dp(46),dp(46)))
+        bar.addView(micBtn, LinearLayout.LayoutParams(dp(48),dp(48)))
         composerBar=bar
         root.addView(bar)
     }
 
-    // WhatsApp-style call button in panel
+    // Shared call controls
     private fun callBtn(icon: String, label: String, onClick: (TextView) -> Unit): LinearLayout {
         val col = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; gravity=Gravity.CENTER }
         val btn = TextView(this).apply { UiIcons.set(this,UiIcons.fromSymbol(icon) ?: "phone",label=label); textSize=24f; gravity=Gravity.CENTER; background=oval(GRAY_BTN); isClickable=true }
@@ -508,10 +507,13 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply { type=mime; addCategory(Intent.CATEGORY_OPENABLE) },request)
     }
     private fun showAttachments() {
-        android.app.AlertDialog.Builder(this).setTitle("Share with $peerName")
-            .setItems(arrayOf("Photo", "Video · up to 8 MB", "Document / file · up to 8 MB", "Stickers", "Offline security")) { _,which ->
-                when(which) { 0->pickImage(); 1->pickAttachment("video/*",102); 2->pickAttachment("*/*",103); 3->Stickers.picker(this,{sendContent(it,"sticker")},{pickAttachment("image/*",104)}); 4->MeshSecurity.showContact(this,peerId) }
-            }.show()
+        RabtaUi.sheet(this,"Share with $peerName",listOf(
+            RabtaUi.SheetAction("Photo") { pickImage() },
+            RabtaUi.SheetAction("Video","Up to 8 MB") { pickAttachment("video/*",102) },
+            RabtaUi.SheetAction("Document / file","Up to 8 MB") { pickAttachment("*/*",103) },
+            RabtaUi.SheetAction("Stickers") { Stickers.picker(this,{sendContent(it,"sticker")},{pickAttachment("image/*",104)}) },
+            RabtaUi.SheetAction("Offline security") { MeshSecurity.showContact(this,peerId) }
+        ))
     }
 
     private fun startVoiceRecord() {
@@ -545,7 +547,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         val am=getSystemService(AUDIO_SERVICE) as AudioManager
         previousAudioMode=am.mode; previousSpeaker=am.isSpeakerphoneOn
         am.mode=AudioManager.MODE_IN_COMMUNICATION; am.isSpeakerphoneOn=false
-        headerBar.visibility=View.GONE; window.statusBarColor=DARK; window.decorView.systemUiVisibility=0
+        headerBar.visibility=View.GONE; RabtaUi.systemBars(this,true)
         callOverlay.visibility=View.VISIBLE; chatScroll.visibility=View.GONE; composerBar.visibility=View.GONE; searchField.visibility=View.GONE
         callStatusTv.text=if(initiate) "Calling…" else "Connecting…"
         callId=db.logCallStart(peerId,peerName,if(initiate)"outgoing" else "incoming")
@@ -592,7 +594,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         if(callId>0) db.logCallEnd(callId,seconds); if(callId>0&&connectedAt==0L)db.callOutcome(callId,outcome)
         callId=-1L; connectedAt=0L
         try { (getSystemService(AUDIO_SERVICE) as AudioManager).apply { isSpeakerphoneOn=previousSpeaker; mode=previousAudioMode } } catch (_:Exception) {}
-        headerBar.visibility=View.VISIBLE; window.statusBarColor=BEIGE; window.decorView.systemUiVisibility=if(AppTheme.dark(this)) 0 else View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        headerBar.visibility=View.VISIBLE; RabtaUi.systemBars(this,AppTheme.dark(this))
         callOverlay.visibility=View.GONE; chatScroll.visibility=View.VISIBLE; composerBar.visibility=View.VISIBLE; searchField.visibility=if(searchQuery.isBlank()) View.GONE else View.VISIBLE
     }
 

@@ -26,6 +26,7 @@ object RabtaBrand {
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
             setTextColor(wordmarkColor)
             includeFontPadding = false
+            maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END
             gravity = Gravity.CENTER_VERTICAL
         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
             marginStart = dp(context, 7)
