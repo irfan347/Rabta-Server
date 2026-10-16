@@ -2,32 +2,202 @@ name: Build Rabta APK
 
 on:
   push:
+  pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-
-      - name: Unzip project
+      - name: Locate or extract Android project
+        id: project
+        shell: bash
         run: |
-          if [ -f rabta.zip ]; then unzip -o rabta.zip; fi
-          ls -la
-
+          python3 - <<'PYTHON'
+          #!/usr/bin/env python3
+          """Find an Android Gradle root in a checkout, or safely unpack one source ZIP."""
+          from pathlib import Path, PurePosixPath
+          import os
+          import stat
+          import sys
+          import zipfile
+          
+          SETTINGS = ("settings.gradle.kts", "settings.gradle")
+          BUILDS = ("build.gradle.kts", "build.gradle")
+          IGNORED = {".git", ".gradle", "build", "node_modules", ".android-source", "__MACOSX"}
+          
+          
+          def is_project(path):
+              return any((path / s).is_file() for s in SETTINGS) and any(
+                  (path / "app" / b).is_file() for b in BUILDS
+              )
+          
+          
+          def projects_in(root):
+              candidates = []
+              for current, dirs, _ in os.walk(root):
+                  dirs[:] = [d for d in dirs if d not in IGNORED and not (Path(current)/d).is_symlink()]
+                  path = Path(current)
+                  if is_project(path):
+                      candidates.append(path)
+                      dirs.clear()
+              return candidates
+          
+          
+          def zip_has_project(path):
+              try:
+                  with zipfile.ZipFile(path) as archive:
+                      names = set(archive.namelist())
+                      for name in names:
+                          if PurePosixPath(name).name in SETTINGS:
+                              prefix = str(PurePosixPath(name).parent)
+                              prefix = "" if prefix == "." else prefix + "/"
+                              if any(prefix + "app/" + b in names for b in BUILDS):
+                                  return True
+              except zipfile.BadZipFile:
+                  pass
+              return False
+          
+          
+          def safe_extract(path, target):
+              with zipfile.ZipFile(path) as archive:
+                  total = sum(i.file_size for i in archive.infolist())
+                  if total > 256 * 1024 * 1024:
+                      raise ValueError("Source ZIP exceeds 256 MiB expanded limit")
+                  for info in archive.infolist():
+                      relative = PurePosixPath(info.filename)
+                      if relative.is_absolute() or ".." in relative.parts or "\\" in info.filename:
+                          raise ValueError("Unsafe path in source ZIP")
+                      if stat.S_ISLNK(info.external_attr >> 16):
+                          raise ValueError("Symlinks are not accepted in source ZIP")
+                  archive.extractall(target)
+          
+          
+          def locate(root):
+              root = Path(root).resolve()
+              if is_project(root):
+                  return root
+              candidates = projects_in(root)
+              if not candidates:
+                  archives = []
+                  for current, dirs, files in os.walk(root):
+                      dirs[:] = [d for d in dirs if d not in IGNORED and not (Path(current)/d).is_symlink()]
+                      archives.extend(Path(current)/f for f in files if f.lower().endswith(".zip") and zip_has_project(Path(current)/f))
+                  if len(archives) != 1:
+                      raise ValueError(f"Expected one Android source ZIP; found {len(archives)}. Keep one ZIP or extract the project at the repository root.")
+                  target = root / ".android-source"
+                  if target.exists():
+                      raise ValueError(".android-source already exists; use a clean checkout")
+                  safe_extract(archives[0], target)
+                  candidates = projects_in(target)
+              if len(candidates) != 1:
+                  raise ValueError(f"Expected one Android Gradle project; found {len(candidates)}. Remove duplicate source copies.")
+              return candidates[0]
+          
+          
+          if __name__ == "__main__":
+              try:
+                  project = locate(sys.argv[1] if len(sys.argv) > 1 else ".")
+                  relative = project.relative_to(Path.cwd().resolve())
+                  value = str(relative)
+                  if any(c in value for c in "\r\n"):
+                      raise ValueError("Project path contains a newline")
+                  print(f"Android Gradle project: {value}")
+                  if os.environ.get("GITHUB_OUTPUT"):
+                      with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+                          output.write(f"directory={value}\n")
+              except ValueError as error:
+                  sys.exit(str(error))
+          PYTHON
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
-
-      - name: Build APK
-        run: gradle assembleDebug --no-daemon
-
-      - uses: actions/upload-artifact@v4
+          gradle-version: '8.7'
+      - name: Install Android build tools
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
+      - name: Check project detection and database queries
+        env:
+          ANDROID_PROJECT_DIR: ${{ steps.project.outputs.directory }}
+        run: |
+          if [ -d "$ANDROID_PROJECT_DIR/tests" ]; then
+            python3 -m unittest discover -s "$ANDROID_PROJECT_DIR/tests" -v
+          fi
+      - name: Test server attachment storage and signaling
+        run: |
+          if [ -f tests/server.test.js ]; then node --test tests/*.test.js; fi
+      - name: Read-only live connection diagnosis
+        timeout-minutes: 3
+        env:
+          ANDROID_PROJECT_DIR: ${{ steps.project.outputs.directory }}
+        run: python3 "$ANDROID_PROJECT_DIR/scripts/check_live_server.py"
+      - name: Build and test APK
+        env:
+          ANDROID_PROJECT_DIR: ${{ steps.project.outputs.directory }}
+        run: gradle --project-dir "$ANDROID_PROJECT_DIR" :app:testDebugUnitTest :app:assembleDebug --no-daemon --stacktrace
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
-          name: rabta-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: Rabta-debug-apk
+          path: ${{ steps.project.outputs.directory }}/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rabta-test-reports
+          path: ${{ steps.project.outputs.directory }}/app/build/reports/tests/
+          if-no-files-found: ignore
+
+  interface:
+    if: github.event_name == 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Enable emulator acceleration
+        run: sudo chmod 666 /dev/kvm
+      - name: Exercise interface and capture real Android screenshots
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: |
+            gradle --project-dir android :app:connectedDebugAndroidTest --no-daemon
+            adb pull /sdcard/Download/rabta-interface interface-screenshots
+      - name: Upload interface screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rabta-interface-screenshots
+          path: interface-screenshots/
+          if-no-files-found: ignore
+      - name: Upload device test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rabta-device-tests
+          path: android/app/build/reports/androidTests/
+          if-no-files-found: ignore
