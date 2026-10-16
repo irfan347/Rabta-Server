@@ -357,6 +357,9 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         val query=searchQuery
         val oldY=chatScroll.scrollY
         val atBottom=nearBottom()
+        val anchor=(0 until chatBox.childCount).map { chatBox.getChildAt(it) }
+            .firstOrNull { it.tag?.toString()?.startsWith("message:")==true&&it.bottom>=oldY }
+            ?.let { it.tag to (it.top-oldY) }
         if(firstHistory&&chatBox.childCount==0) chatBox.addView(RabtaUi.loading(this,"Loading messages…"))
         Thread {
             val result=runCatching {
@@ -386,7 +389,10 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
                         items.firstOrNull { it.first.id==draftReplyId }?.first?.let { selectReply(it,false) }
                         draftReplyId=null
                     }
-                    if(firstHistory||forceScroll||atBottom||scrollAfterSend) scrollBottom(!firstHistory) else chatScroll.post { chatScroll.scrollTo(0,oldY) }
+                    if(firstHistory||forceScroll||atBottom||scrollAfterSend) scrollBottom(!firstHistory) else chatScroll.post {
+                        val anchorView=anchor?.let { saved ->(0 until chatBox.childCount).map { chatBox.getChildAt(it) }.firstOrNull { it.tag==saved.first } }
+                        chatScroll.scrollTo(0,if(anchorView!=null&&anchor!=null) (anchorView.top-anchor.second).coerceAtLeast(0) else oldY)
+                    }
                     firstHistory=false;scrollAfterSend=false
                 }
             }
@@ -418,6 +424,11 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     private fun bubbleSurface(mine:Boolean)=object:LinearLayout(this) {
         override fun onMeasure(widthMeasureSpec:Int,heightMeasureSpec:Int) {
             val limit=minOf(dp(420),(View.MeasureSpec.getSize(widthMeasureSpec)*0.86f).toInt())
+            val contentWidth=(limit-paddingLeft-paddingRight).coerceAtLeast(0)
+            for(i in 0 until childCount) {
+                val lp=getChildAt(i).layoutParams
+                if(lp.width>contentWidth)lp.width=contentWidth
+            }
             super.onMeasure(View.MeasureSpec.makeMeasureSpec(limit,View.MeasureSpec.AT_MOST),heightMeasureSpec)
         }
     }.apply {
