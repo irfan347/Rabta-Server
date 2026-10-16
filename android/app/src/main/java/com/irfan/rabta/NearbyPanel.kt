@@ -37,6 +37,7 @@ class NearbyPanel(private val activity: Activity) {
                 .setPrompt("Scan a trusted Rabta contact").setBeepEnabled(false).setOrientationLocked(false).initiateScan()
         })
         view.addView(RabtaUi.button(activity,"Connection tools") { tools() })
+        view.addView(RabtaUi.button(activity,"Connectivity diagnostics") { activity.startActivity(Intent(activity,ConnectivityDiagnosticsActivity::class.java)) })
         view.addView(FeatureUi.text(activity,"Keep Bluetooth, Wi-Fi and Nearby permissions enabled. Text and built-in stickers can travel through nearby phones. Files, Status, groups and calls require internet. Delivery is confirmed only after the recipient receives it."))
     }
     fun resume() { if(active)return;active=true;MessageService.start(activity);handler.post(tick) }

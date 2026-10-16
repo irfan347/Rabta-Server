@@ -19,6 +19,9 @@ object ConnectionHelp {
             append("\nBoth phones need Rabta open, Bluetooth, Wi-Fi and Nearby permissions.")
         }
         RabtaUi.sheet(activity, "Connection & permissions", listOf(
+            RabtaUi.SheetAction("Connectivity diagnostics", "Radios, peers, delivery queues and relay evidence") {
+                activity.startActivity(Intent(activity,ConnectivityDiagnosticsActivity::class.java))
+            },
             RabtaUi.SheetAction("Internet connection", internetDetail) {
                 AlertDialog.Builder(activity).setTitle("Internet diagnostics").setMessage(internetDetail)
                     .setPositiveButton("Close", null).show()

@@ -16,6 +16,8 @@ class MeshStore(c:Context,id:String):SQLiteOpenHelper(c,"mesh_v2_$id.db",null,1)
     @Synchronized fun put(id:String,json:String,expires:Long,own:Boolean=false):Boolean {
         if(json.toByteArray().size>MeshPolicy.MAX_PACKET) return false
         val d=writableDatabase
+        // A repeated ID must not replace ciphertext or extend the original lifetime.
+        d.rawQuery("SELECT json FROM packets WHERE id=?",arrayOf(id)).use { if(it.moveToFirst())return it.getString(0)==json }
         val size=d.rawQuery("SELECT COUNT(*),COALESCE(SUM(length(json)),0) FROM packets",null).use { it.moveToFirst(); it.getInt(0) to it.getLong(1) }
         if(size.first>=500 || size.second+json.length>8*1024*1024) return false
         return d.insertWithOnConflict("packets",null,ContentValues().apply { put("id",id);put("json",json);put("expires",expires);put("own",if(own)1 else 0) },SQLiteDatabase.CONFLICT_REPLACE)!=-1L
@@ -29,11 +31,31 @@ class MeshStore(c:Context,id:String):SQLiteOpenHelper(c,"mesh_v2_$id.db",null,1)
     fun remove(id:String) { writableDatabase.delete("packets","id=?",arrayOf(id)); writableDatabase.delete("pending","id=?",arrayOf(id)) }
     data class Pending(val id:String,val to:String,val body:String,val type:String,val sent:Long)
     fun pending():List<Pending> = readableDatabase.rawQuery("SELECT id,recipient,body,type,sent FROM pending",null).use { c -> buildList { while(c.moveToNext()) add(Pending(c.getString(0),c.getString(1),c.getString(2),c.getString(3),c.getLong(4))) } }
-    fun pending(p:Pending):Boolean {
+    @Synchronized fun pending(p:Pending):Boolean {
+        readableDatabase.rawQuery("SELECT recipient,body,type FROM pending WHERE id=?",arrayOf(p.id)).use {
+            if(it.moveToFirst())return it.getString(0)==p.to && it.getString(1)==p.body && it.getString(2)==p.type
+        }
         if(pending().size>=100) return false
         return writableDatabase.insertWithOnConflict("pending",null,ContentValues().apply { put("id",p.id);put("recipient",p.to);put("body",p.body);put("type",p.type);put("sent",p.sent) },SQLiteDatabase.CONFLICT_REPLACE)!=-1L
     }
     fun removePending(id:String) { writableDatabase.delete("pending","id=?",arrayOf(id)) }
+    @Synchronized fun promote(p:Pending,json:String,expires:Long):Boolean {
+        val d=writableDatabase;d.beginTransaction()
+        try {
+            if(!put(p.id,json,expires,true))return false
+            mark(p.id,expires);removePending(p.id);d.setTransactionSuccessful();return true
+        }finally{d.endTransaction()}
+    }
+    data class Stats(val pendingPlaintext:Int=0,val ownPackets:Int=0,val relayMessages:Int=0,val receipts:Int=0,val bytes:Long=0)
+    fun stats():Stats {
+        var own=0;var relay=0;var receipts=0;var bytes=0L
+        readableDatabase.rawQuery("SELECT json,own FROM packets",null).use { c -> while(c.moveToNext()) {
+            val json=c.getString(0);bytes+=json.toByteArray(Charsets.UTF_8).size
+            val kind=runCatching { org.json.JSONObject(json).optString("k") }.getOrDefault("")
+            if(kind=="receipt")receipts++ else if(c.getInt(1)==1)own++ else relay++
+        } }
+        return Stats(pending().size,own,relay,receipts,bytes)
+    }
     fun prune(now:Long):List<String> {
         val expired=readableDatabase.rawQuery("SELECT id FROM packets WHERE expires<=? AND own=1 UNION SELECT id FROM pending WHERE sent<=?",arrayOf(now.toString(),(now-MeshPolicy.LIFE).toString())).use { c -> buildList { while(c.moveToNext()) add(c.getString(0)) } }
         writableDatabase.delete("packets","expires<=?",arrayOf(now.toString()))

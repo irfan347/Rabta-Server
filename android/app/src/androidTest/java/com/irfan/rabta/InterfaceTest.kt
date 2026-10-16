@@ -63,7 +63,21 @@ class InterfaceTest {
         val darkList=launch(ConversationListActivity::class.java); screenshot("06-chats-dark"); inst.runOnMainSync { darkList.finish() }
         val incoming=launch(IncomingCallActivity::class.java); screenshot("07-incoming-call"); inst.runOnMainSync { incoming.finish() }
         val settings=launch(SettingsActivity::class.java); screenshot("08-settings-dark");inst.runOnMainSync { settings.finish() }
-        val nearby=launch(NearbyActivity::class.java); screenshot("09-nearby-dark");inst.runOnMainSync { nearby.finish() }
+        val nearby=launch(NearbyActivity::class.java); screenshot("09-nearby-dark")
+        val monitor=inst.addMonitor(ConnectivityDiagnosticsActivity::class.java.name,null,false)
+        inst.runOnMainSync { views(nearby.window.decorView).filterIsInstance<TextView>().first { it.text=="Connectivity diagnostics" }.performClick() }
+        val diagnostics=inst.waitForMonitorWithTimeout(monitor,5000)
+        assertNotNull("Nearby opens connectivity diagnostics",diagnostics)
+        screenshot("09b-connectivity-diagnostics-dark")
+        inst.runOnMainSync {
+            val labels=views(diagnostics.window.decorView).filterIsInstance<TextView>().map { it.text.toString() }
+            assertTrue(labels.any { it.contains("Bluetooth:") && it.contains("Wi-Fi:") })
+            assertTrue(labels.any { it.contains("managed by Nearby; not exposed") })
+            assertTrue(labels.any { it.contains("Multi-hop radio delivery has not been verified") })
+            assertTrue(labels.any { it.startsWith("Updated ") })
+            diagnostics.finish();nearby.finish()
+        }
+        inst.removeMonitor(monitor)
         db.star("000000000002")
         val starred=launch(StarredActivity::class.java); screenshot("10-starred-dark");inst.runOnMainSync { assertTrue(views(starred.window.decorView).filterIsInstance<TextView>().any { it.text.contains("Chai pe") });starred.finish() }
         val status=launch(StatusActivity::class.java);Thread.sleep(2500);screenshot("11-status-dark");inst.runOnMainSync { assertTrue(views(status.window.decorView).filterIsInstance<TextView>().any { it.text=="Text status" });status.finish() }

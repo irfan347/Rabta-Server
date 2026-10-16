@@ -7,7 +7,7 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.spec.*
 
-/** Standard authenticated hybrid encryption; routing metadata is authenticated too. */
+/** Authenticated hybrid encryption. Sender/recipient/IDs/times are signed; mutable hop counts are not. */
 object MeshCrypto {
     data class Box(val key:String,val iv:String,val ciphertext:String)
     fun b64(b:ByteArray)=Base64.getEncoder().encodeToString(b)

@@ -2,6 +2,8 @@
 
 Audit date: 2026-10-16 UTC. This is an inspection and documentation checkpoint, not a feature implementation or production rollout.
 
+Follow-up: [Offline mesh audit, diagnostics and physical-device test plan](MESH_AUDIT.md) records the later focused transport improvements and their verification limits. The baseline findings below remain historical.
+
 ## Baseline and safe checkpoint
 
 - Repository: `https://github.com/irfan347/Rabta-Server`.

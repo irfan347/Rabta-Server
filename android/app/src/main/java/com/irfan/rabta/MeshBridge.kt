@@ -9,6 +9,7 @@ object MeshBridge {
     fun detach() { router = null }
 
     val running get() = router?.running == true
+    fun snapshot()=router?.snapshot()?:MeshRuntimeSnapshot()
     val peersConnected get() = router?.connected?.size ?: 0
 
     fun peerNames():List<String> = router?.connected?.values?.toList() ?: emptyList()
