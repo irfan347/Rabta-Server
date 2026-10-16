@@ -1,134 +1,142 @@
 package com.irfan.rabta
 
-import android.Manifest
-import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.graphics.Color
-import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.View
-import android.view.ViewGroup
-import android.widget.ImageView
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.TextView
-import android.widget.Toast
+import android.widget.*
 
 class ProfileActivity : ThemedActivity() {
-
-    private val GREEN get() = AppTheme.ACCENT
-    private val WHITE get() = AppTheme.surface(this@ProfileActivity)
-    private val TXT get() = AppTheme.text(this@ProfileActivity)
-    private val SUB get() = AppTheme.sub(this@ProfileActivity)
-    private val PICK  = 101
-    private lateinit var picView: ImageView
+    private val pickCode = 101
+    private lateinit var avatar: ImageView
     private val handler = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Session.init(this)
-        buildUi()
+        val body = FeatureUi.page(this, "Profile")
+
+        val hero = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
+            background = RabtaUi.shape(this@ProfileActivity, AppTheme.surface(this@ProfileActivity), 24, AppTheme.line(this@ProfileActivity))
+            setPadding(RabtaUi.dp(this@ProfileActivity, 20), RabtaUi.dp(this@ProfileActivity, 24), RabtaUi.dp(this@ProfileActivity, 20), RabtaUi.dp(this@ProfileActivity, 20))
+        }
+        avatar = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP; background = RabtaUi.shape(this@ProfileActivity, AppTheme.accent(this@ProfileActivity), 999)
+            clipToOutline = true; contentDescription = "Profile photo"
+        }
+        loadAvatar()
+        hero.addView(avatar, LinearLayout.LayoutParams(RabtaUi.dp(this, 104), RabtaUi.dp(this, 104)))
+        hero.addView(RabtaUi.text(this, Session.name.ifBlank { Session.username }, 23f, true).apply { gravity = Gravity.CENTER; setPadding(0, RabtaUi.dp(this@ProfileActivity, 14), 0, RabtaUi.dp(this@ProfileActivity, 3)) })
+        hero.addView(RabtaUi.text(this, "@${Session.username}", 15f, color = AppTheme.sub(this)).apply { gravity = Gravity.CENTER; setPadding(0, 0, 0, RabtaUi.dp(this@ProfileActivity, 16)) })
+        hero.addView(RabtaUi.button(this, "Change profile photo", action = ::pickPhoto))
+        hero.addView(RabtaUi.text(this, "Photo stays on this phone; profile photo sync is not supported by the current server.", 12f, color = AppTheme.sub(this)).apply { gravity = Gravity.CENTER; setPadding(0, 0, 0, 0) })
+        body.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = RabtaUi.dp(this@ProfileActivity, 18) })
+
+        body.addView(RabtaUi.text(this, "ACCOUNT ID", 12f, true, AppTheme.accent(this)).apply {
+            setPadding(RabtaUi.dp(this@ProfileActivity, 4), RabtaUi.dp(this@ProfileActivity, 14), 0, RabtaUi.dp(this@ProfileActivity, 8))
+            androidx.core.view.ViewCompat.setAccessibilityHeading(this, true)
+        })
+        val identity = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; background = RabtaUi.shape(this@ProfileActivity, AppTheme.surface(this@ProfileActivity), 20, AppTheme.line(this@ProfileActivity))
+            clipToOutline = true
+        }
+        identityRow(identity, "Display name", Session.name, "Name editing is not available yet")
+        divider(identity)
+        identityRow(identity, "Username", "@${Session.username}", "Username changes are not supported yet")
+        divider(identity)
+        identityRow(identity, "Rabta ID", Session.id, "Tap to copy your account ID") { copy("Rabta ID", Session.id) }
+        body.addView(identity, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = RabtaUi.dp(this@ProfileActivity, 18) })
+
+        body.addView(RabtaUi.text(this, "YOUR RABTA", 12f, true, AppTheme.accent(this)).apply {
+            setPadding(RabtaUi.dp(this@ProfileActivity, 4), RabtaUi.dp(this@ProfileActivity, 8), 0, RabtaUi.dp(this@ProfileActivity, 8))
+            androidx.core.view.ViewCompat.setAccessibilityHeading(this, true)
+        })
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; background = RabtaUi.shape(this@ProfileActivity, AppTheme.surface(this@ProfileActivity), 20, AppTheme.line(this@ProfileActivity)); setPadding(RabtaUi.dp(this@ProfileActivity, 14), RabtaUi.dp(this@ProfileActivity, 14), RabtaUi.dp(this@ProfileActivity, 14), RabtaUi.dp(this@ProfileActivity, 8))
+        }
+        actions.addView(RabtaUi.text(this, "Connection", 15f, true))
+        actions.addView(RabtaUi.text(this, "${ConnectionStatus.text(this)}\nNearby phones: ${MeshBridge.peersConnected}", 13f, color = AppTheme.sub(this)).apply { setPadding(0, RabtaUi.dp(this@ProfileActivity, 4), 0, RabtaUi.dp(this@ProfileActivity, 8)) })
+        actions.addView(RabtaUi.button(this, "Connection details") { ConnectionHelp.show(this) })
+        actions.addView(RabtaUi.button(this, "Offline security code") { MeshSecurity.showIdentity(this) })
+        actions.addView(RabtaUi.button(this, "Appearance · ${AppTheme.mode(this)}") { AppTheme.choose(this) })
+        actions.addView(RabtaUi.button(this, "Settings") { startActivity(Intent(this, SettingsActivity::class.java)) })
+        actions.addView(RabtaUi.button(this, "Sign out", primary = false, action = ::confirmLogout).apply { setTextColor(AppTheme.error(this@ProfileActivity)) })
+        body.addView(actions)
     }
 
-    private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
-    private fun pill(c: Int) = GradientDrawable().apply { setColor(c); cornerRadius = dp(999).toFloat() }
-    private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
-
-    private fun buildUi() {
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL;setBackgroundColor(AppTheme.bg(this@ProfileActivity)) }
-        setContentView(root)
-
-        val hdr = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(AppTheme.bg(this@ProfileActivity)); setPadding(dp(8),dp(10),dp(16),dp(10)) }
-        hdr.addView(RabtaUi.iconButton(this,"back","Back") { finish() })
-        hdr.addView(TextView(this).apply { text = "Profile & settings"; textSize = 22f; typeface = Typeface.DEFAULT_BOLD; setTextColor(TXT) })
-        root.addView(hdr)
-
-        val body = ScrollView(this).apply { setBackgroundColor(AppTheme.bg(this@ProfileActivity)) }
-        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(24),dp(32),dp(24),dp(32)); gravity = Gravity.CENTER_HORIZONTAL }
-        body.addView(col); root.addView(body,LinearLayout.LayoutParams(-1,0,1f))
-
-        // Avatar / pic
-        picView = ImageView(this).apply {
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            isClickable = true; setOnClickListener { pickPhoto() }
+    private fun identityRow(parent: LinearLayout, label: String, value: String, note: String, action: (() -> Unit)? = null) {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(RabtaUi.dp(this@ProfileActivity, 18), RabtaUi.dp(this@ProfileActivity, 13), RabtaUi.dp(this@ProfileActivity, 16), RabtaUi.dp(this@ProfileActivity, 13))
+            if (action != null) { background = RabtaUi.ripple(this@ProfileActivity, AppTheme.surface(this@ProfileActivity), 0); isClickable = true; isFocusable = true; setOnClickListener { action() } }
         }
-        if (Session.profilePic.isNotEmpty()) {
-            picView.background = pill(0xFF607D8B.toInt())
-            MediaHelper.base64ToBitmap(Session.profilePic)?.let { picView.setImageBitmap(it) }
-        } else {
-            // initials
-            picView.background = pill(AppTheme.ACCENT)
-        }
-        val picFrame = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
-        picFrame.addView(picView, LinearLayout.LayoutParams(dp(120), dp(120)))
-        picFrame.addView(TextView(this).apply { text = "Tap to change photo"; textSize = 13f; setTextColor(SUB); gravity = Gravity.CENTER; setPadding(0,dp(8),0,0) })
-        col.addView(picFrame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(28) })
+        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        texts.addView(RabtaUi.text(this, label, 12f, true, AppTheme.accent(this)))
+        texts.addView(RabtaUi.text(this, value.ifBlank { "Not set" }, 16f, true).apply { setPadding(0, RabtaUi.dp(this@ProfileActivity, 3), 0, 0) })
+        texts.addView(RabtaUi.text(this, note, 12f, color = AppTheme.sub(this)).apply { setPadding(0, RabtaUi.dp(this@ProfileActivity, 3), 0, 0) })
+        row.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
+        if (action != null) row.addView(RabtaUi.text(this, "Copy", 13f, true, AppTheme.accent(this)))
+        parent.addView(row)
+    }
 
-        // Info
-        val card = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = GradientDrawable().apply { setColor(WHITE); cornerRadius = dp(16).toFloat() }; setPadding(dp(20),dp(16),dp(20),dp(16)) }
-        fun infoRow(label: String, value: String) {
-            card.addView(TextView(this).apply { text = label; textSize = 12f; setTextColor(AppTheme.accent(this@ProfileActivity)); typeface = Typeface.DEFAULT_BOLD })
-            card.addView(TextView(this).apply { text = value; textSize = 18f; setTextColor(TXT); setPadding(0,dp(4),0,dp(14)) })
-        }
-        infoRow("Name", Session.name)
-        card.addView(View(this).apply { setBackgroundColor(AppTheme.line(this@ProfileActivity)) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
-        card.addView(View(this).apply { minimumHeight = dp(8) })
-        infoRow("Username", "@${Session.username}")
-        infoRow("Rabta ID", Session.id)
-        col.addView(card, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(20) })
+    private fun divider(parent: LinearLayout) = parent.addView(View(this).apply { setBackgroundColor(AppTheme.line(this@ProfileActivity)) }, LinearLayout.LayoutParams(-1, RabtaUi.dp(this, 1)).apply { marginStart = RabtaUi.dp(this@ProfileActivity, 18) })
 
-        col.addView(TextView(this).apply {
-            text="Appearance  ·  ${AppTheme.mode(this@ProfileActivity)}"; textSize=16f; setTextColor(TXT); background=pill(WHITE); setPadding(dp(20),dp(18),dp(20),dp(18))
-            setOnClickListener { AppTheme.choose(this@ProfileActivity) }
-        },LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(16) })
-        col.addView(TextView(this).apply {
-            text="Nearby mesh\nBluetooth & Wi-Fi · 8 hops · 24-hour expiry\n${MeshBridge.peersConnected} peers connected\nText is saved for later delivery. Keep Nearby permission enabled."
-            textSize=14f; setTextColor(SUB); setPadding(0,0,0,dp(20))
-        })
-        col.addView(TextView(this).apply { text="Offline security code"; setTextColor(GREEN); setPadding(0,0,0,dp(20)); setOnClickListener { MeshSecurity.showIdentity(this@ProfileActivity) } })
-        // Logout
-        col.addView(TextView(this).apply {
-            text = "Logout"; textSize = 16f; typeface = Typeface.DEFAULT_BOLD; setTextColor(AppTheme.error(this@ProfileActivity)); gravity = Gravity.CENTER
-            background = GradientDrawable().apply { setColor(WHITE); cornerRadius = dp(28).toFloat(); setStroke(dp(1), AppTheme.error(this@ProfileActivity)) }
-            setPadding(0, dp(14), 0, dp(14)); isClickable = true
-            setOnClickListener {
-                MessageService.stop(this@ProfileActivity); Session.logout(); WsClient.disconnect()
-                startActivity(Intent(this@ProfileActivity, AuthActivity::class.java))
-                finishAffinity()
-            }
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+    private fun loadAvatar() {
+        avatar.setImageDrawable(null)
+        if (Session.profilePic.isNotEmpty()) MediaHelper.base64ToBitmap(Session.profilePic)?.let(avatar::setImageBitmap)
+        if (avatar.drawable == null) {
+            avatar.setBackgroundColor(AppTheme.accent(this))
+            avatar.setImageDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+            avatar.contentDescription = "${Session.name.ifBlank { Session.username }} profile initials"
+            avatar.setOnClickListener { pickPhoto() }
+            avatar.setImageBitmap(initialsBitmap())
+        }
+    }
+
+    private fun initialsBitmap(): android.graphics.Bitmap {
+        val size = RabtaUi.dp(this, 104)
+        return android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888).also { bitmap ->
+            val canvas = android.graphics.Canvas(bitmap); val paint = android.graphics.Paint(3)
+            paint.color = android.graphics.Color.WHITE; paint.textSize = size * .42f; paint.typeface = android.graphics.Typeface.create("sans-serif-medium", 0)
+            val initial = Session.name.trim().split(Regex("\\s+")).mapNotNull { it.firstOrNull() }.take(2).joinToString("").ifBlank { "R" }.uppercase()
+            val bounds = android.graphics.Rect(); paint.getTextBounds(initial, 0, initial.length, bounds)
+            canvas.drawText(initial, (size - paint.measureText(initial)) / 2, (size - bounds.height()) / 2f - bounds.top, paint)
+        }
     }
 
     private fun pickPhoto() {
-        if (android.os.Build.VERSION.SDK_INT >= 33 &&
-            checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(Manifest.permission.READ_MEDIA_IMAGES), 1); return
-        }
-        startActivityForResult(Intent(Intent.ACTION_PICK).apply { type = "image/*" }, PICK)
+        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE), pickCode)
     }
 
-    override fun onRequestPermissionsResult(r: Int, p: Array<out String>, g: IntArray) {
-        if (g.isNotEmpty() && g[0] == PackageManager.PERMISSION_GRANTED) pickPhoto()
-    }
-
-    override fun onActivityResult(req: Int, res: Int, data: Intent?) {
-        super.onActivityResult(req, res, data)
-        if (req != PICK || res != RESULT_OK) return
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != pickCode || resultCode != RESULT_OK) return
         val uri = data?.data ?: return
-        toast("Photo update ho rahi hai...")
+        Toast.makeText(this, "Updating photo…", Toast.LENGTH_SHORT).show()
         Thread {
-            val b64 = MediaHelper.imageToBase64(this, uri)
-            if (b64 != null) {
-                Session.profilePic = b64
-                WsClient.uploadPhoto(Session.serverUrl, Session.token, b64)
-                val bmp = MediaHelper.base64ToBitmap(b64)
-                handler.post { bmp?.let { picView.setImageBitmap(it) }; toast("Profile picture update ho gayi! ✓") }
-            } else handler.post { toast("Photo load nahi ho saki") }
+            val encoded = MediaHelper.imageToBase64(this, uri)
+            if (encoded != null) {
+                Session.profilePic = encoded
+                WsClient.uploadPhoto(Session.serverUrl, Session.token, encoded)
+                handler.post { if (!isDestroyed) { loadAvatar(); Toast.makeText(this, "Photo saved on this phone", Toast.LENGTH_LONG).show() } }
+            } else handler.post { if (!isDestroyed) Toast.makeText(this, "Could not open that image", Toast.LENGTH_LONG).show() }
         }.start()
+    }
+
+    private fun copy(label: String, value: String) {
+        (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText(label, value))
+        Toast.makeText(this, "$label copied", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun confirmLogout() {
+        AlertDialog.Builder(this).setTitle("Sign out of Rabta?").setMessage("Local chats remain on this phone. Sign in again with the same account to reconnect.")
+            .setNegativeButton("Cancel", null).setPositiveButton("Sign out") { _, _ ->
+                MessageService.stop(this); Session.logout(); WsClient.disconnect(); startActivity(Intent(this, AuthActivity::class.java)); finishAffinity()
+            }.show()
     }
 }
