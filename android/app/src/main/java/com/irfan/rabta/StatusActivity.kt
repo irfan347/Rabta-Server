@@ -29,7 +29,10 @@ class StatusActivity:ThemedActivity() {
                 Thread { val result=runCatching { val remote=if(kind=="text")body else Transfers.upload(this,body,"status") {};FeatureApi.request("/api/status","POST",JSONObject().put("kind",kind).put("body",remote).put("audience",JSONArray(ids))) };runOnUiThread { posting=false;if(isDestroyed)return@runOnUiThread;feed.removeView(progress);result.onSuccess { refresh() }.onFailure { Toast.makeText(this,it.message,1).show() } } }.start()
             }.show()
     }
-    private fun refresh() { FeatureApi.run(this,{FeatureApi.request("/api/status").getJSONArray("statuses")}){ render(it) } }
+    private fun refresh() {
+        feed.removeAllViews();feed.addView(FeatureUi.text(this,"Loading updates…"))
+        Thread { val result=runCatching { FeatureApi.request("/api/status").getJSONArray("statuses") };runOnUiThread {if(!isDestroyed&&!isFinishing)result.onSuccess {render(it)}.onFailure {feed.removeAllViews();feed.addView(FeatureUi.text(this,"Could not load updates. Check your connection and tap Refresh."))} } }.start()
+    }
     private fun render(items:JSONArray) {
         feed.removeAllViews();if(items.length()==0)feed.addView(FeatureUi.text(this,"No updates yet"))
         for(i in 0 until items.length()) {val s=items.getJSONObject(i);val own=s.getString("owner")==Session.id;val minutes=((s.getLong("expires")-System.currentTimeMillis())/60000).coerceAtLeast(0)

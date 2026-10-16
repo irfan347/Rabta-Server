@@ -1,4 +1,4 @@
-# Rabta 1.8
+# Rabta 1.9
 
 Android source is in `android/`; the root `.github/workflows/main.yml` builds it with
 Java 17, Gradle 8.7, SDK 34 and build-tools 34.0.0. APK artifacts come from Actions.
@@ -68,7 +68,7 @@ key-change migration yet. Routing addresses/time are visible to relays. A malici
 relay can drop messages; hop counts do not prevent malicious re-broadcast.
 Encryption here covers offline V2 text/stickers, not all online messaging.
 
-Both ends and relay phones need V1.8. Legacy plaintext V1 packets and the old
+Both ends and relay phones need V1.8 or newer. Legacy plaintext V1 packets and the old
 unencrypted BLE long-range advertising protocol are not forwarded. The previous
 standalone nearby voice class was unused by the app and has been removed; live
 calls still use the online transport.
@@ -87,9 +87,58 @@ This PR also changes root `index.js`:
 The backend must be deployed to the existing service for offline online-storage
 fixes and video signaling to take effect. This branch does not deploy the server.
 A canonical root `package.json` is supplied for `npm install` / `npm start`; the
-old `package (1).json` is retained. Video calls
-still need a working network path; the existing WebRTC client has no configured
-TURN relay, so some NAT/carrier combinations will not connect.
+old `package (1).json` is retained. New Status, privacy and resumable-transfer endpoints
+are in root `features.js`; deploy that file together with `index.js`.
+
+## Status and chat tools
+
+- Open Status from the chat list. Post text (700 characters), a photo or a video
+  (8 MB). Select the contacts allowed to view each update; no contacts are selected
+  by default. Server-enforced visibility expires after 24 hours. Owners see viewers
+  and can delete updates. Status needs internet and the 1.9 backend.
+- Long press a message to reply, react, forward, copy, star/unstar or delete locally.
+  Reply and reaction messages require 1.9 clients and internet. Delete for me does
+  not unsend a message already delivered to another phone.
+- The header menu opens Starred messages, Nearby and Settings. Nearby displays
+  connected phones and queued messages with expiry. Show/scan a contact QR to add
+  an ID and public key without an internet lookup; verify the fingerprint first.
+- Video, file and imported-sticker uploads use resumable 128 KB chunks, SHA-256
+  integrity checks and authenticated downloads. Long press during upload to cancel;
+  tap paused/failed to retry. Network failures resume from the saved server offset.
+  Resumption is online only; media is not forwarded through the offline mesh.
+
+## Privacy, backup and accessibility
+
+Tap a chat's name for block/unblock, report and offline security. Blocking is
+applied on the device immediately and synced to the server. Reports are stored for
+an administrator; no automatic moderation or administrator dashboard is included.
+Settings can hide notification previews and enable fingerprint/device-screen-lock
+protection after 30 seconds away. Set up a phone lock before enabling app lock.
+
+Settings provides encrypted backup and restore using Android's file picker. Backups
+use AES-256-GCM and PBKDF2-HMAC-SHA256 (210,000 iterations), a random salt/nonce and
+a password of at least 10 characters. Restore authenticates the complete file before
+merging rows and verifies the account ID. Limits: 24 MB chat JSON and 100 MB saved
+attachments. Unsaved remote media is not downloaded automatically into a backup.
+Keep the password safely; it cannot be recovered. Offline private identity keys are
+non-exportable and are not included. New phones must exchange keys again.
+
+English/Urdu core navigation labels, right-to-left layout and four text sizes are
+available in Settings. Some detailed dialogs and server errors remain English.
+
+## TURN deployment
+
+The Android client requests temporary ICE credentials from authenticated `/api/ice`.
+The permanent TURN secret stays on the backend. Without `TURN_URL` and `TURN_SECRET`,
+the API explicitly reports no configured relay and returns STUN only. Settings →
+Video relay status shows configuration, not a connectivity test. Calls may fail on
+restrictive networks until a real relay is provisioned.
+
+See root `deploy/README.md` and `deploy/turnserver.conf.example`. No TURN service has
+been provisioned and no live relay connectivity has been verified. PostgreSQL is
+required for durable server Status/uploads/blocks/reports. Upload storage is limited
+to 64 MB per account; this version uses a single server process and database chunk
+storage rather than an object storage service.
 
 ## Validation
 
@@ -100,7 +149,8 @@ TURN relay, so some NAT/carrier combinations will not connect.
 - Node tests exercise actual server handlers with in-memory transport/DB stubs:
   large attachments, sequential dedup, limits, video participants and group metadata.
 - An Android emulator test captures real light/dark chat/list screens, attachments,
-  stickers and incoming calls; it checks avatar sizing and startup focus.
+  stickers, incoming calls, Settings, Nearby, Status and Urdu navigation; it checks
+  avatar sizing, startup focus, starred items and authenticated backup restoration.
 
 CI status: https://github.com/irfan347/Rabta-Server/pull/1
 Real Bluetooth/Wi-Fi relay delivery, process death, expiry over time, large-file

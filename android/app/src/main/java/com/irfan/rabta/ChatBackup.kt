@@ -16,7 +16,9 @@ object ChatBackup {
         try { c.contentResolver.openOutputStream(uri,"wt")!!.use { output -> BackupCrypto.encrypt(output,password) { encrypted ->
             ZipOutputStream(encrypted).use { zip ->
                 zip.putNextEntry(ZipEntry("account"));zip.write(Session.id.toByteArray());zip.closeEntry()
-                zip.putNextEntry(ZipEntry("chats.json"));val writer=JsonWriter(java.io.OutputStreamWriter(zip,Charsets.UTF_8));val db=Db.get(c).readableDatabase
+                zip.putNextEntry(ZipEntry("chats.json"));var jsonBytes=0L
+                val bounded=object:java.io.OutputStream(){override fun write(b:Int){jsonBytes++;require(jsonBytes<=24L*1024*1024){"Chat backup exceeds 24 MB; save large media separately"};zip.write(b)};override fun write(b:ByteArray,off:Int,len:Int){jsonBytes+=len;require(jsonBytes<=24L*1024*1024){"Chat backup exceeds 24 MB; save large media separately"};zip.write(b,off,len)}}
+                val writer=JsonWriter(java.io.OutputStreamWriter(bounded,Charsets.UTF_8));val db=Db.get(c).readableDatabase
                 db.beginTransaction();try {writer.beginObject();for((table,columns) in tables){writer.name(table).beginArray();db.query(table,columns.toTypedArray(),null,null,null,null,null).use { cursor -> while(cursor.moveToNext()){writer.beginObject();columns.forEachIndexed { i,col ->writer.name(col);if(cursor.isNull(i))writer.nullValue()else writer.value(cursor.getString(i)) };writer.endObject()} };writer.endArray() };writer.endObject();writer.flush();db.setTransactionSuccessful()}finally{db.endTransaction()};zip.closeEntry()
                 var bytes=0L
                 File(c.filesDir,"attachments").listFiles()?.filter { Regex("[a-f0-9-]{36}").matches(it.name) }?.forEach { file -> bytes+=file.length();require(bytes<100L*1024*1024){"Attachments exceed backup limit (100 MB)"};zip.putNextEntry(ZipEntry("attachments/"+file.name));file.inputStream().use { it.copyTo(zip) };zip.closeEntry() }

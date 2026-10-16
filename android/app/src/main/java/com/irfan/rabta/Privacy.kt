@@ -10,6 +10,6 @@ object Privacy {
         p.edit().putStringSet("blocked",set).putBoolean("pending_$id",value).commit()
         Thread { sync(c) }.start()
     }
-    fun sync(c:Context) { for((k,v) in prefs(c).all)if(k.startsWith("pending_"))runCatching { FeatureApi.request("/api/block","POST",JSONObject().put("target",k.removePrefix("pending_")).put("blocked",v));prefs(c).edit().remove(k).apply() } }
+    @Synchronized fun sync(c:Context) { for((k,v) in prefs(c).all)if(k.startsWith("pending_"))runCatching { FeatureApi.request("/api/block","POST",JSONObject().put("target",k.removePrefix("pending_")).put("blocked",v));if(prefs(c).all[k]==v)prefs(c).edit().remove(k).apply() } }
     fun hidePreviews(c:Context)=prefs(c).getBoolean("hide_previews",false)||prefs(c).getBoolean("lock",false)
 }
