@@ -29,14 +29,17 @@ class MeshSecurity(private val c:Context,private val id:String) {
     fun publicText()=MeshCrypto.b64(pair().public.encoded)
     fun key(user:String)=if(user==id) publicText() else prefs.getString(user,null)
     @Synchronized fun pin(user:String,text:String):Boolean {
+        synchronized(pinLock) {
         if(!MeshPolicy.validId(user)) return false
         try { MeshCrypto.publicKey(text) } catch(_:Exception) { return false }
         val old=key(user)
         if(old!=null) return old==text
         if(prefs.all.size>=500) return false
         return prefs.edit().putString(user,text).commit()
+        }
     }
     companion object {
+        private val pinLock=Any()
         fun showIdentity(a:Activity) {
             val sec=MeshSecurity(a,Session.id)
             Thread {

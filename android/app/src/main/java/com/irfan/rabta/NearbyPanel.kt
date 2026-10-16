@@ -62,6 +62,7 @@ class NearbyPanel(private val activity:Activity) {
         count=RabtaUi.text(activity,"Nearby users",19f,true).apply { setPadding(0,RabtaUi.dp(activity,8),0,RabtaUi.dp(activity,12)) }
         view.addView(count);view.addView(users)
         view.addView(RabtaUi.text(activity,"No phone numbers are shared. The Radar animation shows discovery activity; it does not measure distance or location.",13f,color=AppTheme.sub(activity)).apply { setPadding(0,RabtaUi.dp(activity,8),0,RabtaUi.dp(activity,16)) })
+        view.addView(RabtaUi.button(activity,"Instant Connect · temporary QR",true) { activity.startActivity(Intent(activity,InstantConnectActivity::class.java)) })
         view.addView(RabtaUi.button(activity,"My contact QR") { showQr() })
         view.addView(RabtaUi.button(activity,"Scan contact QR") {
             IntentIntegrator(activity).setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
@@ -162,7 +163,7 @@ class NearbyPanel(private val activity:Activity) {
                 setImageBitmap(BarcodeEncoder().encodeBitmap(bundle,BarcodeFormat.QR_CODE,700,700))
                 adjustViewBounds=true;setPadding(20,20,20,20);contentDescription="My Rabta contact QR"
             }
-            AlertDialog.Builder(activity).setTitle("Scan to add me offline").setView(image).setPositiveButton("Close",null).show()
+            AlertDialog.Builder(activity).setTitle("Legacy contact QR").setMessage("This permanent public contact key does not expire. Use Instant Connect for temporary, single-use invitations.").setView(image).setPositiveButton("Close",null).show()
         }
     }
     private fun tools() {
@@ -184,6 +185,9 @@ class NearbyPanel(private val activity:Activity) {
     fun handleResult(req: Int,res: Int,data: Intent?): Boolean {
         val result=IntentIntegrator.parseActivityResult(req,res,data)?:return false
         val raw=result.contents?:return true
+        if(raw.startsWith(InstantInvitation.PREFIX)) {
+            activity.startActivity(Intent(activity,InstantConnectActivity::class.java).putExtra("pairing_code",raw));return true
+        }
         runCatching {
             require(raw.length<4096);val o=JSONObject(raw);val id=o.getString("id")
             require(MeshPolicy.validId(id)&&id!=Session.id)
@@ -191,7 +195,7 @@ class NearbyPanel(private val activity:Activity) {
             Triple(id,o.optString("name",id).take(80),key) to code
         }.onSuccess { (contact,code) ->
             AlertDialog.Builder(activity).setTitle("Add ${contact.second}?")
-                .setMessage("${contact.first}\n\n$code\n\nCompare this code with the person before adding.")
+                .setMessage("${contact.first}\n\n$code\n\nThis is a legacy permanent contact QR. Compare this code with the person before adding. Use Instant Connect for temporary invitations and replay protection.")
                 .setNegativeButton("Cancel",null).setPositiveButton("Add contact") { _,_ ->
                     if(MeshSecurity(activity,Session.id).pin(contact.first,contact.third)) {
                         Db.get(activity).upsertConversation(contact.first,contact.second,"",System.currentTimeMillis(),false)

@@ -6,6 +6,8 @@ Follow-up: [Offline mesh audit, diagnostics and physical-device test plan](MESH_
 
 Follow-up: [Rabta Radar](RADAR.md) records the opt-in discovery and explicit connection approval flow that replaces automatic Nearby connection attempts.
 
+Follow-up: [Instant Connect](INSTANT_CONNECT.md) records signed temporary QR invitations and confirmation/replay behavior. The permanent contact QR remains as an explicitly labeled legacy option.
+
 ## Baseline and safe checkpoint
 
 - Repository: `https://github.com/irfan347/Rabta-Server`.
