@@ -27,8 +27,9 @@ class AuthActivity : ThemedActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Session.init(this)
-        if (Session.loggedIn) { goHome(); return }
+        if (Session.loggedIn && !intent.getBooleanExtra("reauth",false)) { goHome(); return }
         buildUi()
+        if(intent.getBooleanExtra("reauth",false)){usernameField.setText(Session.username);statusText.text="Sign in again to reconnect. Your local chats stay on this phone.";registerBtn.visibility=View.GONE}
     }
 
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
@@ -187,6 +188,8 @@ class AuthActivity : ThemedActivity() {
     }
 
     private fun saveAndGo(data: JSONObject) {
+        if(intent.getBooleanExtra("reauth",false)&&data.optString("id")!=Session.id){statusText.text="Use the same account as before. Local chats have not been changed.";return}
+        WsClient.disconnect()
         Session.id = data.optString("id"); Session.username = data.optString("username")
         Session.name = data.optString("name").ifEmpty { data.optString("username") }
         Session.token = data.optString("token"); Session.serverUrl = Config.SERVER

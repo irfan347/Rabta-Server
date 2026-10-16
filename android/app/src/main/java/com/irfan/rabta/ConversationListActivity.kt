@@ -65,7 +65,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         WsClient.connect(Session)
     }
 
-    override fun onResume() { super.onResume(); if (!::connectionTv.isInitialized) return; RabtaEvents.add(this); loadConvs(); handler.post(connectionTick); if (activeTab == 1) loadCalls() }
+    override fun onResume() { super.onResume(); if (!::connectionTv.isInitialized) return; MessageService.start(this);RabtaEvents.add(this); loadConvs(); handler.post(connectionTick); if (activeTab == 1) loadCalls() }
     override fun onPause() { super.onPause(); RabtaEvents.remove(this); handler.removeCallbacks(connectionTick); handler.removeCallbacks(searchTask) }
     override fun onDestroy() { RabtaEvents.remove(this); handler.removeCallbacksAndMessages(null); super.onDestroy() }
 
@@ -106,6 +106,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         hdr.addView(myAvatarView)
         root.addView(hdr)
         connectionTv = TextView(this).apply { textSize=13f; setTextColor(SUB); setBackgroundColor(BG); setPadding(dp(20),0,dp(20),dp(16)) }
+        connectionTv.setOnClickListener { ConnectionHelp.show(this) };connectionTv.contentDescription="Connection details and retry"
         root.addView(connectionTv)
         updateConnection()
 

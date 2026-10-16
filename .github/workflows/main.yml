@@ -137,6 +137,11 @@ jobs:
       - name: Test server attachment storage and signaling
         run: |
           if [ -f tests/server.test.js ]; then node --test tests/*.test.js; fi
+      - name: Read-only live connection diagnosis
+        timeout-minutes: 3
+        env:
+          ANDROID_PROJECT_DIR: ${{ steps.project.outputs.directory }}
+        run: python3 "$ANDROID_PROJECT_DIR/scripts/check_live_server.py"
       - name: Build and test APK
         env:
           ANDROID_PROJECT_DIR: ${{ steps.project.outputs.directory }}

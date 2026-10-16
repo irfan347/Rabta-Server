@@ -23,8 +23,9 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
         fun accepted(ctx:Context,id:String) { pendingCalls.remove(id)?.let { Db.get(ctx).deleteCall(it) } }
 
         fun start(ctx: Context) {
-            try { ctx.startForegroundService(Intent(ctx, MessageService::class.java)) } catch (_: Exception) {}
+            try { ctx.startForegroundService(Intent(ctx, MessageService::class.java)) } catch (_: Exception) {MeshBridge.status="Open Rabta to start Nearby service"}
         }
+        fun restartNearby(ctx:Context) {try {ctx.startForegroundService(Intent(ctx,MessageService::class.java).setAction("retry_nearby"))}catch(_:Exception){MeshBridge.status="Open Rabta to restart Nearby"}}
         fun stop(ctx: Context) {
             try { ctx.stopService(Intent(ctx, MessageService::class.java)) } catch (_: Exception) {}
         }
@@ -37,6 +38,9 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
     private val dismissCall=Runnable { cancelRinging() }
     private fun cancelRinging() { callHandler.removeCallbacks(dismissCall); ringingId=""; (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).cancel(CALL_NOTIF) }
     private var router: Router? = null
+    private val repair=object:Runnable { override fun run(){startMeshIfAllowed();callHandler.postDelayed(this,15000)} }
+    private val network=object:android.net.ConnectivityManager.NetworkCallback(){override fun onAvailable(n:android.net.Network){callHandler.post {if(Session.loggedIn&&!WsClient.connected)WsClient.retry()}}}
+    private var networkRegistered=false
 
     override fun onCreate() {
         super.onCreate()
@@ -45,11 +49,13 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
         startForeground(1, persistentNotification())
         RabtaEvents.add(this)
         if (Session.loggedIn) WsClient.connect(Session)
-        startMeshIfAllowed()
+        startMeshIfAllowed();callHandler.postDelayed(repair,15000)
+        try{(getSystemService(CONNECTIVITY_SERVICE) as android.net.ConnectivityManager).registerDefaultNetworkCallback(network);networkRegistered=true}catch(_:Exception){}
     }
 
     override fun onDestroy() {
-        cancelRinging()
+        cancelRinging();callHandler.removeCallbacks(repair)
+        if(networkRegistered)runCatching {(getSystemService(CONNECTIVITY_SERVICE) as android.net.ConnectivityManager).unregisterNetworkCallback(network)}
         RabtaEvents.remove(this)
         MeshBridge.detach(); router?.stop(); router = null
         super.onDestroy()
@@ -57,31 +63,25 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (Session.loggedIn && !WsClient.connected) WsClient.connect(Session)
+        if(intent?.action=="retry_nearby"){router?.pauseTransport();MeshBridge.status="Restarting Nearby…"}
         startMeshIfAllowed()        // e.g. after the user granted Bluetooth permission
         return START_STICKY
     }
 
     // ---------- offline mesh ----------
-    private fun meshPermissions(): List<String> {
-        val l = mutableListOf(android.Manifest.permission.ACCESS_FINE_LOCATION)
-        if (Build.VERSION.SDK_INT >= 31) {
-            l += android.Manifest.permission.BLUETOOTH_SCAN
-            l += android.Manifest.permission.BLUETOOTH_ADVERTISE
-            l += android.Manifest.permission.BLUETOOTH_CONNECT
-        }
-        if (Build.VERSION.SDK_INT >= 33) l += android.Manifest.permission.NEARBY_WIFI_DEVICES
-        return l
-    }
-
     private fun startMeshIfAllowed() {
-        if (router?.running == true || !Session.loggedIn) return
-        if (meshPermissions().any { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }) return
+        if(!Session.loggedIn){MeshBridge.status="Sign in once to use Nearby";return}
+        val problem=NearbySetup.problem(this)
+        if(problem!=null){router?.pauseTransport();MeshBridge.status=problem;return}
         try {
-            val r = Router(this, this)
-            r.start(Session.id, Session.name)
-            if (r.running) { router = r; MeshBridge.attach(r) }
-        } catch (_: Exception) {}
+            val current=router
+            if(current?.running==true){current.retryTransport();return}
+            if(current!=null){current.stop();router=null;MeshBridge.detach()}
+            val r=Router(this,this);r.start(Session.id,Session.name)
+            router=r;MeshBridge.attach(r)
+        }catch(_:Exception){MeshBridge.status="Nearby could not start — reopen app and check permissions"}
     }
+    override fun onStatus(msg:String){MeshBridge.status=msg}
 
     // Router.UiListener: a message reached us over the mesh
     override fun onMeshMessage(msgId: String, fromId: String, fromName: String, body: String, sentAt: Long, hops: Int, type: String, stored: () -> Unit) {

@@ -2,6 +2,7 @@ package com.irfan.rabta
 
 /** Lets screens use the mesh Router that lives inside MessageService. */
 object MeshBridge {
+    @Volatile var status="Nearby not started"
     @Volatile private var router: Router? = null
 
     fun attach(r: Router) { router = r }

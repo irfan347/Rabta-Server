@@ -25,6 +25,9 @@ class Router(private val ctx:Context,private val ui:UiListener):Mesh.Listener {
     private lateinit var security:MeshSecurity
     var myId=""; private set
     private var myName=""
+    @Volatile private var securityReady=false
+    fun retryTransport(){if(running&&securityReady){mesh.start(myName,myId);mesh.retryConnections()}}
+    fun pauseTransport(){mesh.stop()}
     @Volatile var running=false; private set
     val connected get()=mesh.connected
     val longRangeOn=false // Legacy advertisements cannot safely carry encrypted envelopes.
@@ -33,11 +36,11 @@ class Router(private val ctx:Context,private val ui:UiListener):Mesh.Listener {
         if(running || !MeshPolicy.validId(userId)) return
         myId=userId; myName=name; store=MeshStore(ctx,myId); security=MeshSecurity(ctx,myId); running=true
         worker.execute {
-            try { security.pair(); maintain(); main.post { if(running) { mesh.start(myName,myId); main.post(pulse) } } }
+            try { security.pair(); maintain(); securityReady=true;main.post { if(running) { retryTransport(); main.post(pulse) } } }
             catch(_:Exception) { running=false; main.post { ui.onStatus("Offline security key unavailable") } }
         }
     }
-    fun stop() { running=false; main.removeCallbacks(pulse); mesh.stop(); worker.execute { store.close() }; worker.shutdown() }
+    fun stop() { running=false;securityReady=false; main.removeCallbacks(pulse); mesh.stop(); worker.execute { store.close() }; worker.shutdown() }
     fun hasKey(peer:String)=running && security.key(peer)!=null
     fun sendDirect(toId:String,msgId:String,body:String,type:String="text"):Boolean {
         if(!running || !MeshPolicy.validId(toId) || !MeshPolicy.validId(msgId) || body.toByteArray().size>12000) return false
@@ -138,12 +141,12 @@ class Router(private val ctx:Context,private val ui:UiListener):Mesh.Listener {
     }
     override fun onFound(endpointId:String,name:String,userId:String) { if(running && MeshPolicy.validId(userId) && myId<userId && !connected.containsKey(endpointId)) mesh.connect(endpointId); ui.onPeople() }
     override fun onConnected(endpointId:String,userId:String,name:String) {
-        ui.onPeople()
+        ui.onStatus("Nearby: ${connected.size} phone(s) connected");ui.onPeople()
         worker.execute { maintain(); mesh.sendEnvelopeTo(endpointId,keyPacket()); carry(endpointId) }
     }
     override fun onLost(endpointId:String)=ui.onPeople()
     override fun onConnecting(endpointId:String,name:String) {}
-    override fun onDisconnected(endpointId:String)=ui.onPeople()
+    override fun onDisconnected(endpointId:String) {ui.onStatus(if(connected.isEmpty())"Nearby peer disconnected — searching again" else "Nearby: ${connected.size} phone(s) connected");ui.onPeople()}
     override fun onFileStart(endpointId:String,payloadId:Long,name:String,size:Long) {}
     override fun onFileDone(endpointId:String,payloadId:Long) {}
     override fun onStream(endpointId:String,payload:Payload) {}

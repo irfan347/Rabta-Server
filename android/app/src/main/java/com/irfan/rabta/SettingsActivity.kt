@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.widget.*
 class SettingsActivity:ThemedActivity() {
     override fun onCreate(state:Bundle?) { super.onCreate(state);val col=FeatureUi.page(this,"Settings")
+        col.addView(FeatureUi.button(this,"Connection details") {ConnectionHelp.show(this)})
         col.addView(FeatureUi.button(this,"Appearance") { AppTheme.choose(this) })
         col.addView(FeatureUi.button(this,"Language") { AlertDialog.Builder(this).setTitle("Language / زبان").setItems(arrayOf("English","اردو")) { _,i -> L.prefs(this).edit().putString("language",if(i==0)"en" else "ur").apply();recreate() }.show() })
         col.addView(FeatureUi.button(this,"Text size") { AlertDialog.Builder(this).setTitle(L.t(this,"Text size")).setSingleChoiceItems(arrayOf("Small","Default","Large","Extra large"),listOf(0.9f,1f,1.15f,1.3f).indexOf(L.prefs(this).getFloat("scale",1f))) { d,i ->L.prefs(this).edit().putFloat("scale",listOf(0.9f,1f,1.15f,1.3f)[i]).apply();d.dismiss();recreate()}.show() })

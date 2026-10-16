@@ -17,28 +17,78 @@ object WsClient {
         .pingInterval(25, TimeUnit.SECONDS).build()
     private val handler = Handler(Looper.getMainLooper())
     private var ws: WebSocket? = null
-    var connected = false; private set
+    @Volatile var connected = false; private set
+    @Volatile var authRequired = false; private set
+    @Volatile var status = "Offline"; private set
     private var reconnectDelay = 2000L
     private var shouldConnect = false
+    private var generation=0L
+    private var identity=""
+    private var retryTask:Runnable?=null
+    private var readyTimeout:Runnable?=null
+    private fun main(work:()->Unit) { if(Looper.myLooper()==Looper.getMainLooper())work() else handler.post {work()} }
+    private fun announce(value:String) { status=value;RabtaEvents.postDisconnected() }
+    private fun cancelTimers(){retryTask?.let {handler.removeCallbacks(it)};readyTimeout?.let {handler.removeCallbacks(it)};retryTask=null;readyTimeout=null}
 
-    fun connect(session: Session) {
-        if (session.serverUrl.isEmpty() || session.token.isEmpty()) return
-        if (shouldConnect) return
-        shouldConnect = true; reconnectDelay = 2000L; doConnect(session)
+    fun connect(session: Session) = main {
+        if(session.serverUrl.isBlank()||session.token.isBlank())return@main
+        val next=session.serverUrl+"|"+session.id+"|"+session.token
+        if(identity!=next){generation++;cancelTimers();ws?.cancel();ws=null;connected=false;authRequired=false;identity=next;shouldConnect=false}
+        if(shouldConnect||authRequired)return@main
+        shouldConnect=true;reconnectDelay=2000L;doConnect()
     }
-
-    private fun doConnect(session: Session) {
-        if (!shouldConnect) return
-        val url = session.serverUrl.replace("https://","wss://").replace("http://","ws://") + "/ws"
-        ws = http.newWebSocket(Request.Builder().url(url).header("Authorization","Bearer ${session.token}").build(),
-            object : WebSocketListener() {
-                override fun onOpen(ws: WebSocket, r: Response) { connected = true; reconnectDelay = 2000L; handler.post { RabtaEvents.postConnected() } }
-                override fun onMessage(ws: WebSocket, text: String) { val o = try { JSONObject(text) } catch (_: Exception) { return }; handler.post { handle(o) } }
-                override fun onFailure(ws: WebSocket, t: Throwable, r: Response?) { connected = false; handler.post { RabtaEvents.postDisconnected() }
-                    if (shouldConnect) handler.postDelayed({ doConnect(session) }, reconnectDelay.also { reconnectDelay = (it*1.5).toLong().coerceAtMost(30000) }) }
-                override fun onClosed(ws: WebSocket, code: Int, reason: String) { connected = false; handler.post { RabtaEvents.postDisconnected() }
-                    if (shouldConnect) handler.postDelayed({ doConnect(session) }, reconnectDelay) }
+    fun retry() = main {
+        if(!Session.loggedIn)return@main
+        if(authRequired){announce("Sign in again — session expired or rejected");return@main}
+        generation++;cancelTimers();ws?.cancel();ws=null;connected=false;shouldConnect=false
+        connect(Session)
+    }
+    private fun lost(attempt:Long,value:String,auth:Boolean=false) {
+        if(attempt!=generation)return
+        generation++;cancelTimers();connected=false;ws?.cancel();ws=null;authRequired=auth;announce(value)
+        if(shouldConnect&&!auth) {
+            val delay=reconnectDelay;reconnectDelay=(reconnectDelay*1.5).toLong().coerceAtMost(30000)
+            retryTask=Runnable { retryTask=null;doConnect() }.also {handler.postDelayed(it,delay)}
+        }
+    }
+    private fun doConnect() {
+        if(!shouldConnect||authRequired)return
+        val attempt=++generation
+        announce("Connecting to server…")
+        try {
+            val url=Session.serverUrl.trimEnd('/').replace("https://","wss://").replace("http://","ws://")+"/ws"
+            val expectedId=Session.id
+            ws=http.newWebSocket(Request.Builder().url(url).header("Authorization","Bearer ${Session.token}").build(),object:WebSocketListener(){
+                override fun onOpen(socket:WebSocket,r:Response)=main {
+                    if(attempt!=generation){socket.cancel();return@main}
+                    // A successful HTTP upgrade is not an authenticated session.
+                    announce("Authenticating…")
+                    readyTimeout=Runnable {lost(attempt,"Server did not confirm login — retrying…")}.also {handler.postDelayed(it,15000)}
+                }
+                override fun onMessage(socket:WebSocket,text:String)=main {
+                    if(attempt!=generation)return@main
+                    val o=runCatching {JSONObject(text)}.getOrNull()?:return@main
+                    if(o.optString("type")=="ready") {
+                        if(o.optString("id")!=expectedId){lost(attempt,"Server rejected account identity",true);return@main}
+                        readyTimeout?.let {handler.removeCallbacks(it)};readyTimeout=null
+                        connected=true;status="Online";reconnectDelay=2000L;RabtaEvents.postConnected()
+                    } else if(connected)handle(o)
+                }
+                override fun onClosing(socket:WebSocket,code:Int,reason:String)=main {
+                    if(attempt!=generation)return@main
+                    socket.close(code,reason)
+                    lost(attempt,if(code==1008)"Sign in again — session expired or rejected" else "Connection closed — retrying…",code==1008)
+                }
+                override fun onClosed(socket:WebSocket,code:Int,reason:String)=main {
+                    lost(attempt,if(code==1008)"Sign in again — session expired or rejected" else "Disconnected — retrying…",code==1008)
+                }
+                override fun onFailure(socket:WebSocket,t:Throwable,r:Response?)=main {
+                    val auth=r?.code in listOf(401,403)
+                    val message=when {auth->"Sign in again — session expired or rejected";t is java.net.UnknownHostException->"Server address could not be found";t is javax.net.ssl.SSLException->"Secure connection failed; check phone date and time";r!=null->"Server unavailable (HTTP ${r.code}) — retrying…";else->"Server unreachable — check internet; retrying…"}
+                    lost(attempt,message,auth)
+                }
             })
+        } catch(_:Exception) {lost(attempt,"Invalid server address — check connection settings",true)}
     }
 
     private fun handle(o: JSONObject) {
@@ -68,7 +118,7 @@ object WsClient {
         }
     }
 
-    fun disconnect() { shouldConnect = false; ws?.close(1000,"bye"); ws = null; connected = false }
+    fun disconnect() = main { shouldConnect=false;generation++;cancelTimers();ws?.cancel();ws=null;connected=false;authRequired=false;identity="";announce("Offline") }
 
     fun send(toId: String, msgId: String, body: String, msgType: String = "text"): Boolean {
         if (!connected) return false

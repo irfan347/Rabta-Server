@@ -9,8 +9,8 @@ android {
         applicationId = "com.irfan.rabta"
         minSdk = 26
         targetSdk = 34
-        versionCode = 32
-        versionName = "1.9"
+        versionCode = 33
+        versionName = "1.9.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions {
@@ -20,6 +20,7 @@ android {
     kotlinOptions { jvmTarget = "17" }
 }
 dependencies {
+    androidTestImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     androidTestImplementation("androidx.test:runner:1.5.2")
