@@ -28,3 +28,9 @@ Status remains accessible through its 48dp header action and the More menu. Prof
 `DesignSystemTest` verifies real group filtering and all four navigation destinations, Status access, touch targets, AA colour contrast, system font scaling, keyboard/composer placement and captures light/dark UI. Existing interface and connection tests remain enabled. CI exercises API 29 and 34 and collects screenshots even when another device test fails.
 
 The audit in RABTA_ROADMAP.md records baseline failures separately. A passing build does not establish two-phone or physical mesh delivery.
+
+## Home screen
+
+The Chats home keeps the Rabta brand header, current account avatar, live server and nearby connection text, and a rounded search field. Search and the All, Unread and Groups filters operate on existing SQLite conversation/message data; unread counts come from saved conversation rows and groups use the existing `is_group` field. Rows show the saved peer name, last-message preview, local timestamp and unread count, with remote profile photos where available. An empty conversation shows a neutral no-messages label.
+
+New chat opens a native rounded bottom sheet and resolves the entered username or Rabta ID through the existing account lookup. Calls continue to use the existing local call history and call flows. Status remains reachable from the header and More menu. The Chats, Nearby, Spaces and Calls navigation destinations remain intact.
