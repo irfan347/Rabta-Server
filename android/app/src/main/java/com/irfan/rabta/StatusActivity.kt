@@ -28,7 +28,7 @@ class StatusActivity : ThemedActivity() {
             androidx.core.view.ViewCompat.setAccessibilityHeading(this, true)
         })
         val actions = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        actions.addView(RabtaUi.button(this, "Write a text status", true) { composeText() })
+        actions.addView(RabtaUi.button(this, "Text status", true) { composeText() })
         actions.addView(RabtaUi.button(this, "Share a photo") { pick("image/*", 31) })
         actions.addView(RabtaUi.button(this, "Share a video") { pick("video/*", 32) })
         col.addView(actions)
