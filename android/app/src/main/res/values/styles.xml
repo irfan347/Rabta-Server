@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Rabta.Base" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:colorAccent">@color/rabta_violet</item>
+        <item name="android:statusBarColor">@color/rabta_graphite</item>
+        <item name="android:navigationBarColor">@color/rabta_graphite</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+    <style name="Theme.Rabta" parent="Theme.Rabta.Base" />
+</resources>

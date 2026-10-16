@@ -86,7 +86,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
 
         // ── Header ──
         val hdr = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(BG); setPadding(dp(20),dp(18),dp(20),dp(12)) }
-        hdr.addView(TextView(this).apply { text = "Rabta"; textSize = 30f; typeface = Typeface.DEFAULT_BOLD; setTextColor(TXT) },
+        hdr.addView(RabtaBrand.lockup(this, 38, TXT, 30f),
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         onlineDot = View(this).apply { background = pill(0x55FFFFFF) }
         hdr.addView(onlineDot, LinearLayout.LayoutParams(dp(10), dp(10)).apply { marginEnd = dp(10) })

@@ -1,9 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp" android:height="108dp"
-    android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#FFFFFF"
-        android:pathData="M34,36 h40 a8,8 0 0 1 8,8 v20 a8,8 0 0 1 -8,8 h-22 l-12,10 v-10 h-6 a8,8 0 0 1 -8,-8 v-20 a8,8 0 0 1 8,-8 z" />
-    <path android:fillColor="#0F9D58"
-        android:pathData="M44,50 h20 v4 h-20 z M44,58 h14 v4 h-14 z" />
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- The 66 × 66 safe zone is centered at 54,54. -->
+    <group android:scaleX="0.82" android:scaleY="0.82" android:pivotX="54" android:pivotY="54">
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M31,76 L31,32 L52,32 C64,32 71,38 71,47 C71,56 64,62 52,62 L31,62 M51,62 L76,78"
+        android:strokeColor="@color/rabta_violet"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="7" />
+    <path android:fillColor="@android:color/transparent" android:pathData="M31,27.7 A4.3,4.3 0,1 1,31,36.3 A4.3,4.3 0,1 1,31,27.7 Z" android:strokeColor="@color/rabta_teal" android:strokeWidth="2.5" />
+    <path android:fillColor="@android:color/transparent" android:pathData="M52,27.7 A4.3,4.3 0,1 1,52,36.3 A4.3,4.3 0,1 1,52,27.7 Z" android:strokeColor="@color/rabta_teal" android:strokeWidth="2.5" />
+    <path android:fillColor="@android:color/transparent" android:pathData="M71,42.7 A4.3,4.3 0,1 1,71,51.3 A4.3,4.3 0,1 1,71,42.7 Z" android:strokeColor="@color/rabta_teal" android:strokeWidth="2.5" />
+    <path android:fillColor="@android:color/transparent" android:pathData="M52,57.7 A4.3,4.3 0,1 1,52,66.3 A4.3,4.3 0,1 1,52,57.7 Z" android:strokeColor="@color/rabta_teal" android:strokeWidth="2.5" />
+    <path android:fillColor="@android:color/transparent" android:pathData="M31,57.7 A4.3,4.3 0,1 1,31,66.3 A4.3,4.3 0,1 1,31,57.7 Z" android:strokeColor="@color/rabta_teal" android:strokeWidth="2.5" />
+    <path android:fillColor="@android:color/transparent" android:pathData="M76,73.7 A4.3,4.3 0,1 1,76,82.3 A4.3,4.3 0,1 1,76,73.7 Z" android:strokeColor="@color/rabta_teal" android:strokeWidth="2.5" />
+    </group>
 </vector>

@@ -39,22 +39,19 @@ class AuthActivity : ThemedActivity() {
     }
 
     private fun buildUi() {
-        // Full green top half, white bottom
+        // Graphite branded header, themed form below
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         setContentView(ScrollView(this).apply { isFillViewport=true; addView(root) })
 
-        // ---- TOP (green) ----
+        // ---- TOP (brand) ----
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setBackgroundColor(AppTheme.ACCENT)
+            setBackgroundColor(getColor(R.color.rabta_graphite))
             setPadding(dp(32), dp(24), dp(32), dp(24))
         }
-        top.addView(TextView(this).apply {
-            text = "Rabta"; textSize = 34f; typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.WHITE); gravity = Gravity.CENTER
-        })
+        top.addView(RabtaBrand.lockup(this, 48, Color.WHITE, 34f))
         top.addView(TextView(this).apply {
             text = "رابطہ"; textSize = 20f; setTextColor(0xCCFFFFFF.toInt()); gravity = Gravity.CENTER
         })
