@@ -155,10 +155,13 @@ class DesignSystemTest {
             .putExtra("peerId","DA7A00000001").putExtra("peerName","Design direct contact"))
         try {
             lateinit var editor:EditText
+            waitUntil { a.hasWindowFocus() }
             ui {
                 editor=all(a.window.decorView).filterIsInstance<EditText>().first { it.hint=="Message" }
                 editor.requestFocus()
-                (a.getSystemService(Activity.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).showSoftInput(editor,android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+                editor.post {
+                    androidx.core.view.WindowCompat.getInsetsController(a.window,editor).show(WindowInsetsCompat.Type.ime())
+                }
             }
             waitUntil { ViewCompat.getRootWindowInsets(a.window.decorView)?.isVisible(WindowInsetsCompat.Type.ime())==true }
             ui {

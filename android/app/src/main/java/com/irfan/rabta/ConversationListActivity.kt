@@ -49,7 +49,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         override fun handleOnBackPressed() { switchTab(0) }
     }
     private lateinit var myAvatarView: FrameLayout
-    private val handler = Handler(Looper.getMainLooper())
+    private val uiHandler = Handler(Looper.getMainLooper())
     private lateinit var db: Db
     private lateinit var connectionTv: TextView
     private lateinit var searchField: EditText
@@ -57,7 +57,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
     private var loadVersion = 0
     private val searchTask = Runnable { loadConvs() }
     private val connectionTick = object : Runnable {
-        override fun run() { updateConnection(); handler.postDelayed(this, 3000) }
+        override fun run() { updateConnection(); uiHandler.postDelayed(this, 3000) }
     }
     private fun updateConnection() {
         connectionTv.text = ConnectionStatus.text(this)
@@ -83,15 +83,15 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
     override fun onResume() {
         super.onResume();if(!::connectionTv.isInitialized)return
         resumed=true;MessageService.start(this);RabtaEvents.add(this)
-        handler.removeCallbacks(connectionTick);handler.post(connectionTick)
+        uiHandler.removeCallbacks(connectionTick);uiHandler.post(connectionTick)
         when(activeTab) { 1->nearbyPanel.resume();3->loadCalls();else->loadConvs() }
     }
     override fun onPause() {
         resumed=false;if(::nearbyPanel.isInitialized)nearbyPanel.pause()
-        RabtaEvents.remove(this);handler.removeCallbacks(connectionTick);handler.removeCallbacks(searchTask)
+        RabtaEvents.remove(this);uiHandler.removeCallbacks(connectionTick);uiHandler.removeCallbacks(searchTask)
         super.onPause()
     }
-    override fun onDestroy() { RabtaEvents.remove(this);handler.removeCallbacksAndMessages(null);super.onDestroy() }
+    override fun onDestroy() { RabtaEvents.remove(this);uiHandler.removeCallbacksAndMessages(null);super.onDestroy() }
     override fun onSaveInstanceState(state:Bundle) {
         queries[activeTab]=searchQuery
         state.putInt("destination",activeTab);state.putString("chatQuery",queries[0]);state.putString("spaceQuery",queries[2])
@@ -162,7 +162,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
                 override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int) {}
                 override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int) {
                     searchQuery=s?.toString().orEmpty();loadVersion++
-                    handler.removeCallbacks(searchTask);handler.postDelayed(searchTask,180)
+                    uiHandler.removeCallbacks(searchTask);uiHandler.postDelayed(searchTask,180)
                 }
                 override fun afterTextChanged(s:android.text.Editable?) {}
             })
@@ -261,7 +261,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         if(target.childCount==0)target.addView(RabtaUi.loading(this,"Loading conversations…"))
         Thread {
             val result=runCatching { db.searchConversations(query).filter { destination!=2||it.isGroup } }
-            handler.post {
+            uiHandler.post {
                 if(isDestroyed||isFinishing||version!=loadVersion||destination!=activeTab)return@post
                 target.removeAllViews()
                 result.onFailure {
@@ -293,7 +293,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         else {
             av.addView(initials(c.peerName, dp(50)), FrameLayout.LayoutParams(dp(50),dp(50)))
             ProfileHelper.loadIfNeeded(c.peerId, Session.serverUrl, Session.token) { bmp ->
-                if (bmp != null) handler.post {
+                if (bmp != null) uiHandler.post {
                     val iv = ImageView(this).apply { setImageBitmap(bmp); scaleType = ImageView.ScaleType.CENTER_CROP; clipToOutline=true; background = pill(0xFF607D8B.toInt()) }
                     av.addView(iv, FrameLayout.LayoutParams(dp(50),dp(50)))
                 }
@@ -327,7 +327,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         if(callsList.childCount==0)callsList.addView(RabtaUi.loading(this,"Loading calls…"))
         Thread {
             val result=runCatching { db.calls() }
-            handler.post {
+            uiHandler.post {
                 if(isDestroyed||isFinishing||version!=callVersion)return@post
                 callsList.removeAllViews()
                 result.onFailure {
@@ -461,7 +461,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
                 if (arr != null) for (i in 0 until arr.length()) ml.add(arr.getString(i))
                 Thread { db.saveGroup(gId, name, ml); db.upsertConversation(gId, name, "New group!", System.currentTimeMillis(), false, true) }.start()
                 try { dlg.dismiss() } catch (_: Exception) {}
-                handler.post { open(gId, name, true) }
+                uiHandler.post { open(gId, name, true) }
             }
         }
     }
@@ -488,10 +488,10 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
     }
 
     // RabtaEvents
-    override fun onMessage(fromId: String, fromName: String, msgId: String, body: String, t: Long, msgType: String, groupId: String) { handler.postDelayed({ loadConvs() }, 300) }
+    override fun onMessage(fromId: String, fromName: String, msgId: String, body: String, t: Long, msgType: String, groupId: String) { uiHandler.postDelayed({ loadConvs() }, 300) }
     override fun onGroupCreated(groupId: String, groupName: String, members: List<String>) {
         Thread { try { db.saveGroup(groupId, groupName, members); db.upsertConversation(groupId, groupName, "New group!", System.currentTimeMillis(), true, true) } catch (_: Exception) {} }.start()
-        handler.postDelayed({ loadConvs() }, 400)
+        uiHandler.postDelayed({ loadConvs() }, 400)
     }
     override fun onHistoryChanged(convId: String) { loadConvs() }
     override fun onConnected() { updateConnection() }
