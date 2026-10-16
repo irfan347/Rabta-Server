@@ -11,6 +11,7 @@ import androidx.core.graphics.PathParser
 /** Bundled vector paths: the same controls on every Android version. */
 object UiIcons {
     private val paths = mapOf(
+        "close" to "M5,4l7,7 7,-7 1,1 -7,7 7,7 -1,1 -7,-7 -7,7 -1,-1 7,-7 -7,-7z",
         "chats" to "M4,4h16v12H8l-4,4z M7,7v2h10V7z M7,11v2h7v-2z",
         "nearby" to "M11,10h2v4h-2z M8,8l1.4,1.4a4,4 0,0 0,0,5.2L8,16a6,6 0,0 1,0,-8z M16,8a6,6 0,0 1,0,8l-1.4,-1.4a4,4 0,0 0,0,-5.2z M5,5l1.4,1.4a8,8 0,0 0,0,11.2L5,19a10,10 0,0 1,0,-14z M19,5a10,10 0,0 1,0,14l-1.4,-1.4a8,8 0,0 0,0,-11.2z",
         "spaces" to "M3,3h8v8H3z M13,3h8v8h-8z M3,13h8v8H3z M13,13h8v8h-8z",
