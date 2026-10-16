@@ -52,6 +52,8 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     private lateinit var peerId: String
     private lateinit var peerName: String
     private var isGroup = false
+    private var replyTo:Db.Message?=null
+    private lateinit var replyBar:TextView
     private lateinit var chatBox: LinearLayout
     private lateinit var chatScroll: ScrollView
     private lateinit var input: EditText
@@ -93,7 +95,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             handler.postDelayed(this,1000)
         }
     }
-    private val callTimeout = Runnable { if(inCall && connectedAt==0L) { endCall(); toast("Call ka jawab nahi mila") } }
+    private val callTimeout = Runnable { if(inCall && connectedAt==0L) { endCall(outcome="no answer"); toast("Call ka jawab nahi mila") } }
     private val searchTask = Runnable { loadHistory(true) }
     private fun duration(seconds: Long) = "%d:%02d".format(seconds/60,seconds%60)
 
@@ -185,6 +187,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         if (!isGroup) hdr.addView(headerBtn("📞") { startCall(true) })
         if (!isGroup) hdr.addView(headerBtn("🎥") { startVideoCall() })
         hdr.addView(TextView(this).apply { UiIcons.set(this,"search",SUB,label="Search chat"); gravity=Gravity.CENTER; setOnClickListener { searchField.visibility=if(searchField.visibility==View.VISIBLE) View.GONE else View.VISIBLE } },LinearLayout.LayoutParams(dp(44),dp(48)))
+        hdrCol.setOnClickListener { if(!isGroup) MessageActions.contact(this,peerId) }
         headerBar=hdr
         root.addView(hdr)
 
@@ -239,6 +242,8 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         chatScroll.addView(chatBox)
         root.addView(chatScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,0,1f))
 
+        replyBar=TextView(this).apply { visibility=View.GONE;setTextColor(SUB);setPadding(dp(16),dp(8),dp(16),dp(8));setOnClickListener { replyTo=null;visibility=View.GONE } }
+        root.addView(replyBar)
         // ── Input bar ──
         recordingPanel=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setBackgroundColor(RECV); visibility=View.GONE }
         recordingTv=TextView(this).apply { setTextColor(RED); textSize=13f; setPadding(dp(12),dp(12),0,dp(12)); accessibilityLiveRegion=View.ACCESSIBILITY_LIVE_REGION_POLITE }
@@ -249,7 +254,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         bar.addView(headerBtn("📎") { showAttachments() }.apply { background=null })
         bar.addView(TextView(this).apply { UiIcons.set(this,"sticker",GREEN,label="Stickers"); gravity=Gravity.CENTER; setOnClickListener { Stickers.picker(this@ChatActivity,{sendContent(it,"sticker")},{pickAttachment("image/*",104)}) } },LinearLayout.LayoutParams(dp(40),dp(48)))
         input = EditText(this).apply {
-            hint="Message"; textSize=16f; setTextColor(TXT); setHintTextColor(SUB); maxLines=5
+            hint=L.t(this@ChatActivity,"Message"); textSize=16f; setTextColor(TXT); setHintTextColor(SUB); maxLines=5
             background = GradientDrawable().apply { setColor(BEIGE); cornerRadius=dp(24).toFloat() }
             setPadding(dp(14),dp(10),dp(14),dp(10))
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
@@ -314,7 +319,16 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
                     if(day!=lastDay) { addDateSeparator(m.sentAt); lastDay=day }
                     val before=chatBox.childCount
                     addBubble(m.body,m.mine,fmtTime(m.sentAt),m.status,m.msgType,if(isGroup&&!m.mine)m.fromName else "")
-                    if(m.mine && m.status in setOf("failed","expired") && chatBox.childCount>before) {
+                    if(chatBox.childCount>before) {
+                        val row=chatBox.getChildAt(chatBox.childCount-1) as ViewGroup
+                        val bubble=row.getChildAt(0) as ViewGroup
+                        fun actions(v:View) { v.setOnLongClickListener { MessageActions.show(this,m,isGroup,{ replyTo=it;replyBar.text="Reply: "+MessageActions.preview(it)+"  ×";replyBar.visibility=View.VISIBLE },{loadHistory()});true };if(v is ViewGroup) for(i in 0 until v.childCount)actions(v.getChildAt(i)) }
+                        actions(bubble)
+                        val meta=db.meta(m.id);val reactions=org.json.JSONObject(meta.second);val emojis=reactions.keys().asSequence().map { reactions.optString(it) }.groupingBy { it }.eachCount().entries.joinToString("  ") { it.key+" "+it.value }
+                        if(meta.first||emojis.isNotEmpty())bubble.addView(textLine((if(meta.first)"★  " else "")+emojis).apply {textSize=12f})
+                        Transfers.progress[m.id]?.let { percent ->bubble.addView(textLine("Uploading $percent% · Hold to cancel").apply {textSize=12f}) }
+                    }
+                    if(m.mine && m.status in setOf("failed","expired","paused","canceled") && chatBox.childCount>before) {
                         val row=chatBox.getChildAt(chatBox.childCount-1) as ViewGroup
                         row.getChildAt(0).apply { isClickable=true; contentDescription="Message failed. Tap to retry"; setOnClickListener { Outbox.retry(m,isGroup) } }
                     }
@@ -345,6 +359,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             bubble.addView(TextView(this).apply { text=sender; textSize=13f; typeface=Typeface.DEFAULT_BOLD; setTextColor(senderColors[(sender.hashCode() and 0x7FFFFFFF)%senderColors.size].toInt()) })
         }
         when (msgType) {
+            "rich" -> {val o=runCatching {org.json.JSONObject(body)}.getOrDefault(org.json.JSONObject());bubble.addView(textLine("↪ "+o.optString("reply")).apply {textSize=12f;setTextColor(SUB)});bubble.addView(textLine(o.optString("text")))}
             "image" -> {
                 val bmp = MediaHelper.base64ToBitmap(body)
                 if (bmp != null) {
@@ -361,6 +376,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             "sticker" -> {
                 val iv=ImageView(this).apply { contentDescription="Sticker"; scaleType=ImageView.ScaleType.FIT_CENTER }
                 if(Stickers.valid(body)) iv.setImageDrawable(Stickers.drawable(body))
+                else if(runCatching {org.json.JSONObject(body).has("remote")}.getOrDefault(false)) FeatureApi.run(this,{Transfers.download(this,body)}) { local ->iv.setImageURI(android.net.Uri.fromFile(Attachments.file(this,local))) }
                 else runCatching { iv.setImageURI(android.net.Uri.fromFile(Attachments.file(this,body))) }
                 iv.setOnLongClickListener { Stickers.remember(this,body); toast("Sticker saved to Recent"); true }
                 bubble.addView(iv,LinearLayout.LayoutParams(dp(150),dp(150)))
@@ -441,9 +457,13 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     // ── Send ──
     private fun sendMsg() {
         val text = input.text.toString().trim(); if (text.isEmpty()) return
-        sendContent(text, "text"); input.setText("")
+        val quote=replyTo
+        if(quote!=null&&!WsClient.connected){toast("Reply needs internet; tap the reply preview to send plain text offline");return}
+        if(quote==null)sendContent(text,"text")else sendContent(org.json.JSONObject().put("text",text).put("reply",MessageActions.preview(quote)).toString(),"rich")
+        replyTo=null;replyBar.visibility=View.GONE;input.setText("")
     }
     private fun sendContent(body: String, msgType: String) {
+        if(!isGroup&&Privacy.blocked(this,peerId)){toast("Unblock this contact to send a message");return}
         if(!WsClient.connected && (isGroup || msgType !in setOf("text","sticker") || (msgType=="sticker" && !Stickers.valid(body)))) { toast("Videos, files and media need internet. Nearby supports text and built-in stickers."); return }
         if(msgType=="text" && body.toByteArray().size>12000) { toast("Message is too long (12 KB maximum)"); return }
         if(msgType=="sticker") Stickers.remember(this,body)
@@ -562,12 +582,12 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         UiIcons.set(speakerControl,"speaker",label=if(callSpeaker) "Speaker on" else "Speaker off")
         speakerControl.background=oval(if(callSpeaker) GREEN else GRAY_BTN); speakerControl.isSelected=callSpeaker
     }
-    private fun endCall(sendEnd:Boolean=true) {
+    private fun endCall(sendEnd:Boolean=true,outcome:String="cancelled") {
         if(!inCall) return
         inCall=false; netCall?.stop(sendEnd); netCall=null
         handler.removeCallbacks(callTick); handler.removeCallbacks(callTimeout)
         val seconds=if(connectedAt==0L) 0 else ((android.os.SystemClock.elapsedRealtime()-connectedAt)/1000).toInt()
-        if(callId>0) db.logCallEnd(callId,seconds)
+        if(callId>0) db.logCallEnd(callId,seconds); if(callId>0&&connectedAt==0L)db.callOutcome(callId,outcome)
         callId=-1L; connectedAt=0L
         try { (getSystemService(AUDIO_SERVICE) as AudioManager).apply { isSpeakerphoneOn=previousSpeaker; mode=previousAudioMode } } catch (_:Exception) {}
         headerBar.visibility=View.VISIBLE; window.statusBarColor=BEIGE; window.decorView.systemUiVisibility=if(AppTheme.dark(this)) 0 else View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
@@ -600,10 +620,10 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         // Audio alone must never auto-answer an incoming call.
         if(inCall) netCall?.onAudio(data)
     }
-    override fun onCallEnd(fromId:String,callId:String) { if(fromId==peerId && callId==netCall?.id) handler.post{endCall(false);toast("Call khatam")} }
+    override fun onCallEnd(fromId:String,callId:String) { if(fromId==peerId && callId==netCall?.id) handler.post{endCall(false,"ended before answer");toast("Call khatam")} }
     override fun onCallState(fromId:String,callId:String,state:String) {
         if(fromId!=peerId || callId!=netCall?.id) return
-        if(state=="busy") { endCall(false); toast("Busy"); return }
+        if(state=="busy") { endCall(false,"busy"); toast("Busy"); return }
         netCall?.state(state)
     }
     override fun onVideoEnd(callId:String) {}

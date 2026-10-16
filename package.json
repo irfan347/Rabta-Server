@@ -1,10 +1,10 @@
 {
   "name": "rabta-server",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "test": "node --test tests/server.test.js"
+    "test": "node --test tests/*.test.js"
   },
   "engines": {
     "node": ">=18"

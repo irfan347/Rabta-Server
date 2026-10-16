@@ -10,6 +10,8 @@ object MeshBridge {
     val running get() = router?.running == true
     val peersConnected get() = router?.connected?.size ?: 0
 
+    fun peerNames():List<String> = router?.connected?.values?.toList() ?: emptyList()
+
     fun hasKey(peer:String)=router?.hasKey(peer)==true
 
     /** Send a 1-to-1 message over the offline mesh. False if mesh is off. */

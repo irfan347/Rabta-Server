@@ -16,7 +16,8 @@ object MessageDelivery {
         "mesh_wait" -> old in setOf("sending", "failed")
         "expired" -> old in setOf("mesh","mesh_wait")
         "failed" -> old == "sending"
-        "sending" -> old in setOf("failed","expired")
+        "paused", "canceled" -> old=="sending"
+        "sending" -> old in setOf("failed","expired","paused","canceled")
         else -> false
     }
     fun label(status: String): String = when (status) {
@@ -27,6 +28,8 @@ object MessageDelivery {
         "mesh" -> "Nearby queued"
         "mesh_wait" -> "Waiting for contact key"
         "expired" -> "Expired · Tap to resend"
+        "paused" -> "Paused · Tap to resume"
+        "canceled" -> "Cancelled · Tap to retry"
         "failed" -> "Failed · Tap to retry"
         else -> status
     }

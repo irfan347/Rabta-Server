@@ -145,6 +145,7 @@ function deliverCall(call) {
 }
 function beginCall(from,to,id,video,sdp) {
   if(!/^[0-9A-F]{12}$/.test(id) || !memUsers.has(to) || from===to) return;
+  if(features.blocked(from,to)){sendTo(from,{type:'call_state',from:to,callId:id,state:'busy'});return;}
   const all=[...voiceCalls.values(),...videoCalls.values()];
   if(all.some(c=>[c.from,c.to].includes(from)||[c.from,c.to].includes(to))) { sendTo(from,{type:'call_state',from:to,callId:id,state:'busy'});return; }
   const call={id,from,to,video,sdp,answered:false,expires:Date.now()+45000,ice:[]};
@@ -167,6 +168,7 @@ async function deliverPending(userId, ws) {
     msgs.forEach(m => { m.delivered_at = Date.now(); });
   }
   for (const m of msgs) {
+    if(features.blocked(m.from_id,userId)) continue;
     ws.send(JSON.stringify({ type: m.group_id ? 'group_msg' : 'msg', groupId: m.group_id || '', groupName: m.group_name || '', id: m.msg_id, from: m.from_id, fromName: m.from_name, body: m.body, msgType: m.type || 'text', t: Number(m.sent_at), offline: true }));
   }
 }
@@ -205,14 +207,21 @@ wss.on('connection', (ws, req) => {
   ws.on('message', async (raw) => {
     let msg; try { msg = JSON.parse(raw.toString()); } catch { return; }
     if (msg.type === 'msg' || msg.type === 'group_msg') {
-      if (!/^[0-9A-F]{12}$/.test(String(msg.id || '')) || typeof msg.body !== 'string' || !msg.body || Buffer.byteLength(msg.body) > MAX_BODY || !['text','image','voice','video','file','sticker'].includes(msg.msgType || 'text')) {
+      if (!/^[0-9A-F]{12}$/.test(String(msg.id || '')) || typeof msg.body !== 'string' || !msg.body || Buffer.byteLength(msg.body) > MAX_BODY || !['text','image','voice','video','file','sticker','rich','reaction'].includes(msg.msgType || 'text')) {
         ws.send(JSON.stringify({type:'ack',id:msg.id,status:'error'})); return;
       }
+    }
+    if ((msg.type==='msg'||msg.type==='group_msg')&&['rich','reaction'].includes(msg.msgType)) {
+      try { const b=JSON.parse(msg.body);if(msg.msgType==='rich'){if(typeof b.text!=='string'||!b.text.trim()||Buffer.byteLength(b.text)>12000||typeof b.reply!=='string'||b.reply.length>300)throw new Error();}
+        else if(!/^[0-9A-F]{12}$/.test(b.target)||!['👍','❤️','😂','😮','😢','🙏'].includes(b.emoji))throw new Error();
+      } catch {ws.send(JSON.stringify({type:'ack',id:msg.id,status:'error'}));return;}
     }
     if (msg.type === 'msg') {
       const { id: msgId, to, body, msgType = 'text', t } = msg;
       if (!msgId || !to || !body) return;
       if (!memUsers.has(to)) { ws.send(JSON.stringify({type:'ack',id:msgId,status:'error'})); return; }
+      if(features.blocked(userId,to)){ws.send(JSON.stringify({type:"ack",id:msgId,status:"error"}));return;}
+      try { await features.grant(body,userId,to); } catch(_) { ws.send(JSON.stringify({type:"ack",id:msgId,status:"error"}));return; }
       const sentAt = Number(t) || Date.now();
       const recipient = online.get(to);
       if (recipient && recipient.readyState === 1) {
@@ -259,7 +268,8 @@ wss.on('connection', (ws, req) => {
       const now = Date.now();
       const out = { type:'group_msg', id:msg.id, groupId:g.id, groupName:g.name, from:userId, fromName:user.name, body:msg.body, msgType:msg.msgType||'text', t:now };
       for (const mid of g.members) {
-        if (mid===userId) continue;
+        if (mid===userId || features.blocked(userId,mid)) continue;
+        try { await features.grant(msg.body,userId,mid); } catch(_) { ws.send(JSON.stringify({type:"ack",id:msg.id,status:"error"}));return; }
         const r = online.get(mid);
         if (r && r.readyState===1) r.send(JSON.stringify(out));
         else { try { await storeMessage(userId, user.name, mid, msg.id, msg.body, msg.msgType||'text', now, g.id, g.name); } catch (_) { ws.send(JSON.stringify({type:'ack',id:msg.id,status:'error'})); return; } }
@@ -292,7 +302,8 @@ app.post('/api/groups', async (req, res) => {
 
 app.get('/health', (req, res) => res.json({ ok: true, db: !!pool, online: online.size, users: memUsers.size }));
 
+const features=require('./features')({app,authId,users:memUsers,getPool:()=>pool});
 const PORT = process.env.PORT || 3000;
-initDb().catch(e => console.error('DB init:', e.message))
+initDb().then(()=>features.init()).catch(e => console.error('DB init:', e.message))
   .finally(() => server.listen(PORT, () => console.log('Rabta server on', PORT)));
 

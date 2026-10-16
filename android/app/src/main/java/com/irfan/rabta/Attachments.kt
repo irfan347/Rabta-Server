@@ -19,7 +19,7 @@ object Attachments {
     private fun root(c:Context)=File(c.filesDir,"attachments").apply { mkdirs() }
     private fun hash(b:ByteArray)=MessageDigest.getInstance("SHA-256").digest(b).joinToString("") { "%02x".format(it) }
     private fun safeName(s:String)=s.substringAfterLast('/').substringAfterLast('\\').replace(Regex("[\\p{Cntrl}]"),"").take(120).ifBlank { "attachment" }
-    private fun save(c:Context,b:ByteArray,name:String,mime:String):String {
+    fun save(c:Context,b:ByteArray,name:String,mime:String):String {
         require(b.isNotEmpty() && b.size<=MAX_BYTES) { "Choose a file up to 8 MB" }
         val key=UUID.randomUUID().toString()
         File(root(c),key).writeBytes(b)
@@ -45,13 +45,13 @@ object Attachments {
     }
     fun wire(c:Context,body:String,type:String):String {
         if(type !in setOf("file","video","sticker") || body.startsWith("rbt:")) return body
-        val o=JSONObject(body); val bytes=file(c,body).readBytes(); require(bytes.size<=MAX_BYTES)
+        val o=JSONObject(body); if(o.has("remote")) return body; val bytes=file(c,body).readBytes(); require(bytes.size<=MAX_BYTES)
         o.remove("local"); o.put("data",Base64.encodeToString(bytes,Base64.NO_WRAP)); return o.toString()
     }
     fun receive(c:Context,body:String,type:String):String {
         if(type !in setOf("file","video","sticker") || body.startsWith("rbt:")) return body
         require(body.length<=12*1024*1024)
-        val o=JSONObject(body); val encoded=o.getString("data")
+        val o=JSONObject(body); if(o.has("remote")) { require(Regex("[a-f0-9]{32}").matches(o.getString("remote")));return body }; val encoded=o.getString("data")
         require(encoded.length <= (MAX_BYTES+2)/3*4)
         val bytes=Base64.decode(encoded,Base64.DEFAULT)
         require(bytes.size==o.getInt("size") && hash(bytes)==o.getString("sha256")) { "Attachment checksum failed" }
@@ -61,6 +61,7 @@ object Attachments {
     fun name(body:String)=runCatching { JSONObject(body).getString("name") }.getOrDefault("Attachment")
     fun details(body:String):String=runCatching { val n=JSONObject(body).getLong("size"); if(n>=1024*1024) "%.1f MB".format(n/1048576.0) else "${(n+1023)/1024} KB" }.getOrDefault("")
     fun open(a:Activity,body:String) {
+        if(runCatching { JSONObject(body).has("remote") }.getOrDefault(false)) { FeatureApi.run(a,{ Transfers.download(a,body) }) { open(a,it) };return }
         try {
             val o=JSONObject(body); val uri=FileProvider.getUriForFile(a,a.packageName+".files",file(a,body),name(body))
             a.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri,o.optString("mime","application/octet-stream")).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))

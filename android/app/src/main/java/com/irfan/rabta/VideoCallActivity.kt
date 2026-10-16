@@ -143,10 +143,18 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
         am.mode=android.media.AudioManager.MODE_IN_COMMUNICATION; am.isSpeakerphoneOn=true
         RabtaEvents.add(this)
         initWebRtc()
-        createPeerConnection()
-        handler.postDelayed(ringTimeout,45000)
-        if (isCaller) createAndSendOffer()
-        else { val sdp = intent.getStringExtra(OFFER_SDP); if (sdp != null) acceptOffer(sdp) else finish() }
+        statusTv.text="Preparing connection…"
+        Thread {
+            val ice=runCatching {
+                val servers=FeatureApi.request("/api/ice").getJSONArray("servers")
+                (0 until servers.length()).map { i ->val s=servers.getJSONObject(i);val urls=s.getJSONArray("urls");PeerConnection.IceServer.builder((0 until urls.length()).map {urls.getString(it)}).setUsername(s.optString("username")).setPassword(s.optString("credential")).createIceServer() }
+            }.getOrElse { listOf(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer()) }
+            handler.post { if(!isFinishing&&!isDestroyed) {
+                createPeerConnection(ice);handler.postDelayed(ringTimeout,45000)
+                if(isCaller) {statusTv.text="Calling…";createAndSendOffer()}
+                else {val sdp=intent.getStringExtra(OFFER_SDP);if(sdp!=null)acceptOffer(sdp)else finish()}
+            } }
+        }.start()
     }
 
     private fun initWebRtc() {
@@ -173,11 +181,7 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
         localAudioTrack = factory!!.createAudioTrack("a0", audioSource!!)
     }
 
-    private fun createPeerConnection() {
-        val ice = listOf(
-            PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
-            PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer()
-        )
+    private fun createPeerConnection(ice:List<PeerConnection.IceServer>) {
         val cfg = PeerConnection.RTCConfiguration(ice).apply { sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN }
         pc = factory!!.createPeerConnection(cfg, object : PeerConnection.Observer {
             override fun onIceCandidate(c: IceCandidate) {

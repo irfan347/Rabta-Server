@@ -7,11 +7,11 @@ const path=require('node:path');
 async function fixture(database=false) {
   const routes=new Map(); let connect; const queries=[]; const timers=new Set();
   const setTimeout=(fn,ms)=>{const t={fn,ms,unref(){}};timers.add(t);return t;};const clearTimeout=t=>timers.delete(t);
-  const app={use(){},post(p,f){routes.set('POST '+p,f)},get(p,f){routes.set('GET '+p,f)}};
+  const app={use(){},post(p,f){routes.set('POST '+p,f)},get(p,f){routes.set('GET '+p,f)},delete(p,f){routes.set('DELETE '+p,f)}};
   const express=()=>app; express.json=()=>()=>{};
   class WebSocketServer { on(event,cb){if(event==='connection')connect=cb;} }
   class Pool { async query(sql,args){ queries.push([sql,args]); return {rows:[]}; } }
-  const context=vm.createContext({require(name){if(name==='express')return express;if(name==='ws')return {WebSocketServer};if(name==='http')return {createServer(){return {listen(){}}}};if(name==='pg')return {Pool};return require(name)},setTimeout,clearTimeout,process:{env:database?{DATABASE_URL:'test'}:{}},console,Buffer,URL});
+  const context=vm.createContext({require(name){if(name==='./features')return require('../features');if(name==='express')return express;if(name==='ws')return {WebSocketServer};if(name==='http')return {createServer(){return {listen(){}}}};if(name==='pg')return {Pool};return require(name)},setTimeout,clearTimeout,process:{env:database?{DATABASE_URL:'test'}:{}},console,Buffer,URL});
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../index.js'),'utf8'),context);
   const register=async name=>{let value;await routes.get('POST /api/register')({body:{username:name,pin:'123456',name}},{json(v){value=v},status(){return this}});return value;};
   const alice=await register('alice'),bob=await register('bob'),eve=await register('eve');

@@ -90,6 +90,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         onlineDot = View(this).apply { background = pill(0x55FFFFFF) }
         hdr.addView(onlineDot, LinearLayout.LayoutParams(dp(10), dp(10)).apply { marginEnd = dp(10) })
+        hdr.addView(TextView(this).apply { text="⋮";textSize=28f;setTextColor(TXT);gravity=Gravity.CENTER;setOnClickListener { android.app.AlertDialog.Builder(this@ConversationListActivity).setItems(arrayOf("Status","Nearby","Starred messages","Settings").map { L.t(this@ConversationListActivity,it) }.toTypedArray()) { _,i -> startActivity(Intent(this@ConversationListActivity,arrayOf(StatusActivity::class.java,NearbyActivity::class.java,StarredActivity::class.java,SettingsActivity::class.java)[i])) }.show() } },LinearLayout.LayoutParams(dp(48),dp(48)))
         // My avatar (opens Profile)
         myAvatarView = FrameLayout(this).apply { isClickable = true; setOnClickListener { startActivity(Intent(this@ConversationListActivity, ProfileActivity::class.java)) } }
         val myInitials = initials(Session.name, dp(40))
@@ -128,6 +129,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
                 override fun afterTextChanged(s: android.text.Editable?) {}
             })
         }
+        root.addView(FeatureUi.button(this,"Status") { startActivity(Intent(this,StatusActivity::class.java)) })
         root.addView(searchField,LinearLayout.LayoutParams(-1,-2).apply { setMargins(dp(16),dp(12),dp(16),dp(12)) })
 
         // ── Chats content ──
@@ -159,7 +161,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
     }
 
     private fun tab(label: String, selected: Boolean, onClick: () -> Unit) = TextView(this).apply {
-        text = label; textSize = 14f; typeface = Typeface.DEFAULT_BOLD; setTextColor(TXT)
+        text = L.t(this@ConversationListActivity,label); textSize = 14f; typeface = Typeface.DEFAULT_BOLD; setTextColor(TXT)
         gravity = Gravity.CENTER; setPadding(0, dp(12), 0, dp(10))
         if (selected) setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0).also { background = rect(AppTheme.sent(this@ConversationListActivity), 18) }
         setOnClickListener { onClick() }
@@ -290,7 +292,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         mid.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             addView(TextView(this@ConversationListActivity).apply { text = arrowIcon; textSize = 14f; setTextColor(arrowColor); setPadding(0,0,dp(4),0) })
-            addView(TextView(this@ConversationListActivity).apply { text = fmtTime(c.startedAt)+durStr; textSize = 13f; setTextColor(SUB) })
+            addView(TextView(this@ConversationListActivity).apply { text = c.type.replaceFirstChar { it.uppercase() }+" · "+fmtTime(c.startedAt)+durStr; textSize = 13f; setTextColor(SUB) })
         })
         row.addView(mid, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         // Right: time + call-back icon

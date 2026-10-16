@@ -88,7 +88,7 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
 
     // --- RabtaEvents.Listener ---
     override fun onMessage(fromId: String, fromName: String, msgId: String, body: String, t: Long, msgType: String, groupId: String) {
-        if (ChatActivity.openPeer != fromId) showMessageNotification(fromId, fromName, when(msgType) { "file"->"File"; "video"->"Video"; "image"->"Photo"; "voice"->"Voice note"; "sticker"->"Sticker"; else->body.take(160) })
+        if (msgType!="reaction" && !Privacy.blocked(this,fromId) && ChatActivity.openPeer != fromId) showMessageNotification(fromId, fromName, when(msgType) { "file"->"File"; "video"->"Video"; "image"->"Photo"; "voice"->"Voice note"; "sticker"->"Sticker"; else->body.take(160) })
     }
 
     override fun onIncomingCall(fromId: String, fromName: String, callId:String) { showCallNotification(fromId, fromName, false,callId) }
@@ -106,7 +106,7 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
         val n = Notification.Builder(this, MSG_CHANNEL)
             .setSmallIcon(android.R.drawable.ic_dialog_email)
             .setContentTitle(fromName)
-            .setContentText(body)
+            .setContentText(if(Privacy.hidePreviews(this)) "New message" else body)
             .setAutoCancel(true)
             .setContentIntent(pi)
             .setWhen(System.currentTimeMillis())
@@ -116,6 +116,7 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
     }
 
     private fun showCallNotification(fromId: String, fromName: String, isVideo: Boolean = false, callId: String = "", offerSdp: String? = null) {
+        if(Privacy.blocked(this,fromId))return
         if(ringingId==callId && callId.isNotEmpty()) return
         ringingId=callId; callHandler.removeCallbacks(dismissCall); callHandler.postDelayed(dismissCall,45000)
         val callIntent = Intent(this, IncomingCallActivity::class.java)

@@ -5,7 +5,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
-class Db(ctx: Context) : SQLiteOpenHelper(ctx, "rabta.db", null, 4) {
+class Db(ctx: Context) : SQLiteOpenHelper(ctx, "rabta.db", null, 5) {
 
     data class Conversation(val peerId: String, val peerName: String, val lastMsg: String, val lastTime: Long, val unread: Int, val isGroup: Boolean = false)
     data class Message(val id: String, val convId: String, val fromId: String, val fromName: String, val body: String, val sentAt: Long, val mine: Boolean, val status: String, val msgType: String)
@@ -20,10 +20,12 @@ class Db(ctx: Context) : SQLiteOpenHelper(ctx, "rabta.db", null, 4) {
             try { db.execSQL("CREATE TABLE IF NOT EXISTS calls(id INTEGER PRIMARY KEY AUTOINCREMENT, peer_id TEXT, peer_name TEXT, type TEXT, duration INTEGER DEFAULT 0, started_at INTEGER)") } catch (_: Exception) {}
             db.execSQL("CREATE TABLE IF NOT EXISTS groups(id TEXT PRIMARY KEY, name TEXT, members TEXT)")
         db.execSQL("CREATE TABLE IF NOT EXISTS calls(id INTEGER PRIMARY KEY AUTOINCREMENT, peer_id TEXT, peer_name TEXT, type TEXT, duration INTEGER DEFAULT 0, started_at INTEGER)")
-        } else { db.execSQL("DROP TABLE IF EXISTS conversations"); db.execSQL("DROP TABLE IF EXISTS messages"); createAll(db) }
+        }
+        createAll(db)
     }
 
     private fun createAll(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS message_meta(id TEXT PRIMARY KEY, starred INTEGER DEFAULT 0, reactions TEXT DEFAULT '{}')")
         db.execSQL("CREATE TABLE IF NOT EXISTS conversations(peer_id TEXT PRIMARY KEY, peer_name TEXT, last_msg TEXT, last_time INTEGER DEFAULT 0, unread INTEGER DEFAULT 0, is_group INTEGER DEFAULT 0)")
         db.execSQL("CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY, conv_id TEXT, from_id TEXT, from_name TEXT DEFAULT '', body TEXT, sent_at INTEGER, mine INTEGER DEFAULT 0, status TEXT DEFAULT 'sent', msg_type TEXT DEFAULT 'text')")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_msg_conv ON messages(conv_id, sent_at)")
@@ -60,6 +62,15 @@ class Db(ctx: Context) : SQLiteOpenHelper(ctx, "rabta.db", null, 4) {
         }
         return writableDatabase.insertWithOnConflict("messages", null, cv, SQLiteDatabase.CONFLICT_IGNORE) != -1L
     }
+
+    fun meta(id:String):Pair<Boolean,String> = readableDatabase.rawQuery("SELECT starred,reactions FROM message_meta WHERE id=?",arrayOf(id)).use { if(it.moveToFirst()) (it.getInt(0)==1) to it.getString(1) else false to "{}" }
+    fun star(id:String) { val m=meta(id);writableDatabase.execSQL("INSERT OR REPLACE INTO message_meta(id,starred,reactions) VALUES(?,?,?)",arrayOf(id,if(m.first)0 else 1,m.second)) }
+    fun react(id:String,from:String,emoji:String) { val m=meta(id);val r=org.json.JSONObject(m.second).put(from,emoji);writableDatabase.execSQL("INSERT OR REPLACE INTO message_meta(id,starred,reactions) VALUES(?,?,?)",arrayOf(id,if(m.first)1 else 0,r.toString())) }
+    fun deleteMessage(id:String) { writableDatabase.execSQL("UPDATE messages SET body='Message deleted',msg_type='text' WHERE id=?",arrayOf(id)) }
+    private fun selected(where:String):List<Message> { val out=mutableListOf<Message>();readableDatabase.rawQuery("SELECT id,conv_id,from_id,from_name,body,sent_at,mine,status,msg_type FROM messages WHERE "+where+" ORDER BY sent_at DESC",null).use { c -> while(c.moveToNext())out.add(Message(c.getString(0),c.getString(1),c.getString(2),c.getString(3)?:"",c.getString(4),c.getLong(5),c.getInt(6)==1,c.getString(7),c.getString(8))) };return out }
+    fun pausedMessages()=selected("mine=1 AND status='paused'")
+    fun pendingMesh()=selected("mine=1 AND status IN ('mesh','mesh_wait')")
+    fun starred()=selected("id IN (SELECT id FROM message_meta WHERE starred=1)")
 
     fun hasMessage(id:String)=readableDatabase.rawQuery("SELECT 1 FROM messages WHERE id=?",arrayOf(id)).use { it.moveToFirst() }
 
@@ -133,6 +144,7 @@ class Db(ctx: Context) : SQLiteOpenHelper(ctx, "rabta.db", null, 4) {
         val cv = ContentValues().apply { put("peer_id",peerId);put("peer_name",peerName);put("type",type);put("started_at",System.currentTimeMillis()) }
         return writableDatabase.insert("calls", null, cv)
     }
+    fun callOutcome(id:Long,outcome:String)=writableDatabase.execSQL("UPDATE calls SET type=? WHERE id=?",arrayOf(outcome,id))
     fun logCallEnd(callId: Long, durationSec: Int) = writableDatabase.execSQL("UPDATE calls SET duration=? WHERE id=?", arrayOf(durationSec, callId))
     fun calls(limit: Int = 100): List<CallRecord> {
         val list = mutableListOf<CallRecord>()

@@ -136,7 +136,7 @@ jobs:
           fi
       - name: Test server attachment storage and signaling
         run: |
-          if [ -f tests/server.test.js ]; then node --test tests/server.test.js; fi
+          if [ -f tests/server.test.js ]; then node --test tests/*.test.js; fi
       - name: Build and test APK
         env:
           ANDROID_PROJECT_DIR: ${{ steps.project.outputs.directory }}

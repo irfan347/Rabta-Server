@@ -27,15 +27,27 @@ object AppTheme {
     }
 }
 
-open class ThemedActivity : Activity() {
+open class ThemedActivity : androidx.fragment.app.FragmentActivity() {
+    private var appliedSettings=""
+    private var unlocking=false
+    override fun attachBaseContext(base:Context) { super.attachBaseContext(L.context(base)) }
+    override fun onPause() { super.onPause();AppLock.left() }
     private var appliedDark=false
     override fun onCreate(state: Bundle?) {
-        appliedDark=AppTheme.dark(this)
+        appliedSettings=L.signature(this); appliedDark=AppTheme.dark(this)
         setTheme(if(appliedDark) android.R.style.Theme_Material_NoActionBar else android.R.style.Theme_Material_Light_NoActionBar)
         super.onCreate(state)
         window.statusBarColor=AppTheme.bg(this); window.navigationBarColor=AppTheme.bg(this)
         window.decorView.systemUiVisibility=if(appliedDark) 0 else View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN or android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
     }
-    override fun onResume() { super.onResume(); if(appliedDark!=AppTheme.dark(this)) recreate() }
+    override fun onResume() {
+        super.onResume()
+        if(appliedDark!=AppTheme.dark(this)||appliedSettings!=L.signature(this)) { recreate();return }
+        if(Privacy.prefs(this).getBoolean("lock",false)) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        if(AppLock.needed(this)&&!unlocking) {
+            unlocking=true;window.decorView.alpha=0f
+            AppLock.authenticate(this) { unlocking=false;window.decorView.alpha=1f }
+        }
+    }
 }
