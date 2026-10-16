@@ -18,9 +18,9 @@ class VoiceMessageView(context:Context,private val body:String):LinearLayout(con
     private var generation=0
     private var prepared=false
     private var loading=false
-    private val play:TextView
-    private val time:TextView
-    private val seek:SeekBar
+    private lateinit var play:TextView
+    private lateinit var time:TextView
+    private lateinit var seek:SeekBar
     private val tick=object:Runnable {
         override fun run() {
             val p=player?:return
