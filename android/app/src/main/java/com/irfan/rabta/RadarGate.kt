@@ -23,7 +23,8 @@ class RadarGate(private val blocked:(String)->Boolean) {
         peers[endpoint]=if(old?.id==id)old.copy(name=name.take(80)) else RadarPeer(endpoint,id,name.take(80))
         return true
     }
-    @Synchronized fun lost(endpoint:String) { if(peers[endpoint]?.stage==RadarStage.FOUND)peers.remove(endpoint) }
+    @Synchronized fun lost(endpoint:String) { if(peers[endpoint]?.stage in setOf(RadarStage.FOUND,RadarStage.FAILED,RadarStage.REJECTED))peers.remove(endpoint) }
+    @Synchronized fun pendingCount()=peers.values.count { pending(it) }
     private fun room(now:Long):Boolean {
         cooldowns.entries.removeAll { it.value<=now }
         return cooldowns.size<500 && peers.values.count { pending(it) }<8
@@ -46,7 +47,7 @@ class RadarGate(private val blocked:(String)->Boolean) {
             return Decision.ACCEPT // This side explicitly pressed Connect.
         }
         if(old!=null&&(pending(old)||old.stage==RadarStage.CONNECTED))return Decision.IGNORE
-        while(inbound.isNotEmpty()&&inbound.peekFirst()<=now-60000)inbound.removeFirst()
+        while(inbound.peekFirst()?.let { it<=now-60000 }==true)inbound.removeFirst()
         if(now<(cooldowns[id]?:0)||inbound.size>=5||!room(now))return Decision.REJECT
         if(peers.values.any { it.id==id&&(pending(it)||it.stage==RadarStage.CONNECTED) })return Decision.REJECT
         if(!found(endpoint,id,name))return Decision.REJECT

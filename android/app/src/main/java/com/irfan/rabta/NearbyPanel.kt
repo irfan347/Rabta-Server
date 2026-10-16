@@ -112,7 +112,7 @@ class NearbyPanel(private val activity:Activity) {
             RadarStage.FOUND -> "Discovered · approval required"
             RadarStage.OUTGOING -> "Request sent · waiting for approval"
             RadarStage.INCOMING -> "Wants to connect with you"
-            RadarStage.APPROVED -> "Approved · establishing secure connection"
+            RadarStage.APPROVED -> "Your approval sent · waiting for connection"
             RadarStage.CONNECTED -> if(keyMatched)"Connected · signed key matches saved identity" else "Connected · verifying identity key"
             RadarStage.FAILED -> "Connection ended, failed or timed out"
             RadarStage.REJECTED -> "Request declined"

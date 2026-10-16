@@ -45,7 +45,10 @@ class RadarTransportTest {
         }
         fun found() {
             val discovery=Mesh::class.java.getDeclaredMethod("discoveryFor",Int::class.javaPrimitiveType).apply { isAccessible=true }.invoke(mesh,1) as EndpointDiscoveryCallback
-            discovery.onEndpointFound("endpoint",DiscoveredEndpointInfo("Remote\u0001$remote",Mesh.SERVICE_ID))
+            val info=DiscoveredEndpointInfo(Mesh.SERVICE_ID,"Remote\u0001$remote")
+            assertEquals("Valid service in simulated SDK discovery",Mesh.SERVICE_ID,info.serviceId)
+            assertEquals("Remote\u0001$remote",info.endpointName)
+            discovery.onEndpointFound("endpoint",info)
         }
         fun incoming() { lifecycle.onConnectionInitiated("endpoint",connectionInfo("Remote\u0001$remote")) }
         fun success() { lifecycle.onConnectionResult("endpoint",ConnectionResolution(Status.RESULT_SUCCESS)) }
@@ -61,7 +64,8 @@ class RadarTransportTest {
             ByteArray::class.java -> byteArrayOf(1,2,3,4)
             else -> null
         } }.toTypedArray()
-        constructor.isAccessible=true;return constructor.newInstance(*args) as ConnectionInfo
+        constructor.isAccessible=true
+        return (constructor.newInstance(*args) as ConnectionInfo).also { assertEquals("Valid name in simulated connection callback",name,it.endpointName) }
     }
     @Test fun optedOutAccountDoesNotTouchNearbyClient() {
         val h=Harness()
@@ -75,10 +79,12 @@ class RadarTransportTest {
         try {
             h.ready();h.found();assertEquals(1,h.events.found);assertFalse(h.calls.contains("requestConnection"))
             h.incoming();assertEquals(RadarStage.INCOMING,h.mesh.radarPeers().single().stage)
+            assertEquals(1,h.mesh.connectingCount)
             assertFalse(h.calls.contains("acceptConnection"));assertTrue(h.mesh.connected.isEmpty())
             assertTrue(h.mesh.approveConnection("endpoint"));assertEquals(1,h.calls.count { it=="acceptConnection" })
             h.payload!!.onPayloadReceived("endpoint",Payload.fromBytes("M{}".toByteArray()));assertEquals(0,h.events.envelopes)
             h.success();assertEquals(remote,h.mesh.userIdOf["endpoint"])
+            assertEquals(0,h.mesh.connectingCount)
             h.payload!!.onPayloadReceived("endpoint",Payload.fromBytes("M{}".toByteArray()));assertEquals(1,h.events.envelopes)
         }finally{h.close()}
     }

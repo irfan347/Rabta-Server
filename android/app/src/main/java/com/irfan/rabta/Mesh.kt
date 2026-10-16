@@ -52,7 +52,7 @@ class Mesh(private val ctx: Context, private val cb: Listener,clientFactory:(()-
     private val radar=RadarGate { Privacy.blocked(ctx,it,selfId) }
     private fun now()=android.os.SystemClock.elapsedRealtime()
     override val discoveredCount get()=found.size
-    override val connectingCount get()=attempts.pending(android.os.SystemClock.elapsedRealtime())
+    override val connectingCount get()=radar.pendingCount()
     private fun current(generation:Int)=generation==epoch && (starting||active)
     override fun retryConnections() {
         if(!active)return
@@ -60,6 +60,7 @@ class Mesh(private val ctx: Context, private val cb: Listener,clientFactory:(()-
             pendingNames.remove(endpoint);attempts.remove(endpoint)
             runCatching { client.rejectConnection(endpoint);client.disconnectFromEndpoint(endpoint) }
         }
+        radar.snapshot().filter { it.stage in setOf(RadarStage.FAILED,RadarStage.REJECTED)&&!found.containsKey(it.endpoint) }.forEach { radar.lost(it.endpoint) }
         userIdOf.values.filter { Privacy.blocked(ctx,it,selfId) }.toSet().forEach { disconnectUser(it) }
     }
     override fun radarPeers():List<RadarPeer> { retryConnections();return radar.snapshot() }

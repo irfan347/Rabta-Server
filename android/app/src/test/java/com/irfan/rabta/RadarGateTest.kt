@@ -61,4 +61,12 @@ class RadarGateTest {
         assertEquals("request-endpoint",gate.snapshot().single().endpoint)
         assertFalse(gate.request("discovered-first",1))
     }
+    @Test fun departedFailedPeersDoNotExhaustDiscoveryCapacity() {
+        val gate=RadarGate { false }
+        repeat(400) { i ->
+            assertTrue(gate.found("p$i","%012X".format(i+1),"User"))
+            gate.failed("p$i");gate.lost("p$i")
+        }
+        assertTrue(gate.snapshot().isEmpty());assertEquals(0,gate.pendingCount())
+    }
 }
