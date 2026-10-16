@@ -1,0 +1,33 @@
+# coturn on a dedicated Linux VM with a public IP. Replace placeholders locally.
+listening-port=3478
+min-port=49160
+max-port=49200
+fingerprint
+use-auth-secret
+static-auth-secret=REPLACE_WITH_RANDOM_SECRET
+realm=turn.example.com
+server-name=turn.example.com
+# If the VM has a private interface behind NAT, set public/private mapping:
+# external-ip=PUBLIC_IP/PRIVATE_IP
+# TLS requires a valid domain certificate; mount certificate paths locally.
+# tls-listening-port=5349
+# cert=/etc/letsencrypt/live/turn.example.com/fullchain.pem
+# pkey=/etc/letsencrypt/live/turn.example.com/privkey.pem
+no-cli
+no-loopback-peers
+no-multicast-peers
+no-tcp-relay
+user-quota=4
+total-quota=200
+max-bps=1000000
+stale-nonce=600
+# Prevent relay access to private/internal services.
+denied-peer-ip=0.0.0.0-0.255.255.255
+denied-peer-ip=10.0.0.0-10.255.255.255
+denied-peer-ip=127.0.0.0-127.255.255.255
+denied-peer-ip=169.254.0.0-169.254.255.255
+denied-peer-ip=172.16.0.0-172.31.255.255
+denied-peer-ip=192.168.0.0-192.168.255.255
+denied-peer-ip=::1
+denied-peer-ip=fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff

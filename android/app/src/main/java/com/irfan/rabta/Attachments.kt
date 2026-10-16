@@ -51,7 +51,7 @@ object Attachments {
     fun receive(c:Context,body:String,type:String):String {
         if(type !in setOf("file","video","sticker") || body.startsWith("rbt:")) return body
         require(body.length<=12*1024*1024)
-        val o=JSONObject(body); if(o.has("remote")) { require(Regex("[a-f0-9]{32}").matches(o.getString("remote")));return body }; val encoded=o.getString("data")
+        val o=JSONObject(body); if(o.has("remote")) { require(Regex("[a-f0-9]{32}").matches(o.getString("remote"))&&o.getLong("size") in 1..MAX_BYTES.toLong()&&Regex("[a-f0-9]{64}").matches(o.getString("sha256")));return body }; val encoded=o.getString("data")
         require(encoded.length <= (MAX_BYTES+2)/3*4)
         val bytes=Base64.decode(encoded,Base64.DEFAULT)
         require(bytes.size==o.getInt("size") && hash(bytes)==o.getString("sha256")) { "Attachment checksum failed" }

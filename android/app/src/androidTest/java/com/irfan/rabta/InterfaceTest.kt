@@ -62,6 +62,23 @@ class InterfaceTest {
         val dark=launch(ChatActivity::class.java); screenshot("05-chat-dark"); inst.runOnMainSync { dark.finish() }
         val darkList=launch(ConversationListActivity::class.java); screenshot("06-chats-dark"); inst.runOnMainSync { darkList.finish() }
         val incoming=launch(IncomingCallActivity::class.java); screenshot("07-incoming-call"); inst.runOnMainSync { incoming.finish() }
+        val settings=launch(SettingsActivity::class.java); screenshot("08-settings-dark");inst.runOnMainSync { settings.finish() }
+        val nearby=launch(NearbyActivity::class.java); screenshot("09-nearby-dark");inst.runOnMainSync { nearby.finish() }
+        db.star("000000000002")
+        val starred=launch(StarredActivity::class.java); screenshot("10-starred-dark");inst.runOnMainSync { assertTrue(views(starred.window.decorView).filterIsInstance<TextView>().any { it.text.contains("Chai pe") });starred.finish() }
+        val status=launch(StatusActivity::class.java);Thread.sleep(2500);screenshot("11-status-dark");inst.runOnMainSync { assertTrue(views(status.window.decorView).filterIsInstance<TextView>().any { it.text=="Text status" });status.finish() }
+        ctx.getSharedPreferences("appearance",0).edit().putString("language","ur").putFloat("scale",1.15f).commit()
+        val urdu=launch(SettingsActivity::class.java);screenshot("12-settings-urdu");inst.runOnMainSync { assertTrue(views(urdu.window.decorView).filterIsInstance<TextView>().any { it.text=="ترتیبات" });urdu.finish() }
+        ctx.getSharedPreferences("appearance",0).edit().putString("language","en").putFloat("scale",1f).commit()
+        // A password failure must leave the database untouched. A valid restore merges lost rows.
+        val file=File(ctx.cacheDir,"instrumentation-backup.rbt");val uri=android.net.Uri.fromFile(file)
+        ChatBackup.export(ctx,uri,"test-only-long-password".toCharArray())
+        db.writableDatabase.execSQL("DELETE FROM messages WHERE id='000000000002'")
+        try { ChatBackup.restore(ctx,uri,"incorrect-password".toCharArray());fail("Wrong password accepted") }catch(expected:javax.crypto.AEADBadTagException){}
+        assertFalse(db.hasMessage("000000000002"))
+        ChatBackup.restore(ctx,uri,"test-only-long-password".toCharArray())
+        assertTrue(db.hasMessage("000000000002"));assertTrue(db.meta("000000000002").first)
+        file.delete()
         MessageService.stop(ctx)
     }
 }

@@ -37,6 +37,7 @@ open class ThemedActivity : androidx.fragment.app.FragmentActivity() {
         appliedSettings=L.signature(this); appliedDark=AppTheme.dark(this)
         setTheme(if(appliedDark) android.R.style.Theme_Material_NoActionBar else android.R.style.Theme_Material_Light_NoActionBar)
         super.onCreate(state)
+        Session.init(this)
         window.statusBarColor=AppTheme.bg(this); window.navigationBarColor=AppTheme.bg(this)
         window.decorView.systemUiVisibility=if(appliedDark) 0 else View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN or android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)

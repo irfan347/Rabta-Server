@@ -52,8 +52,10 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
     private var muted = false
     private var useFrontCamera = true
     private val ringback=CallSounds()
-    private val ringTimeout=Runnable { if(connectedAt==0L) hangUp() }
+    private val ringTimeout=Runnable { if(connectedAt==0L) {outcome="no answer";hangUp()} }
     private var connectedAt=0L
+    private var historyId=-1L
+    private var outcome="cancelled"
     private var speakerOn=true
     private var previousAudioMode=android.media.AudioManager.MODE_NORMAL
     private var previousSpeaker=false
@@ -137,6 +139,7 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
     }
 
     private fun begin() {
+        historyId=Db.get(this).logCallStart(peerId,peerName,if(isCaller)"outgoing video" else "incoming video")
         buildUi()
         val am=getSystemService(AUDIO_SERVICE) as android.media.AudioManager
         previousAudioMode=am.mode; previousSpeaker=am.isSpeakerphoneOn
@@ -287,6 +290,7 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
     }
 
     private fun cleanup() {
+        if(historyId>0){val db=Db.get(this);if(connectedAt>0)db.logCallEnd(historyId,((android.os.SystemClock.elapsedRealtime()-connectedAt)/1000).toInt())else db.callOutcome(historyId,outcome+" · video");historyId=-1L}
         ringback.stop(); handler.removeCallbacks(ringTimeout)
         handler.removeCallbacks(durationTick)
         if(::speakerBtn.isInitialized) try { (getSystemService(AUDIO_SERVICE) as android.media.AudioManager).apply { isSpeakerphoneOn=previousSpeaker; mode=previousAudioMode } } catch (_:Exception) {}
@@ -311,10 +315,10 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
             "calling" -> { ringback.stop(); statusTv.text="Calling…" }
             "ringing" -> { ringback.ringing(); statusTv.text="Ringing…" }
             "accepted" -> { ringback.stop(); statusTv.text="Connecting…" }
-            "busy" -> { Toast.makeText(this,"Busy",Toast.LENGTH_SHORT).show(); cleanup(); finish() }
+            "busy" -> { outcome="busy";Toast.makeText(this,"Busy",Toast.LENGTH_SHORT).show(); cleanup(); finish() }
         }
     }
-    override fun onDisconnected() { cleanup(); finish() }
+    override fun onDisconnected() { outcome="disconnected";cleanup(); finish() }
     override fun onVideoAnswer(callId: String, sdp: String) {
         if (callId != this.callId) return
         ringback.stop(); statusTv.text="Connecting…"
@@ -327,6 +331,6 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
     }
     override fun onVideoEnd(callId: String) {
         if (callId != this.callId) return
-        handler.post { cleanup(); finish() }
+        handler.post { outcome="ended before answer";cleanup(); finish() }
     }
 }

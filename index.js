@@ -304,6 +304,6 @@ app.get('/health', (req, res) => res.json({ ok: true, db: !!pool, online: online
 
 const features=require('./features')({app,authId,users:memUsers,getPool:()=>pool});
 const PORT = process.env.PORT || 3000;
-initDb().then(()=>features.init()).catch(e => console.error('DB init:', e.message))
-  .finally(() => server.listen(PORT, () => console.log('Rabta server on', PORT)));
+initDb().then(()=>features.init()).then(() => server.listen(PORT, () => console.log('Rabta server on', PORT)))
+  .catch(e => { console.error('Database initialization failed:', e.message); process.exitCode=1; });
 

@@ -19,6 +19,8 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
         const val CALL_CHANNEL = "rabta_calls_ringtone_v2"
         const val CALL_NOTIF   = 2
         private var msgId      = 100
+        private val pendingCalls=java.util.concurrent.ConcurrentHashMap<String,Long>()
+        fun accepted(ctx:Context,id:String) { pendingCalls.remove(id)?.let { Db.get(ctx).deleteCall(it) } }
 
         fun start(ctx: Context) {
             try { ctx.startForegroundService(Intent(ctx, MessageService::class.java)) } catch (_: Exception) {}
@@ -118,6 +120,8 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
     private fun showCallNotification(fromId: String, fromName: String, isVideo: Boolean = false, callId: String = "", offerSdp: String? = null) {
         if(Privacy.blocked(this,fromId))return
         if(ringingId==callId && callId.isNotEmpty()) return
+        if(pendingCalls.size>100)pendingCalls.clear()
+        if(!pendingCalls.containsKey(callId))pendingCalls[callId]=Db.get(this).logCallStart(fromId,fromName,"missed")
         ringingId=callId; callHandler.removeCallbacks(dismissCall); callHandler.postDelayed(dismissCall,45000)
         val callIntent = Intent(this, IncomingCallActivity::class.java)
             .putExtra("fromId", fromId).putExtra("fromName", fromName)

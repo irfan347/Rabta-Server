@@ -144,6 +144,7 @@ class Db(ctx: Context) : SQLiteOpenHelper(ctx, "rabta.db", null, 5) {
         val cv = ContentValues().apply { put("peer_id",peerId);put("peer_name",peerName);put("type",type);put("started_at",System.currentTimeMillis()) }
         return writableDatabase.insert("calls", null, cv)
     }
+    fun deleteCall(id:Long)=writableDatabase.execSQL("DELETE FROM calls WHERE id=?",arrayOf(id))
     fun callOutcome(id:Long,outcome:String)=writableDatabase.execSQL("UPDATE calls SET type=? WHERE id=?",arrayOf(outcome,id))
     fun logCallEnd(callId: Long, durationSec: Int) = writableDatabase.execSQL("UPDATE calls SET duration=? WHERE id=?", arrayOf(durationSec, callId))
     fun calls(limit: Int = 100): List<CallRecord> {

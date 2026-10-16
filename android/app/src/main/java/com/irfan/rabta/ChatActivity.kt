@@ -248,7 +248,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         recordingPanel=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setBackgroundColor(RECV); visibility=View.GONE }
         recordingTv=TextView(this).apply { setTextColor(RED); textSize=13f; setPadding(dp(12),dp(12),0,dp(12)); accessibilityLiveRegion=View.ACCESSIBILITY_LIVE_REGION_POLITE }
         recordingPanel.addView(recordingTv,LinearLayout.LayoutParams(0,-2,1f))
-        recordingPanel.addView(TextView(this).apply { text="Cancel"; setTextColor(RED); minHeight=dp(48); gravity=Gravity.CENTER; setPadding(dp(12),0,dp(12),0); setOnClickListener { stopVoiceRecord(false) } })
+        recordingPanel.addView(TextView(this).apply { text=L.t(this@ChatActivity,"Cancel"); setTextColor(RED); minHeight=dp(48); gravity=Gravity.CENTER; setPadding(dp(12),0,dp(12),0); setOnClickListener { stopVoiceRecord(false) } })
         root.addView(recordingPanel)
         val bar = LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.BOTTOM; setBackgroundColor(RECV); setPadding(dp(6),dp(6),dp(6),dp(6)) }
         bar.addView(headerBtn("📎") { showAttachments() }.apply { background=null })

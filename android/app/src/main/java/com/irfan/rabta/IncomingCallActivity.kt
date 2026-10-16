@@ -110,6 +110,7 @@ class IncomingCallActivity : ThemedActivity(), RabtaEvents.Listener {
     }
 
     private fun answer() {
+        MessageService.accepted(this,callId)
         answered = true; cancelNotif()
         if (isVideo && offerSdp != null) {
             startActivity(android.content.Intent(this, VideoCallActivity::class.java)

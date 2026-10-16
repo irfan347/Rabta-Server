@@ -333,7 +333,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
 
     private fun showNewChat() {
         val dl = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(WHITE); setPadding(dp(24),dp(20),dp(24),dp(16)) }
-        dl.addView(TextView(this).apply { text = "New chat"; textSize = 20f; typeface = Typeface.DEFAULT_BOLD; setTextColor(TXT); setPadding(0,0,0,dp(16)) })
+        dl.addView(TextView(this).apply { text = L.t(this@ConversationListActivity,"New chat"); textSize = 20f; typeface = Typeface.DEFAULT_BOLD; setTextColor(TXT); setPadding(0,0,0,dp(16)) })
         val inp = EditText(this).apply { hint = "@username or Rabta ID"; textSize = 16f; setTextColor(TXT); setHintTextColor(SUB); setSingleLine(true); background = null; setPadding(dp(12),dp(12),dp(12),dp(12)); inputType = InputType.TYPE_CLASS_TEXT }
         dl.addView(inp, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) })
         dl.addView(View(this).apply { setBackgroundColor(GREEN) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(2)))

@@ -45,7 +45,7 @@ object Outbox : RabtaEvents.Listener {
     private fun transmit(d: Db, id: String, peerId: String, group: Boolean, body: String, type: String) {
         val attempt=++attemptSequence
         attempts[id]=attempt
-        val net = try { val wire=if(type in setOf("file","video","sticker")&&!body.startsWith("rbt:")&&WsClient.connected) Transfers.upload(context,body,id) { RabtaEvents.postHistoryChanged(peerId) } else Attachments.wire(context,body,type); if (group) WsClient.sendGroupMsg(peerId,id,wire,type) else WsClient.send(peerId,id,wire,type) } catch (_: Transfers.Cancelled) { d.updateStatus(id,"canceled");RabtaEvents.postHistoryChanged(peerId);return } catch (_: java.io.IOException) { d.updateStatus(id,"paused");RabtaEvents.postHistoryChanged(peerId);return } catch (_: Exception) { false }
+        val net = try { val wire=if(type in setOf("file","video","sticker")&&!body.startsWith("rbt:")&&WsClient.connected) Transfers.upload(context,body,id) { RabtaEvents.postHistoryChanged(peerId) } else Attachments.wire(context,body,type); if (group) WsClient.sendGroupMsg(peerId,id,wire,type) else WsClient.send(peerId,id,wire,type) } catch (_: Transfers.Cancelled) { attempts.remove(id);d.updateStatus(id,"canceled");RabtaEvents.postHistoryChanged(peerId);return } catch (_: java.io.IOException) { attempts.remove(id);d.updateStatus(id,"paused");RabtaEvents.postHistoryChanged(peerId);return } catch (_: Exception) { false }
         // The existing mesh protocol carries text only. Never send raw image/audio as text.
         val mesh = !net && !group && type in setOf("text","sticker") && try { MeshBridge.sendDirect(peerId,id,body,type) } catch (_: Exception) { false }
         if (!net) {
