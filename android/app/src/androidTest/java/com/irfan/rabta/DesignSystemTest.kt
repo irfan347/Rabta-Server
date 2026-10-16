@@ -102,7 +102,10 @@ class DesignSystemTest {
                 waitUntil { nav("Calls").isSelected }
                 capture("23-calls-${mode.lowercase()}")
                 ui { all(a.window.decorView).first { it.contentDescription=="Status" }.performClick() }
-                inst.waitForIdleSync()
+                waitUntil {
+                    androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()
+                        .getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED).any { it is StatusActivity }
+                }
                 val status=inst.runCatchingResumedStatus()
                 assertNotNull("Status is a real screen",status)
                 ui { status?.finish() }
