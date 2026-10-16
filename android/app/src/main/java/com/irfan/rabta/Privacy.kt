@@ -4,7 +4,7 @@ import android.content.Context
 import org.json.JSONObject
 object Privacy {
     fun prefs(c:Context)=c.getSharedPreferences("privacy_${Session.id}",0)
-    fun blocked(c:Context,id:String)=prefs(c).getStringSet("blocked",emptySet())!!.contains(id)
+    fun blocked(c:Context,id:String,account:String=Session.id)=c.getSharedPreferences("privacy_$account",0).getStringSet("blocked",emptySet())!!.contains(id)
     fun setBlocked(c:Context,id:String,value:Boolean) {
         val p=prefs(c);val set=p.getStringSet("blocked",emptySet())!!.toMutableSet();if(value)set.add(id)else set.remove(id)
         p.edit().putStringSet("blocked",set).putBoolean("pending_$id",value).commit()

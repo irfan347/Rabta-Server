@@ -16,6 +16,7 @@ class Router(private val ctx:Context,private val ui:UiListener,transportFactory:
         fun onPeople() {}
         fun onStatus(msg:String) {}
         fun onAudio(frame:ByteArray) {}
+        fun onRadarRequest(name:String) {}
     }
     companion object { const val START_HOPS=MeshPolicy.HOPS }
     private val mesh:MeshTransport=transportFactory?.invoke(this)?:Mesh(ctx,this)
@@ -36,6 +37,11 @@ class Router(private val ctx:Context,private val ui:UiListener,transportFactory:
     fun pauseTransport(){if(!transportPaused){transportPaused=true;mesh.stop();matchedKeys.clear()}}
     @Volatile var running=false; private set
     val connected get()=mesh.connected
+    fun radarPeers()=mesh.radarPeers()
+    fun requestConnection(endpoint:String)=running&&mesh.requestConnection(endpoint)
+    fun approveConnection(endpoint:String)=running&&mesh.approveConnection(endpoint)
+    fun rejectConnection(endpoint:String)=mesh.rejectConnection(endpoint)
+    fun disconnectUser(id:String)=mesh.disconnectUser(id)
     val longRangeOn=false // Legacy advertisements cannot safely carry encrypted envelopes.
     private val pulse=object:Runnable { override fun run() { if(!running) return; enqueue { maintain(); flushPending(); carry() }; main.postDelayed(this,30000) } }
     fun start(userId:String,name:String) {
@@ -163,7 +169,7 @@ class Router(private val ctx:Context,private val ui:UiListener,transportFactory:
         val o=packet(id,to,"receipt",originalExpiry-MeshPolicy.LIFE,ack=original)
         store.put(id,o.toString(),o.getLong("x")); mesh.sendEnvelopeToAll(o.toString())
     }
-    override fun onFound(endpointId:String,name:String,userId:String) { if(running && MeshPolicy.validId(userId) && myId<userId && !connected.containsKey(endpointId)) mesh.connect(endpointId); ui.onPeople() }
+    override fun onFound(endpointId:String,name:String,userId:String) { ui.onPeople() }
     override fun onConnected(endpointId:String,userId:String,name:String) {
         ui.onStatus("Nearby: ${connected.size} phone(s) connected");ui.onPeople()
         enqueue { maintain();mesh.sendEnvelopeTo(endpointId,keyPacket());carry(endpointId) }
@@ -176,4 +182,5 @@ class Router(private val ctx:Context,private val ui:UiListener,transportFactory:
     override fun onStream(endpointId:String,payload:Payload) {}
     override fun onAudio(endpointId:String,frame:ByteArray) {} // Never broadcast call audio to relay peers.
     override fun onStatus(msg:String)=ui.onStatus(msg)
+    override fun onRadarRequest(name:String) { main.post { if(running)ui.onRadarRequest(name) } }
 }

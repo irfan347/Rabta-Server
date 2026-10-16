@@ -4,6 +4,8 @@ Audit date: 2026-10-16 UTC. This is an inspection and documentation checkpoint, 
 
 Follow-up: [Offline mesh audit, diagnostics and physical-device test plan](MESH_AUDIT.md) records the later focused transport improvements and their verification limits. The baseline findings below remain historical.
 
+Follow-up: [Rabta Radar](RADAR.md) records the opt-in discovery and explicit connection approval flow that replaces automatic Nearby connection attempts.
+
 ## Baseline and safe checkpoint
 
 - Repository: `https://github.com/irfan347/Rabta-Server`.

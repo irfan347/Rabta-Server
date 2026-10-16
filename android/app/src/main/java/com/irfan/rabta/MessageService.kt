@@ -18,6 +18,8 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
         const val MSG_CHANNEL  = "rabta_messages"
         const val CALL_CHANNEL = "rabta_calls_ringtone_v2"
         const val CALL_NOTIF   = 2
+        const val RADAR_NOTIF = 3
+        const val RADAR_CHANNEL = "rabta_radar_requests"
         private var msgId      = 100
         private val pendingCalls=java.util.concurrent.ConcurrentHashMap<String,Long>()
         fun accepted(ctx:Context,id:String) { pendingCalls.remove(id)?.let { Db.get(ctx).deleteCall(it) } }
@@ -55,6 +57,7 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
 
     override fun onDestroy() {
         cancelRinging();callHandler.removeCallbacks(repair)
+        getSystemService(NotificationManager::class.java).cancel(RADAR_NOTIF)
         if(networkRegistered)runCatching {(getSystemService(CONNECTIVITY_SERVICE) as android.net.ConnectivityManager).unregisterNetworkCallback(network)}
         RabtaEvents.remove(this)
         MeshBridge.detach(); router?.stop(); router = null
@@ -70,18 +73,29 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
 
     // ---------- offline mesh ----------
     private fun startMeshIfAllowed() {
-        if(!Session.loggedIn){MeshBridge.status="Sign in once to use Nearby";return}
-        val problem=NearbySetup.problem(this)
-        if(problem!=null){router?.pauseTransport();MeshBridge.status=problem;return}
+        if(!Session.loggedIn){router?.pauseTransport();MeshBridge.status="Sign in once to use Nearby";return}
         try {
-            val current=router
-            if(current?.running==true){current.retryTransport();return}
-            if(current!=null){current.stop();router=null;MeshBridge.detach()}
-            val r=Router(this,this);r.start(Session.id,Session.name)
-            router=r;MeshBridge.attach(r)
+            if(router!=null&&router?.myId!=Session.id){router?.stop();router=null;MeshBridge.detach()}
+            if(router?.running!=true) {
+                router?.stop()
+                val r=Router(this,this);r.start(Session.id,Session.name);router=r;MeshBridge.attach(r)
+            }
+            if(!RadarPrefs.enabled(this)){router?.pauseTransport();MeshBridge.status="Radar is off — you are not discoverable";return}
+            val problem=NearbySetup.problem(this)
+            if(problem!=null){router?.pauseTransport();MeshBridge.status=problem;return}
+            router?.retryTransport()
         }catch(_:Exception){MeshBridge.status="Nearby could not start — reopen app and check permissions"}
     }
     override fun onStatus(msg:String){MeshBridge.status=msg}
+    override fun onRadarRequest(name:String) {
+        if(!RadarPrefs.enabled(this))return
+        val review=PendingIntent.getActivity(this,RADAR_NOTIF,Intent(this,NearbyActivity::class.java),PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val notification=Notification.Builder(this,RADAR_CHANNEL).setSmallIcon(R.drawable.ic_stat_rabta)
+            .setContentTitle("Radar connection request")
+            .setContentText(if(Privacy.hidePreviews(this))"Open Radar to review" else "${name.take(80)} wants to connect")
+            .setContentIntent(review).setAutoCancel(true).setOnlyAlertOnce(true).setTimeoutAfter(RadarGate.REQUEST_LIFE).build()
+        runCatching { getSystemService(NotificationManager::class.java).notify(RADAR_NOTIF,notification) }
+    }
 
     // Router.UiListener: a message reached us over the mesh
     override fun onMeshMessage(msgId: String, fromId: String, fromName: String, body: String, sentAt: Long, hops: Int, type: String, stored: () -> Unit) {
@@ -160,6 +174,7 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
 
     private fun createChannels() {
         val nm = getSystemService(NotificationManager::class.java) ?: return
+        nm.createNotificationChannel(NotificationChannel(RADAR_CHANNEL,"Radar requests",NotificationManager.IMPORTANCE_DEFAULT).apply { description="Review nearby connection requests in Radar" })
         nm.createNotificationChannel(NotificationChannel(MSG_CHANNEL, "Messages", NotificationManager.IMPORTANCE_HIGH).apply {
             description = "New message notifications"; enableLights(true); enableVibration(true)
         })

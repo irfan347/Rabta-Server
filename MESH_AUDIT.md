@@ -2,6 +2,8 @@
 
 Audited 2026-10-16 on `codex/rabta-2-design-system`. Checkpoint: `checkpoint/pre-mesh-audit` (source tree `0eb6f92c181a31a0d5da0af512e43955808ba1f7`). Supplements the original findings in `RABTA_ROADMAP.md`.
 
+Later change: [Rabta Radar](RADAR.md) adds default-off, account-scoped discoverability and per-connection approval. Its consent flow supersedes the automatic initiation/acceptance described in this historical audit; the existing encrypted routing and carry queues remain in use.
+
 ## Findings and focused changes
 
 | Area | Existing behavior and audit result |

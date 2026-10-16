@@ -10,6 +10,16 @@ object MeshBridge {
 
     val running get() = router?.running == true
     fun snapshot()=router?.snapshot()?:MeshRuntimeSnapshot()
+    fun radarPeers()=router?.radarPeers()?:emptyList()
+    fun requestConnection(endpoint:String)=router?.requestConnection(endpoint)==true
+    fun approveConnection(endpoint:String)=router?.approveConnection(endpoint)==true
+    fun rejectConnection(endpoint:String) { router?.rejectConnection(endpoint) }
+    fun blockUser(ctx:android.content.Context,id:String) { Privacy.setBlocked(ctx,id,true);router?.disconnectUser(id) }
+    fun setDiscoverable(ctx:android.content.Context,value:Boolean) {
+        RadarPrefs.setEnabled(ctx,value)
+        if(!value){router?.pauseTransport();status="Radar is off — you are not discoverable";ctx.getSystemService(android.app.NotificationManager::class.java).cancel(MessageService.RADAR_NOTIF)}
+        MessageService.restartNearby(ctx)
+    }
     val peersConnected get() = router?.connected?.size ?: 0
 
     fun peerNames():List<String> = router?.connected?.values?.toList() ?: emptyList()

@@ -11,6 +11,11 @@ interface MeshTransport {
     fun stop()
     fun retryConnections()
     fun connect(endpointId:String)
+    fun radarPeers():List<RadarPeer> = emptyList()
+    fun requestConnection(endpointId:String):Boolean = false
+    fun approveConnection(endpointId:String):Boolean = false
+    fun rejectConnection(endpointId:String) {}
+    fun disconnectUser(id:String) {}
     fun sendEnvelopeToAll(json:String,exceptEndpoint:String?=null)
     fun sendEnvelopeTo(endpointId:String,json:String)
 }

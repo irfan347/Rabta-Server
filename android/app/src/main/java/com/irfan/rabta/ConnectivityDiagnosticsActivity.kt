@@ -91,7 +91,7 @@ class ConnectivityDiagnosticsActivity:ThemedActivity() {
         val wifi=runCatching { if((applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager).isWifiEnabled)"On" else "Off" }.getOrDefault("Unavailable")
         val missing=NearbySetup.permissions().filter { checkSelfPermission(it)!=PackageManager.PERMISSION_GRANTED }.map { it.substringAfterLast('.') }
         radios.text="Bluetooth: $bluetooth\nWi-Fi: $wifi\nPermissions: ${if(missing.isEmpty())"Granted" else missing.joinToString(", ")}\n${NearbySetup.problem(this)?:"Nearby prerequisites available"}"
-        links.text="Internet: ${WsClient.status}\n${internetBearer()}\nOffline: ${if(snapshot.peers.isEmpty())"No connected peer" else "Nearby Connections · P2P_CLUSTER"}\nRadio for each Nearby link: managed by Nearby; not exposed to Rabta\nDiscovery: ${if(snapshot.active)"Advertising and searching" else "Not active"}\nFound: ${snapshot.discovered} · Connecting: ${snapshot.connecting}\n${MeshBridge.status}"
+        links.text="Internet: ${WsClient.status}\n${internetBearer()}\nOffline: ${if(snapshot.peers.isEmpty())"No connected peer" else "Nearby Connections · P2P_CLUSTER"}\nRadio for each Nearby link: managed by Nearby; not exposed to Rabta\nRadar discoverability: ${if(RadarPrefs.enabled(this))"On · approval required" else "Off"}\nDiscovery: ${if(snapshot.active)"Advertising and searching" else "Not active"}\nFound: ${snapshot.discovered} · Connecting: ${snapshot.connecting}\n${MeshBridge.status}"
         peers.text=if(snapshot.peers.isEmpty())"No phones connected." else snapshot.peers.joinToString("\n\n") {
             "${it.name}\n${it.id}\n${if(it.keyMatched)"Signed key matches pinned identity" else "Key exchange not confirmed"}"
         }

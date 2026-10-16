@@ -9,7 +9,7 @@ class NearbyActivity : ThemedActivity() {
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         panel = NearbyPanel(this)
-        FeatureUi.page(this,"Nearby").addView(panel.view)
+        FeatureUi.page(this,"Rabta Radar").addView(panel.view)
     }
     override fun onResume() { super.onResume(); panel.resume() }
     override fun onPause() { panel.pause(); super.onPause() }
