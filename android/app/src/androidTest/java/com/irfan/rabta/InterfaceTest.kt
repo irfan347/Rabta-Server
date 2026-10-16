@@ -22,6 +22,9 @@ class InterfaceTest {
         inst.waitForIdleSync(); Thread.sleep(600)
         val dir=File(ctx.getExternalFilesDir(null),"screenshots").apply { mkdirs() }
         inst.uiAutomation.takeScreenshot().useBitmap { bitmap -> File(dir,"$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG,100,it) } }
+        // AGP uninstalls the app after tests, so copy captures outside its data directory.
+        val command="mkdir -p /sdcard/Download/rabta-interface && cp ${dir.absolutePath}/$name.png /sdcard/Download/rabta-interface/$name.png"
+        inst.uiAutomation.executeShellCommand(command).use { descriptor -> java.io.FileInputStream(descriptor.fileDescriptor).use { it.readBytes() } }
     }
     private fun Bitmap.useBitmap(block:(Bitmap)->Unit) { try { block(this) } finally { recycle() } }
     private fun views(v:View):List<View> = listOf(v)+if(v is ViewGroup) (0 until v.childCount).flatMap { views(v.getChildAt(it)) } else emptyList()

@@ -181,7 +181,7 @@ jobs:
           disable-animations: true
           script: |
             gradle --project-dir android :app:connectedDebugAndroidTest --no-daemon
-            adb pull /sdcard/Android/data/com.irfan.rabta/files/screenshots interface-screenshots
+            adb pull /sdcard/Download/rabta-interface interface-screenshots
       - name: Upload interface screenshots
         if: always()
         uses: actions/upload-artifact@v4

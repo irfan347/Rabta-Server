@@ -127,7 +127,34 @@ app.get('/api/me', (req, res) => {
 // ---------- WebSocket ----------
 const online = new Map(); // userId -> ws
 const videoCalls = new Map();
+const voiceCalls = new Map();
 const groups = new Map();  // groupId -> {id,name,creator,members:Set}
+
+function sendTo(id, payload) { const socket=online.get(id); if(socket?.readyState===1) socket.send(JSON.stringify(payload)); }
+function callState(call,state) { sendTo(call.from,{type:'call_state',from:call.to,callId:call.id,state}); }
+function endCall(call) {
+  clearTimeout(call.timer);
+  const type=call.video?'video_end':'call_end';
+  sendTo(call.from,{type,from:call.to,callId:call.id});
+  sendTo(call.to,{type,from:call.from,callId:call.id});
+  (call.video?videoCalls:voiceCalls).delete(call.id);
+}
+function deliverCall(call) {
+  if(call.answered || call.expires<=Date.now() || online.get(call.to)?.readyState!==1) return;
+  sendTo(call.to,{type:call.video?'video_offer':'incoming_call',from:call.from,fromName:memUsers.get(call.from)?.name,callId:call.id,sdp:call.sdp});
+}
+function beginCall(from,to,id,video,sdp) {
+  if(!/^[0-9A-F]{12}$/.test(id) || !memUsers.has(to) || from===to) return;
+  const all=[...voiceCalls.values(),...videoCalls.values()];
+  if(all.some(c=>[c.from,c.to].includes(from)||[c.from,c.to].includes(to))) { sendTo(from,{type:'call_state',from:to,callId:id,state:'busy'});return; }
+  const call={id,from,to,video,sdp,answered:false,expires:Date.now()+45000,ice:[]};
+  call.timer=setTimeout(()=>endCall(call),45000);call.timer.unref?.();
+  (video?videoCalls:voiceCalls).set(id,call); callState(call,'calling'); deliverCall(call);
+}
+function participantCall(msg,userId) {
+  const call=voiceCalls.get(msg.callId)||videoCalls.get(msg.callId);
+  return call && ((call.from===userId&&call.to===msg.to)||(call.to===userId&&call.from===msg.to)) ? call : null;
+}
 
 async function deliverPending(userId, ws) {
   let msgs;
@@ -173,6 +200,7 @@ wss.on('connection', (ws, req) => {
 
   ws.send(JSON.stringify({ type: 'ready', id: userId, name: user.name }));
   deliverPending(userId, ws).catch(() => {});
+  for(const call of [...voiceCalls.values(),...videoCalls.values()]) if(call.to===userId) deliverCall(call);
 
   ws.on('message', async (raw) => {
     let msg; try { msg = JSON.parse(raw.toString()); } catch { return; }
@@ -194,33 +222,33 @@ wss.on('connection', (ws, req) => {
         try { await storeMessage(userId, user.name, to, msgId, body, msgType, sentAt); } catch (_) { ws.send(JSON.stringify({type:'ack',id:msgId,status:'error'})); return; }
         ws.send(JSON.stringify({ type: 'ack', id: msgId, status: 'stored' }));
       }
-    } else if (['video_offer','video_answer','ice_candidate','video_end'].includes(msg.type)) {
-      const now = Date.now();
-      for (const [id,call] of videoCalls) if(call.expires <= now) videoCalls.delete(id);
-      const callId = String(msg.callId || ''); const target = online.get(msg.to);
-      if(!/^[0-9A-F]{12}$/.test(callId)) return;
-      if(msg.type === 'video_offer') {
-        if(!target || target.readyState !== 1 || typeof msg.sdp !== 'string' || msg.sdp.length > 65536 || videoCalls.has(callId)) return;
-        if([...videoCalls.values()].filter(c => c.from === userId || c.to === userId).length >= 2) return;
-        videoCalls.set(callId,{from:userId,to:msg.to,expires:now+2*60*60*1000});
+    } else if (msg.type === 'call_init' || msg.type === 'video_offer') {
+      const video=msg.type==='video_offer';
+      if(video && (typeof msg.sdp!=='string'||msg.sdp.length>65536)) return;
+      beginCall(userId,msg.to,String(msg.callId||''),video,msg.sdp);
+    } else if (msg.type === 'call_ringing') {
+      const call=participantCall(msg,userId);
+      if(call && call.to===userId && !call.answered) callState(call,'ringing');
+    } else if (msg.type === 'call_accept' || msg.type === 'video_answer') {
+      const call=participantCall(msg,userId);
+      if(!call || call.to!==userId || call.answered || call.video!==(msg.type==='video_answer')) return;
+      if(call.video && (typeof msg.sdp!=='string'||msg.sdp.length>65536)) return;
+      call.answered=true; clearTimeout(call.timer); call.expires=Date.now()+2*60*60*1000; callState(call,'accepted');
+      if(call.video) {
+        sendTo(call.from,{type:'video_answer',from:userId,callId:call.id,sdp:msg.sdp});
+        for(const candidate of call.ice) sendTo(candidate.to,candidate.payload);
+        call.ice=[];
       }
-      const call=videoCalls.get(callId);
-      if(!call || !((call.from===userId && call.to===msg.to) || (call.to===userId && call.from===msg.to))) return;
-      if(msg.type==='video_answer' && call.to!==userId) return;
-      if(typeof msg.sdp==='string' && msg.sdp.length>65536) return;
-      if(target && target.readyState===1) target.send(JSON.stringify({type:msg.type,from:userId,fromName:user.name,callId,sdp:msg.sdp,sdpMid:msg.sdpMid,sdpMLineIndex:msg.sdpMLineIndex}));
-      if(msg.type==='video_end') videoCalls.delete(callId);
-    } else if (msg.type === 'call_init') {
-      // Notify the other person of an incoming call
-      const callee = online.get(msg.to);
-      if (callee) callee.send(JSON.stringify({ type: 'incoming_call', from: userId, fromName: user.name }));
+    } else if (msg.type === 'ice_candidate') {
+      const call=participantCall(msg,userId);
+      if(!call?.video || typeof msg.sdp!=='string'||msg.sdp.length>4096) return;
+      const payload={type:'ice_candidate',from:userId,callId:call.id,sdp:msg.sdp,sdpMid:msg.sdpMid,sdpMLineIndex:msg.sdpMLineIndex};
+      if(call.answered) sendTo(msg.to,payload); else if(call.ice.length<64) call.ice.push({to:msg.to,payload});
     } else if (msg.type === 'call_audio') {
-      // Relay audio frame instantly (low latency)
-      const callee = online.get(msg.to);
-      if (callee && callee.readyState === 1) callee.send(JSON.stringify({ type: 'call_audio', from: userId, data: msg.data }));
-    } else if (msg.type === 'call_end') {
-      const callee = online.get(msg.to);
-      if (callee) callee.send(JSON.stringify({ type: 'call_end', from: userId }));
+      const call=participantCall(msg,userId);
+      if(call && !call.video && call.answered && typeof msg.data==='string' && msg.data.length<=14000) sendTo(msg.to,{type:'call_audio',from:userId,callId:call.id,data:msg.data});
+    } else if (msg.type === 'call_end' || msg.type === 'video_end') {
+      const call=participantCall(msg,userId); if(call) endCall(call);
     } else if (msg.type === 'typing') {
       const tgt = online.get(msg.to); if (tgt && tgt.readyState === 1) tgt.send(JSON.stringify({ type: 'typing', from: userId }));
     } else if (msg.type === 'read') {
@@ -243,7 +271,7 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', () => {
-    if (online.get(userId) === ws) { online.delete(userId); updateLastSeen(userId); }
+    if (online.get(userId) === ws) { online.delete(userId); updateLastSeen(userId); for(const call of [...voiceCalls.values(),...videoCalls.values()]) if(call.from===userId||call.to===userId) endCall(call); }
   });
   ws.on('error', () => { try { ws.close(); } catch (_) {} });
 });

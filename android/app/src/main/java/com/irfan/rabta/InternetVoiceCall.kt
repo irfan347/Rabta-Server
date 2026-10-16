@@ -17,7 +17,8 @@ import java.util.concurrent.LinkedBlockingQueue
  * Voice call over the internet: mic → base64 frames → server → other phone.
  * 8kHz PCM, 40ms frames, jitter buffer drops old frames to cap latency.
  */
-class InternetVoiceCall(private val peerId: String, private val onStatus: (String) -> Unit) {
+class InternetVoiceCall(private val peerId: String, val id:String, private val onStatus: (String) -> Unit) {
+    private val ringback=CallSounds()
     private val sampleRate = 8000
     private val frameBytes = 640       // 40ms × 8000Hz × 2 bytes
     private val maxQueue = 6           // ~240ms max buffer
@@ -42,9 +43,10 @@ class InternetVoiceCall(private val peerId: String, private val onStatus: (Strin
         if (running) return
         running = true; hasRemoteAudio=false; captureStarted=false
         if (initiate) {
-            WsClient.sendRaw(JSONObject().put("type","call_init").put("to",peerId).toString())
-            handler.post { onStatus("Ringing…") }
+            WsClient.sendRaw(JSONObject().put("type","call_init").put("to",peerId).put("callId",id).toString())
+            handler.post { onStatus("Calling…") }
         } else {
+            WsClient.sendRaw(JSONObject().put("type","call_accept").put("to",peerId).put("callId",id).toString())
             handler.post { onStatus("Connecting…") }
         }
         // Set speaker mode
@@ -53,13 +55,22 @@ class InternetVoiceCall(private val peerId: String, private val onStatus: (Strin
         if (!initiate) startCapture()
     }
 
+    fun state(state:String) {
+        if(!running || hasRemoteAudio) return
+        when(state) {
+            "calling" -> { ringback.stop(); onStatus("Calling…") }
+            "ringing" -> { ringback.ringing(); onStatus("Ringing…") }
+            "accepted" -> { ringback.stop(); onStatus("Connecting…"); startCapture() }
+        }
+    }
+
     /** Audio frame received from the remote phone. */
     fun onAudio(b64: String) {
         if (!running) return
         val data = try { Base64.decode(b64, Base64.NO_WRAP) } catch (_: Exception) { return }
         if (data.isEmpty() || data.size > 10000) return
         if (!hasRemoteAudio) {
-            hasRemoteAudio = true
+            hasRemoteAudio = true; ringback.stop()
             startCapture()
             handler.post { if(running) onStatus("Connected") }
         }
@@ -87,7 +98,7 @@ class InternetVoiceCall(private val peerId: String, private val onStatus: (Strin
                     if (n > 0 && WsClient.connected) {
                         if(muted) java.util.Arrays.fill(buf,0,n,0.toByte())
                         val enc = Base64.encodeToString(buf, 0, n, Base64.NO_WRAP)
-                        WsClient.sendRaw(JSONObject().put("type","call_audio").put("to",peerId).put("data",enc).toString())
+                        WsClient.sendRaw(JSONObject().put("type","call_audio").put("to",peerId).put("callId",id).put("data",enc).toString())
                     } else if (n < 0) {
                         handler.post { onStatus("Mic error ($n)") }; break
                     }
@@ -126,9 +137,10 @@ class InternetVoiceCall(private val peerId: String, private val onStatus: (Strin
 
     /** sendEnd=false when the other side hung up first. */
     fun stop(sendEnd: Boolean = true) {
+        ringback.stop()
         if (!running) return
         running = false
-        if (sendEnd) try { WsClient.sendRaw(JSONObject().put("type","call_end").put("to",peerId).toString()) } catch (_: Exception) {}
+        if (sendEnd) try { WsClient.sendRaw(JSONObject().put("type","call_end").put("to",peerId).put("callId",id).toString()) } catch (_: Exception) {}
         playbackThread?.interrupt()
         captureThread?.interrupt()
         playbackThread=null; captureThread=null

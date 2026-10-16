@@ -526,9 +526,10 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         am.mode=AudioManager.MODE_IN_COMMUNICATION; am.isSpeakerphoneOn=false
         headerBar.visibility=View.GONE; window.statusBarColor=DARK; window.decorView.systemUiVisibility=0
         callOverlay.visibility=View.VISIBLE; chatScroll.visibility=View.GONE; composerBar.visibility=View.GONE; searchField.visibility=View.GONE
-        callStatusTv.text=if(initiate) "Ringing…" else "Connecting…"
+        callStatusTv.text=if(initiate) "Calling…" else "Connecting…"
         callId=db.logCallStart(peerId,peerName,if(initiate)"outgoing" else "incoming")
-        netCall=InternetVoiceCall(peerId) { status ->
+        val voiceId=if(initiate) ByteArray(6).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02X".format(it) } else intent.getStringExtra("voiceCallId").orEmpty()
+        netCall=InternetVoiceCall(peerId,voiceId) { status ->
             if(inCall) {
                 callStatusTv.text=status
                 if(status.startsWith("Connected") && connectedAt==0L) {
@@ -594,11 +595,16 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         if (fromId!=peerId||isGroup) return
         handler.post { typingTv.visibility=View.VISIBLE; statusTv.visibility=View.GONE; handler.removeCallbacks(typingHide); handler.postDelayed(typingHide,3000) }
     }
-    override fun onCallAudio(fromId:String,data:String) {
-        if (fromId!=peerId) return
+    override fun onCallAudio(fromId:String,data:String,callId:String) {
+        if (fromId!=peerId || callId!=netCall?.id) return
         // Audio alone must never auto-answer an incoming call.
         if(inCall) netCall?.onAudio(data)
     }
-    override fun onCallEnd(fromId:String) { if(fromId==peerId) handler.post{endCall(false);toast("Call khatam")} }
+    override fun onCallEnd(fromId:String,callId:String) { if(fromId==peerId && callId==netCall?.id) handler.post{endCall(false);toast("Call khatam")} }
+    override fun onCallState(fromId:String,callId:String,state:String) {
+        if(fromId!=peerId || callId!=netCall?.id) return
+        if(state=="busy") { endCall(false); toast("Busy"); return }
+        netCall?.state(state)
+    }
     override fun onVideoEnd(callId:String) {}
 }

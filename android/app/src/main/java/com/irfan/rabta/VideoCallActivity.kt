@@ -39,6 +39,8 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
     private var eglBase: EglBase? = null
     private var factory: PeerConnectionFactory? = null
     private var pc: PeerConnection? = null
+    private val pendingIce=mutableListOf<IceCandidate>()
+    private fun flushIce() { handler.post { if(pc?.remoteDescription!=null) { pendingIce.forEach { pc?.addIceCandidate(it) }; pendingIce.clear() } } }
     private var capturer: CameraVideoCapturer? = null
     private var localView: SurfaceViewRenderer? = null
     private var remoteView: SurfaceViewRenderer? = null
@@ -49,6 +51,8 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
     private var localAudioTrack: AudioTrack? = null
     private var muted = false
     private var useFrontCamera = true
+    private val ringback=CallSounds()
+    private val ringTimeout=Runnable { if(connectedAt==0L) hangUp() }
     private var connectedAt=0L
     private var speakerOn=true
     private var previousAudioMode=android.media.AudioManager.MODE_NORMAL
@@ -80,6 +84,7 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
         begin()
     }
 
+    override fun onBackPressed() { hangUp() }
     override fun onDestroy() { RabtaEvents.remove(this); cleanup(); super.onDestroy() }
 
     private fun hasPerms() = checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED &&
@@ -110,7 +115,7 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
         // Name + status (center)
         val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
         info.addView(TextView(this).apply { text = peerName; textSize = 26f; typeface = Typeface.DEFAULT_BOLD; setTextColor(Color.WHITE); gravity = Gravity.CENTER })
-        statusTv = TextView(this).apply { text = "Connecting..."; textSize = 14f; setTextColor(0xCCFFFFFF.toInt()); gravity = Gravity.CENTER }
+        statusTv = TextView(this).apply { text = if(isCaller) "Calling…" else "Connecting…"; textSize = 14f; setTextColor(0xCCFFFFFF.toInt()); gravity = Gravity.CENTER }
         info.addView(statusTv)
         root.addView(info, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             gravity = Gravity.CENTER; bottomMargin = dp(160) })
@@ -139,6 +144,7 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
         RabtaEvents.add(this)
         initWebRtc()
         createPeerConnection()
+        handler.postDelayed(ringTimeout,45000)
         if (isCaller) createAndSendOffer()
         else { val sdp = intent.getStringExtra(OFFER_SDP); if (sdp != null) acceptOffer(sdp) else finish() }
     }
@@ -186,7 +192,7 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
                 handler.post {
                     if(isFinishing) return@post
                     when(s) {
-                        PeerConnection.PeerConnectionState.CONNECTED -> { if(connectedAt==0L) connectedAt=android.os.SystemClock.elapsedRealtime(); handler.removeCallbacks(durationTick); handler.post(durationTick) }
+                        PeerConnection.PeerConnectionState.CONNECTED -> { ringback.stop(); handler.removeCallbacks(ringTimeout); if(connectedAt==0L) connectedAt=android.os.SystemClock.elapsedRealtime(); handler.removeCallbacks(durationTick); handler.post(durationTick) }
                         PeerConnection.PeerConnectionState.DISCONNECTED -> { handler.removeCallbacks(durationTick); statusTv.text="Reconnecting…" }
                         PeerConnection.PeerConnectionState.FAILED -> { Toast.makeText(this@VideoCallActivity,"Connection failed",Toast.LENGTH_SHORT).show(); hangUp() }
                         else -> {}
@@ -225,7 +231,7 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
                 pc!!.setLocalDescription(sdpObserver(onSet = {
                     WsClient.sendRaw(JSONObject().put("type","video_offer").put("to",peerId).put("callId",callId)
                         .put("fromName",Session.name).put("sdp",sdp.description).toString())
-                    handler.post { statusTv.text = "Ring ho rahi hai..." }
+                    handler.post { statusTv.text = "Calling…" }
                 }), sdp)
             }
             override fun onSetSuccess() {}
@@ -236,6 +242,7 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
 
     private fun acceptOffer(offerSdp: String) {
         pc!!.setRemoteDescription(sdpObserver(onSet = {
+            flushIce()
             pc!!.createAnswer(object : SdpObserver {
                 override fun onCreateSuccess(sdp: SessionDescription) {
                     pc!!.setLocalDescription(sdpObserver(onSet = {
@@ -276,6 +283,7 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
     }
 
     private fun cleanup() {
+        ringback.stop(); handler.removeCallbacks(ringTimeout)
         handler.removeCallbacks(durationTick)
         if(::speakerBtn.isInitialized) try { (getSystemService(AUDIO_SERVICE) as android.media.AudioManager).apply { isSpeakerphoneOn=previousSpeaker; mode=previousAudioMode } } catch (_:Exception) {}
         try { capturer?.stopCapture() } catch (_: Exception) {}
@@ -293,13 +301,25 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
     }
 
     // RabtaEvents
+    override fun onCallState(fromId:String,callId:String,state:String) {
+        if(callId!=this.callId || fromId!=peerId || !isCaller || connectedAt!=0L) return
+        when(state) {
+            "calling" -> { ringback.stop(); statusTv.text="Calling…" }
+            "ringing" -> { ringback.ringing(); statusTv.text="Ringing…" }
+            "accepted" -> { ringback.stop(); statusTv.text="Connecting…" }
+            "busy" -> { Toast.makeText(this,"Busy",Toast.LENGTH_SHORT).show(); cleanup(); finish() }
+        }
+    }
+    override fun onDisconnected() { cleanup(); finish() }
     override fun onVideoAnswer(callId: String, sdp: String) {
         if (callId != this.callId) return
-        pc?.setRemoteDescription(sdpObserver(), SessionDescription(SessionDescription.Type.ANSWER, sdp))
+        ringback.stop(); statusTv.text="Connecting…"
+        pc?.setRemoteDescription(sdpObserver(onSet={flushIce()}), SessionDescription(SessionDescription.Type.ANSWER, sdp))
     }
     override fun onIceCandidateEvent(callId: String, sdpMid: String, sdpMLineIndex: Int, sdp: String) {
         if (callId != this.callId) return
-        pc?.addIceCandidate(IceCandidate(sdpMid, sdpMLineIndex, sdp))
+        val candidate=IceCandidate(sdpMid,sdpMLineIndex,sdp)
+        if(pc?.remoteDescription!=null) pc?.addIceCandidate(candidate) else if(pendingIce.size<64) pendingIce.add(candidate)
     }
     override fun onVideoEnd(callId: String) {
         if (callId != this.callId) return

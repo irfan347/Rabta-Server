@@ -12,9 +12,26 @@ Java 17, Gradle 8.7, SDK 34 and build-tools 34.0.0. APK artifacts come from Acti
 - Share photos, videos and documents. Video/file limit: 8 MiB. Private attachment
   files are kept outside SQLite; temporary URI grants let a chosen app open them.
 - A picker of 12 original Rabta expression stickers; import PNG, WebP or JPEG
-  stickers up to 512 KiB. These are not WhatsApp-owned sticker packs.
+  stickers up to 512 KiB, plus Recent/Favorites tabs and saving received stickers.
+  These are not WhatsApp-owned sticker packs.
 - Online attachment transport preserves full bodies and checks file SHA-256 on
   receive. Failed messages can be retried with the same ID.
+
+## Calling and ringtones
+
+Caller starts at Calling. The receiver app acknowledges an incoming call before
+Ringing appears and local ringback starts. Offline recipients can reconnect during
+the 45-second calling window. Answer stops ringback, and the connected duration
+starts only when media connects. Decline, timeout, busy, disconnect and hang-up stop
+sounds. Calls carry an ID; unrelated users and stale calls cannot inject call audio
+or ringing/end events. Audio relay requires acceptance first.
+
+Incoming calls use Android's default ringtone URI in a dedicated call notification
+channel, with a looping notification and a system-enforced timeout. The device's
+selected ringtone, ring volume, silent mode, DND and notification permissions apply.
+The user can override the app's call sound in Android notification settings.
+Both callers and the server must run this updated call protocol. The old backend
+does not support call IDs or recipient-confirmed ringing.
 
 ## Offline store-carry-forward
 

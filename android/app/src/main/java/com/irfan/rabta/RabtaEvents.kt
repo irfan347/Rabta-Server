@@ -9,9 +9,10 @@ object RabtaEvents {
         fun onAck(msgId: String, status: String) {}
         fun onRead(msgId: String, byId: String) {}
         fun onTyping(fromId: String) {}
-        fun onIncomingCall(fromId: String, fromName: String) {}
-        fun onCallAudio(fromId: String, data: String) {}
-        fun onCallEnd(fromId: String) {}
+        fun onIncomingCall(fromId: String, fromName: String, callId: String) {}
+        fun onCallAudio(fromId: String, data: String, callId: String) {}
+        fun onCallState(fromId:String,callId:String,state:String) {}
+        fun onCallEnd(fromId: String, callId: String) {}
         fun onHistoryChanged(convId: String) {}
         fun onConnected() {}
         fun onDisconnected() {}
@@ -36,9 +37,10 @@ object RabtaEvents {
     fun postAck(msgId: String, status: String)               = fire { onAck(msgId, status) }
     fun postRead(msgId: String, byId: String)                = fire { onRead(msgId, byId) }
     fun postTyping(fromId: String)                           = fire { onTyping(fromId) }
-    fun postIncomingCall(fromId: String, fromName: String)   = fire { onIncomingCall(fromId, fromName) }
-    fun postCallAudio(fromId: String, data: String)          = fire { onCallAudio(fromId, data) }
-    fun postCallEnd(fromId: String)                          = fire { onCallEnd(fromId) }
+    fun postIncomingCall(fromId: String, fromName: String, callId: String)   = fire { onIncomingCall(fromId, fromName, callId) }
+    fun postCallAudio(fromId: String, data: String, callId: String)          = fire { onCallAudio(fromId, data, callId) }
+    fun postCallState(fromId:String,callId:String,state:String) = fire { onCallState(fromId,callId,state) }
+    fun postCallEnd(fromId: String, callId: String)                          = fire { onCallEnd(fromId, callId) }
     fun postHistoryChanged(convId: String) = fire { onHistoryChanged(convId) }
     fun postConnected()                                      = fire { onConnected() }
     fun postDisconnected()                                   = fire { onDisconnected() }

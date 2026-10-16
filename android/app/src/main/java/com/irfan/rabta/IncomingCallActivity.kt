@@ -51,14 +51,15 @@ class IncomingCallActivity : ThemedActivity(), RabtaEvents.Listener {
         handler.postDelayed(autoDecline, 30_000)
     }
 
-    override fun onCallEnd(fromId: String) {
-        if (fromId == this.fromId && !answered) { answered = true; cancelNotif(); finish() }
+    override fun onCallEnd(fromId: String, callId: String) {
+        if (fromId == this.fromId && callId==this.callId && !answered) { answered = true; cancelNotif(); finish() }
     }
 
     private fun cancelNotif() {
         try { (getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager).cancel(MessageService.CALL_NOTIF) } catch (_: Exception) {}
     }
 
+    override fun onBackPressed() { decline() }
     override fun onDestroy() { handler.removeCallbacks(autoDecline); RabtaEvents.remove(this); super.onDestroy() }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -118,7 +119,7 @@ class IncomingCallActivity : ThemedActivity(), RabtaEvents.Listener {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
         } else {
             startActivity(Intent(this, ChatActivity::class.java)
-                .putExtra("peerId", fromId).putExtra("peerName", fromName).putExtra("autoAnswer", true)
+                .putExtra("peerId", fromId).putExtra("peerName", fromName).putExtra("autoAnswer", true).putExtra("voiceCallId",callId)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
         }
         finish()
