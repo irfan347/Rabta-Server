@@ -175,8 +175,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
             hint=L.t(this@ConversationListActivity,"Search names or messages")
             imeOptions=android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
             textSize=15f;setTextColor(TXT);setHintTextColor(SUB);setSingleLine(true)
-            minHeight=dp(52);setPadding(dp(18),dp(12),dp(18),dp(12))
-            background=RabtaUi.shape(this@ConversationListActivity,WHITE,16,AppTheme.line(this@ConversationListActivity))
+            minHeight=dp(52);setPadding(0,dp(12),0,dp(12));background=null
             contentDescription=L.t(this@ConversationListActivity,"Search names or messages")
             addTextChangedListener(object:android.text.TextWatcher {
                 override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int) {}
@@ -190,7 +189,17 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
                 if(action==android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH) { hideKeyboard();true } else false
             }
         }
-        root.addView(searchField,LinearLayout.LayoutParams(-1,-2).apply { setMargins(dp(20),0,dp(20),dp(8)) })
+        val searchRow=LinearLayout(this).apply {
+            orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL
+            setPadding(dp(16),0,dp(16),0)
+            background=RabtaUi.shape(this@ConversationListActivity,WHITE,16,AppTheme.line(this@ConversationListActivity))
+        }
+        searchRow.addView(TextView(this).apply {
+            UiIcons.set(this,"search",SUB,18,"Search conversations");gravity=Gravity.CENTER
+            importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        },LinearLayout.LayoutParams(dp(24),dp(24)).apply { marginEnd=dp(10) })
+        searchRow.addView(searchField,LinearLayout.LayoutParams(0,-2,1f))
+        root.addView(searchRow,LinearLayout.LayoutParams(-1,-2).apply { setMargins(dp(20),0,dp(20),dp(8)) })
         chatFilters=LinearLayout(this).apply {
             orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL
             setPadding(dp(16),dp(2),dp(16),dp(8));contentDescription="Chat filters"
@@ -346,7 +355,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         }
         // Avatar: group icon or profile pic
         val av = FrameLayout(this)
-        if (c.isGroup) av.addView(TextView(this).apply { UiIcons.set(this,"spaces",Color.WHITE,label="Group"); textSize = 20f; gravity = Gravity.CENTER; background = pill(0xFF607D8B.toInt()) }, FrameLayout.LayoutParams(dp(50),dp(50)))
+        if (c.isGroup) av.addView(TextView(this).apply { UiIcons.set(this,"spaces",Color.WHITE,label="Group"); textSize = 20f; gravity = Gravity.CENTER; background = pill(AppTheme.ACCENT) }, FrameLayout.LayoutParams(dp(50),dp(50)))
         else {
             av.addView(initials(c.peerName, dp(50)), FrameLayout.LayoutParams(dp(50),dp(50)))
             ProfileHelper.loadIfNeeded(c.peerId, Session.serverUrl, Session.token) { bmp ->
@@ -363,7 +372,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         if (c.lastTime > 0) top.addView(TextView(this).apply { text = fmtTime(c.lastTime); textSize = 12f; setTextColor(if (c.unread > 0) AppTheme.accent(this@ConversationListActivity) else SUB) })
         mid.addView(top)
         val bot = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0,dp(2),0,0) }
-        bot.addView(TextView(this).apply { text = c.lastMsg.ifEmpty { "Tap to chat" }; textSize = 14f; setTextColor(SUB); maxLines = 1;ellipsize=android.text.TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        bot.addView(TextView(this).apply { text = c.lastMsg.ifEmpty { "No messages yet" }; textSize = 14f; setTextColor(SUB); maxLines = 1;ellipsize=android.text.TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         if (c.unread > 0) bot.addView(TextView(this).apply {
             text = if (c.unread > 99) "99+" else c.unread.toString()
             textSize = 12f; typeface = Typeface.DEFAULT_BOLD; setTextColor(Color.WHITE); gravity = Gravity.CENTER
