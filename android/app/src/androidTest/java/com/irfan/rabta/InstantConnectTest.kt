@@ -41,7 +41,7 @@ class InstantConnectTest {
     }
     private fun decode(bitmap:Bitmap):String {
         val pixels=IntArray(bitmap.width*bitmap.height);bitmap.getPixels(pixels,0,bitmap.width,0,0,bitmap.width,bitmap.height)
-        return MultiFormatReader().decode(BinaryBitmap(HybridBinarizer(RGBLuminanceSource(bitmap.width,bitmap.height,pixels)))).text
+        return MultiFormatReader().decode(BinaryBitmap(HybridBinarizer(RGBLuminanceSource(bitmap.width,bitmap.height,pixels))),InstantQr.decodeHints).text
     }
     @Test fun actualQrImagesRoundTripAndOneTimePairingPersists() {
         val aid=id();val bid=id();val a=InstantPairingStore(ctx,aid);val b=InstantPairingStore(ctx,bid)

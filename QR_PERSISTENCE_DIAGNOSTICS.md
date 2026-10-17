@@ -12,7 +12,9 @@ A new JVM regression test reproduces the failure independently of Android, camer
 
 ## Focused candidate fix and coverage
 
-Pin the existing ZXing core dependency to 3.5.3; retain journeyapps embedded 4.3.0 and its current camera/UI flow. The updated core has changes to QR finder-candidate filtering; actual regression results, rather than release notes alone, determine whether this fixes the observed case. See the [official 3.5.3 finder source](https://github.com/zxing/zxing/blob/zxing-3.5.3/core/src/main/java/com/google/zxing/qrcode/detector/FinderPatternFinder.java).
+The dependency-only 3.5.3 candidate failed both the fixed and varied-image regressions in run 39012170116. It was not accepted as a fix; the dependency pin was removed, preserving the original dependency versions.
+
+The next focused candidate enables QR-only TRY_HARDER hints through shared InstantQr configuration in the actual camera DefaultDecoderFactory and image tests. ZXing's default finder scan assumes up to version 20 for row sampling; TRY_HARDER changes this sampling for denser codes. The preserved confirmation is asserted to exceed version 20. This uses the normal image detector, with no PURE_BARCODE or supplied finder points. The camera continues decoding only in the existing foreground lifecycle. See the [existing 3.4.1 finder sampling logic](https://github.com/zxing/zxing/blob/zxing-3.4.1/core/src/main/java/com/google/zxing/qrcode/detector/FinderPatternFinder.java).
 
 There is no invitation format, signature, expiry, replay-cache, key approval, authentication, encryption, message, database or backend implementation change. NFC still exchanges the same public invitation text.
 

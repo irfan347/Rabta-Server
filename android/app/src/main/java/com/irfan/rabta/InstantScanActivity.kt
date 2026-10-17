@@ -11,7 +11,6 @@ import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
-import com.google.zxing.BarcodeFormat
 import com.google.zxing.ResultPoint
 import com.journeyapps.barcodescanner.BarcodeCallback
 import com.journeyapps.barcodescanner.BarcodeResult
@@ -30,7 +29,7 @@ class InstantScanActivity:ThemedActivity() {
         val body=FeatureUi.page(this,"Scan to connect")
         body.addView(RabtaUi.text(this,"Scan an invitation, pairing reply or confirmation. You will review the identity before approving.",15f,color=AppTheme.sub(this)))
         val frame=FrameLayout(this).apply { background=RabtaUi.shape(this@InstantScanActivity,AppTheme.raised(this@InstantScanActivity));clipToOutline=true }
-        camera=BarcodeView(this).apply { decoderFactory=DefaultDecoderFactory(listOf(BarcodeFormat.QR_CODE)) }
+        camera=BarcodeView(this).apply { decoderFactory=DefaultDecoderFactory(InstantQr.formats,InstantQr.decodeHints,null,0) }
         frame.addView(camera,FrameLayout.LayoutParams(-1,-1))
         frame.addView(object:View(this) {
             private val p=Paint(Paint.ANTI_ALIAS_FLAG)

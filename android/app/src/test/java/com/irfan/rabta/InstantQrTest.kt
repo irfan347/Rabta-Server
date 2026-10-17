@@ -7,6 +7,8 @@ import com.google.zxing.MultiFormatReader
 import com.google.zxing.RGBLuminanceSource
 import com.google.zxing.common.HybridBinarizer
 import com.google.zxing.qrcode.QRCodeWriter
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
+import com.google.zxing.qrcode.encoder.Encoder
 import org.junit.Assert.*
 import org.junit.Test
 import java.security.KeyPairGenerator
@@ -20,11 +22,12 @@ class InstantQrTest {
             if(matrix[index%matrix.width,index/matrix.width])0xFF000000.toInt() else 0xFFFFFFFF.toInt()
         }
         // Exercise the ordinary detector. No PURE_BARCODE, retries, catch-and-ignore or supplied points.
-        return MultiFormatReader().decode(BinaryBitmap(HybridBinarizer(RGBLuminanceSource(matrix.width,matrix.height,pixels)))).text
+        return MultiFormatReader().decode(BinaryBitmap(HybridBinarizer(RGBLuminanceSource(matrix.width,matrix.height,pixels))),InstantQr.decodeHints).text
     }
     @Test fun previouslyMissedConfirmationDecodesAtBothRenderingSizesAndEveryMask() {
         val raw=javaClass.getResourceAsStream("/qr-regression.txt")!!.bufferedReader().use { it.readText().trim() }
         assertEquals(InstantInvitation.CONFIRMATION,InstantInvitation.verify(raw,1700000000002L).record.kind)
+        assertTrue("Fixture must exercise a dense QR",Encoder.encode(raw,ErrorCorrectionLevel.L).version.versionNumber>20)
         for(size in listOf(800,900)) {
             assertEquals("Default mask size=$size",raw,decode(raw,size))
             for(mask in 0..7)assertEquals("Mask=$mask size=$size",raw,decode(raw,size,mask))
