@@ -2,6 +2,8 @@ package com.irfan.rabta
 
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.drawable.BitmapDrawable
+import android.widget.ImageView
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
@@ -34,9 +36,12 @@ class InstantConnectTest {
     private fun qr(raw:String):String {
         val bitmap=BarcodeEncoder().encodeBitmap(raw,BarcodeFormat.QR_CODE,900,900)
         return try {
-            val pixels=IntArray(bitmap.width*bitmap.height);bitmap.getPixels(pixels,0,bitmap.width,0,0,bitmap.width,bitmap.height)
-            MultiFormatReader().decode(BinaryBitmap(HybridBinarizer(RGBLuminanceSource(bitmap.width,bitmap.height,pixels)))).text
+            decode(bitmap)
         }finally{bitmap.recycle()}
+    }
+    private fun decode(bitmap:Bitmap):String {
+        val pixels=IntArray(bitmap.width*bitmap.height);bitmap.getPixels(pixels,0,bitmap.width,0,0,bitmap.width,bitmap.height)
+        return MultiFormatReader().decode(BinaryBitmap(HybridBinarizer(RGBLuminanceSource(bitmap.width,bitmap.height,pixels)))).text
     }
     @Test fun actualQrImagesRoundTripAndOneTimePairingPersists() {
         val aid=id();val bid=id();val a=InstantPairingStore(ctx,aid);val b=InstantPairingStore(ctx,bid)
@@ -141,6 +146,19 @@ class InstantConnectTest {
             val replyEnd=System.currentTimeMillis()+5000
             while(InstantPairingStore(ctx,bid).view().pendingReply==null&&System.currentTimeMillis()<replyEnd)Thread.sleep(30)
             val reply=InstantPairingStore(ctx,bid).view().pendingReply!!;assertEquals(reply,qr(reply));assertNull(MeshSecurity(ctx,bid).key(aid))
+            // Verify the actual 800px production ImageView bitmap, not only a test-generated QR.
+            var rendered:Bitmap?=null
+            val renderEnd=System.currentTimeMillis()+5000
+            while(rendered==null&&System.currentTimeMillis()<renderEnd) {
+                inst.runOnMainSync {
+                    val qrView=views(screen!!.window.decorView).filterIsInstance<ImageView>()
+                        .firstOrNull { it.contentDescription=="Temporary Instant Connect QR code" }
+                    rendered=(qrView?.drawable as? BitmapDrawable)?.bitmap?.copy(Bitmap.Config.ARGB_8888,false)
+                }
+                if(rendered==null)Thread.sleep(30)
+            }
+            assertNotNull("Production QR must be rendered",rendered)
+            try { assertEquals(reply,decode(rendered!!)) }finally{rendered?.recycle()}
             inst.waitForIdleSync()
             val dir=java.io.File(ctx.getExternalFilesDir(null),"screenshots").apply { mkdirs() }
             val screenshot=inst.uiAutomation.takeScreenshot()

@@ -2,16 +2,34 @@ package com.irfan.rabta
 
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.BinaryBitmap
+import com.google.zxing.EncodeHintType
 import com.google.zxing.MultiFormatReader
 import com.google.zxing.RGBLuminanceSource
 import com.google.zxing.common.HybridBinarizer
 import com.google.zxing.qrcode.QRCodeWriter
-import org.junit.Assert.assertEquals
+import org.junit.Assert.*
 import org.junit.Test
 import java.security.KeyPairGenerator
 
-/** Isolated expired public test invitations; never accesses Android accounts or Keystore. */
+/** Real signed, expired test records. No Android accounts, Keystore or production storage. */
 class InstantQrTest {
+    private fun decode(raw:String,size:Int,mask:Int?=null):String {
+        val hints=if(mask==null)emptyMap() else mapOf(EncodeHintType.QR_MASK_PATTERN to mask)
+        val matrix=QRCodeWriter().encode(raw,BarcodeFormat.QR_CODE,size,size,hints)
+        val pixels=IntArray(matrix.width*matrix.height) { index ->
+            if(matrix[index%matrix.width,index/matrix.width])0xFF000000.toInt() else 0xFFFFFFFF.toInt()
+        }
+        // Exercise the ordinary detector. No PURE_BARCODE, retries, catch-and-ignore or supplied points.
+        return MultiFormatReader().decode(BinaryBitmap(HybridBinarizer(RGBLuminanceSource(matrix.width,matrix.height,pixels)))).text
+    }
+    @Test fun previouslyMissedConfirmationDecodesAtBothRenderingSizesAndEveryMask() {
+        val raw=javaClass.getResourceAsStream("/qr-regression.txt")!!.bufferedReader().use { it.readText().trim() }
+        assertEquals(InstantInvitation.CONFIRMATION,InstantInvitation.verify(raw,1700000000002L).record.kind)
+        for(size in listOf(800,900)) {
+            assertEquals("Default mask size=$size",raw,decode(raw,size))
+            for(mask in 0..7)assertEquals("Mask=$mask size=$size",raw,decode(raw,size,mask))
+        }
+    }
     @Test fun signedPairingImagesDecodeAcrossStagesAndRasterSizes() {
         val a=KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
         val b=KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
@@ -21,17 +39,7 @@ class InstantQrTest {
             val reply=InstantInvitation.reply(offer,"DDDDEEEEFFFF","علی",b,now+1)
             val confirmation=InstantInvitation.confirmation(offer,reply,a,now+2)
             for(packet in listOf(offer,reply,confirmation))for(size in listOf(800,900)) {
-                val matrix=QRCodeWriter().encode(packet.raw,BarcodeFormat.QR_CODE,size,size)
-                val pixels=IntArray(matrix.width*matrix.height) { index ->
-                    if(matrix[index%matrix.width,index/matrix.width])0xFF000000.toInt() else 0xFFFFFFFF.toInt()
-                }
-                try {
-                    val actual=MultiFormatReader().decode(BinaryBitmap(HybridBinarizer(RGBLuminanceSource(matrix.width,matrix.height,pixels)))).text
-                    assertEquals(packet.raw,actual)
-                }catch(error:Exception) {
-                    throw AssertionError("QR stage="+packet.record.kind+" size="+size+" sample="+sample+
-                        " expired-public-fixture="+packet.raw,error)
-                }
+                assertEquals("Stage="+packet.record.kind+" size="+size+" sample="+sample,packet.raw,decode(packet.raw,size))
             }
         }
     }
