@@ -28,6 +28,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import java.security.SecureRandom
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -77,8 +78,22 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     private lateinit var headerBar: LinearLayout
     private lateinit var composerBar: LinearLayout
     private lateinit var searchField: EditText
-    private lateinit var recordingPanel: LinearLayout
-    private lateinit var recordingTv: TextView
+    private lateinit var lockHint: LinearLayout
+    private lateinit var lockedPanel: LinearLayout
+    private lateinit var lockedTimer: TextView
+    private lateinit var waveform: WaveformView
+    private lateinit var pauseBtn: LinearLayout
+    private lateinit var barRow: LinearLayout
+    private lateinit var holdStrip: LinearLayout
+    private lateinit var holdTimer: TextView
+    private lateinit var emojiBtn: TextView
+    private lateinit var stickerBtn: TextView
+    private lateinit var cameraBtn: TextView
+    private var pillContent: List<View> = emptyList()
+    private var recordingLocked = false
+    private var recordingPaused = false
+    private var pausedAt = 0L
+    private var pausedTotal = 0L
     private lateinit var muteControl: TextView
     private lateinit var speakerControl: TextView
     private var searchQuery = ""
@@ -91,10 +106,17 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     private val recordingTick = object : Runnable {
         override fun run() {
             if (!recording) return
-            val seconds = (android.os.SystemClock.elapsedRealtime()-recordingStarted)/1000
-            recordingTv.text = "${duration(seconds)} · Slide left to cancel"
-            if(seconds >= 120) stopVoiceRecord(true) else uiHandler.postDelayed(this,250)
+            val seconds = recordedMillis()/1000
+            holdTimer.text = duration(seconds); lockedTimer.text = duration(seconds)
+            if(!recordingPaused) waveform.add(MediaHelper.recordingLevel())
+            if(seconds >= 120) stopVoiceRecord(true) else uiHandler.postDelayed(this,100)
         }
+    }
+    /** Recorded time, excluding pauses. */
+    private fun recordedMillis():Long {
+        if(!recording) return 0
+        val now=android.os.SystemClock.elapsedRealtime()
+        return now-recordingStarted-pausedTotal-(if(recordingPaused) now-pausedAt else 0)
     }
     private val callTick = object : Runnable {
         override fun run() {
@@ -301,21 +323,62 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         replyBar.addView(replyPreview,LinearLayout.LayoutParams(0,-2,1f))
         replyBar.addView(RabtaUi.iconButton(this,"close","Cancel reply") { replyTo=null;replyBar.visibility=View.GONE })
         root.addView(replyBar)
-        // ── Input bar ──
-        recordingPanel=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;setBackgroundColor(RECV);visibility=View.GONE }
-        recordingTv=RabtaUi.text(this,"",13f,color=AppTheme.error(this)).apply { setPadding(dp(16),dp(8),dp(16),dp(8));accessibilityLiveRegion=View.ACCESSIBILITY_LIVE_REGION_POLITE }
-        recordingPanel.addView(recordingTv)
-        val recordActions=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL;gravity=Gravity.END }
-        recordActions.addView(RabtaUi.button(this,"Cancel") { stopVoiceRecord(false) }.apply { layoutParams=LinearLayout.LayoutParams(-2,-2) })
-        recordActions.addView(RabtaUi.button(this,"Send voice message") { stopVoiceRecord(true) }.apply { layoutParams=LinearLayout.LayoutParams(-2,-2) })
-        recordingPanel.addView(recordActions);root.addView(recordingPanel)
-        val bar = LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.BOTTOM; setBackgroundColor(RECV); setPadding(dp(6),dp(6),dp(6),dp(6)) }
-        bar.addView(RabtaUi.iconButton(this,"attach","attach") { showAttachments() })
-        bar.addView(RabtaUi.iconButton(this,"sticker","Stickers") { Stickers.picker(this@ChatActivity,{sendContent(it,"sticker")},{pickAttachment("image/*",104)}) })
+        // ── Composer: one rounded pill (emoji · message · sticker · attach · camera) and a round mic/send button ──
+        composerBar=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;clipChildren=false;clipToPadding=false }
+        // Shown while holding the mic: slide up to lock.
+        lockHint=LinearLayout(this).apply {
+            orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER_HORIZONTAL;visibility=View.GONE
+            background=RabtaUi.shape(this@ChatActivity,RECV,999,AppTheme.line(this@ChatActivity));setPadding(0,dp(10),0,dp(8))
+            importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            addView(TextView(this@ChatActivity).apply { UiIcons.set(this,"lock",SUB,20,"Lock") },LinearLayout.LayoutParams(-2,-2))
+            addView(TextView(this@ChatActivity).apply { UiIcons.set(this,"chevron_up",SUB,20,"Slide up") },LinearLayout.LayoutParams(-2,-2))
+        }
+        composerBar.addView(lockHint,LinearLayout.LayoutParams(dp(48),-2).apply { gravity=Gravity.END;marginEnd=dp(10);bottomMargin=dp(6) })
+        // Locked recording: timer and live level, then delete · pause/resume · send.
+        lockedPanel=LinearLayout(this).apply {
+            orientation=LinearLayout.VERTICAL;visibility=View.GONE;setPadding(dp(16),dp(14),dp(12),dp(10))
+            background=RabtaUi.shape(this@ChatActivity,RECV,24).apply { val r=dp(24).toFloat();cornerRadii=floatArrayOf(r,r,r,r,0f,0f,0f,0f) }
+        }
+        val levelRow=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL }
+        lockedTimer=RabtaUi.text(this,"0:00",20f,false,TXT).apply { accessibilityLiveRegion=View.ACCESSIBILITY_LIVE_REGION_POLITE }
+        levelRow.addView(lockedTimer)
+        waveform=WaveformView(this)
+        levelRow.addView(waveform,LinearLayout.LayoutParams(0,dp(32),1f).apply { marginStart=dp(16);marginEnd=dp(4) })
+        lockedPanel.addView(levelRow)
+        val lockedActions=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL;setPadding(0,dp(14),0,0) }
+        lockedActions.addView(TextView(this).apply {
+            UiIcons.set(this,"trash",AppTheme.error(this@ChatActivity),24,"Delete recording");gravity=Gravity.CENTER;isFocusable=true
+            background=RabtaUi.ripple(this@ChatActivity,(AppTheme.error(this@ChatActivity) and 0x00FFFFFF) or 0x26000000,999)
+            setOnClickListener { stopVoiceRecord(false) }
+        },LinearLayout.LayoutParams(dp(52),dp(52)))
+        pauseBtn=LinearLayout(this).apply {
+            gravity=Gravity.CENTER;isFocusable=true;background=RabtaUi.ripple(this@ChatActivity,AppTheme.raised(this@ChatActivity),999)
+            setOnClickListener { togglePause() }
+            addView(TextView(this@ChatActivity).apply { importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO })
+            addView(RabtaUi.text(this@ChatActivity,"Pause",16f,true).apply { setPadding(dp(10),0,0,0);importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO })
+        }
+        lockedActions.addView(pauseBtn,LinearLayout.LayoutParams(0,dp(52),1f).apply { marginStart=dp(12);marginEnd=dp(12) })
+        lockedActions.addView(TextView(this).apply {
+            UiIcons.set(this,"send",AppTheme.onPrimary(this@ChatActivity),26,"Send voice message");gravity=Gravity.CENTER;isFocusable=true
+            background=RabtaUi.ripple(this@ChatActivity,GREEN2,999);setOnClickListener { stopVoiceRecord(true) }
+        },LinearLayout.LayoutParams(dp(56),dp(56)))
+        lockedPanel.addView(lockedActions)
+        composerBar.addView(lockedPanel,LinearLayout.LayoutParams(-1,-2))
+
+        barRow=LinearLayout(this).apply { gravity=Gravity.BOTTOM;setPadding(dp(8),dp(6),dp(8),dp(8));clipChildren=false;clipToPadding=false }
+        val pill=LinearLayout(this).apply {
+            gravity=Gravity.BOTTOM;minimumHeight=dp(52);setPadding(dp(4),0,dp(4),0)
+            background=RabtaUi.shape(this@ChatActivity,RECV,26)
+        }
+        fun pillIcon(icon:String,label:String,action:()->Unit)=RabtaUi.iconButton(this,icon,label,action).apply {
+            UiIcons.set(this,icon,SUB,24,label);layoutParams=LinearLayout.LayoutParams(dp(42),dp(52))
+        }
+        emojiBtn=pillIcon("emoji","Emoji") { showEmojiPicker() }
+        pill.addView(emojiBtn)
         input = EditText(this).apply {
-            hint=L.t(this@ChatActivity,"Message"); minHeight=dp(48);textSize=16f; setTextColor(TXT); setHintTextColor(SUB); maxLines=5
-            background = RabtaUi.shape(this@ChatActivity,BEIGE,20)
-            setPadding(dp(14),dp(10),dp(14),dp(10))
+            hint=L.t(this@ChatActivity,"Message"); minHeight=dp(52);textSize=17f; setTextColor(TXT); setHintTextColor(SUB); maxLines=5
+            background=null;gravity=Gravity.CENTER_VERTICAL
+            setPadding(dp(6),dp(12),dp(4),dp(12))
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
             addTextChangedListener(object:TextWatcher{
                 override fun beforeTextChanged(s:CharSequence?,a:Int,b:Int,c:Int){}
@@ -323,26 +386,102 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
                     val has = !s.isNullOrBlank()
                     sendBtn.visibility = if(has) View.VISIBLE else View.GONE
                     micBtn.visibility  = if(has) View.GONE   else View.VISIBLE
+                    // Like WhatsApp, typing leaves room for the text: sticker and camera step aside.
+                    stickerBtn.visibility = if(has) View.GONE else View.VISIBLE
+                    cameraBtn.visibility = if(has) View.GONE else View.VISIBLE
                     val now = System.currentTimeMillis()
                     if (has && now - lastTypingSent > 2500) { lastTypingSent=now; uiHandler.postDelayed({ WsClient.sendTyping(peerId) }, 300) }
                 }
                 override fun afterTextChanged(s:Editable?){}
             })
         }
-        bar.addView(input, LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f).apply { marginStart=dp(4); marginEnd=dp(4) })
+        pill.addView(input, LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
+        stickerBtn=pillIcon("sticker","Stickers") { Stickers.picker(this@ChatActivity,{sendContent(it,"sticker")},{pickAttachment("image/*",104)}) }
+        pill.addView(stickerBtn)
+        pill.addView(pillIcon("attach","attach") { showAttachments() })
+        cameraBtn=pillIcon("photo","Camera") { takePhoto() }
+        pill.addView(cameraBtn)
+        // While holding the mic, the pill shows the timer and how to cancel.
+        holdStrip=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL;visibility=View.GONE;minimumHeight=dp(52);setPadding(dp(12),0,dp(8),0) }
+        holdStrip.addView(View(this).apply { background=RabtaUi.shape(this@ChatActivity,AppTheme.error(this@ChatActivity),999) },LinearLayout.LayoutParams(dp(10),dp(10)))
+        holdTimer=RabtaUi.text(this,"0:00",17f,false,TXT).apply { setPadding(dp(10),0,0,0);accessibilityLiveRegion=View.ACCESSIBILITY_LIVE_REGION_POLITE }
+        holdStrip.addView(holdTimer)
+        holdStrip.addView(RabtaUi.text(this,"‹  Slide to cancel",14f,color=SUB).apply { gravity=Gravity.END;maxLines=1 },LinearLayout.LayoutParams(0,-2,1f))
+        pill.addView(holdStrip,LinearLayout.LayoutParams(0,-2,1f))
+        pillContent=listOf(emojiBtn,input,stickerBtn,pill.getChildAt(3),cameraBtn)
+        barRow.addView(pill,LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f).apply { marginEnd=dp(6) })
         sendBtn = TextView(this).apply {
-            UiIcons.set(this,"send",AppTheme.onPrimary(this@ChatActivity),label="Send message"); textSize=20f; setTextColor(Color.WHITE); gravity=Gravity.CENTER
-            background=RabtaUi.ripple(this@ChatActivity,GREEN2,24); isFocusable=true;isClickable=true; setOnClickListener{sendMsg()}; visibility=View.GONE
+            UiIcons.set(this,"send",AppTheme.onPrimary(this@ChatActivity),24,"Send message"); gravity=Gravity.CENTER
+            background=RabtaUi.ripple(this@ChatActivity,GREEN2,999); isFocusable=true;isClickable=true; setOnClickListener{sendMsg()}; visibility=View.GONE
         }
-        bar.addView(sendBtn, LinearLayout.LayoutParams(dp(48),dp(48)))
+        barRow.addView(sendBtn, LinearLayout.LayoutParams(dp(52),dp(52)))
         micBtn = TextView(this).apply {
-            UiIcons.set(this,"mic",AppTheme.onPrimary(this@ChatActivity),label="Hold to record; release to send"); textSize=20f; gravity=Gravity.CENTER; background=RabtaUi.ripple(this@ChatActivity,GREEN2,24);isFocusable=true
-            setOnClickListener { if(recording) stopVoiceRecord(true) else checkAudioPermission { startVoiceRecord() } }
-            setOnTouchListener { _,ev -> when(ev.action){ MotionEvent.ACTION_DOWN->{ checkAudioPermission{startVoiceRecord()}; true }; MotionEvent.ACTION_MOVE->{ if(ev.x < -dp(48)) stopVoiceRecord(false); true }; MotionEvent.ACTION_UP->{ stopVoiceRecord(true); true }; MotionEvent.ACTION_CANCEL->{ stopVoiceRecord(false); true }; else->false } }
+            UiIcons.set(this,"mic",AppTheme.onPrimary(this@ChatActivity),26,"Hold to record, slide up to lock"); gravity=Gravity.CENTER
+            background=RabtaUi.ripple(this@ChatActivity,GREEN2,999);isFocusable=true
+            // Screen readers cannot hold: a tap starts a locked recording instead.
+            setOnClickListener { if(recording) stopVoiceRecord(true) else checkAudioPermission { startVoiceRecord(); lockRecording() } }
+            var downX=0f;var downY=0f
+            setOnTouchListener { _,ev -> when(ev.actionMasked){
+                MotionEvent.ACTION_DOWN->{ downX=ev.rawX;downY=ev.rawY;checkAudioPermission{startVoiceRecord()}; true }
+                MotionEvent.ACTION_MOVE->{
+                    if(recording&&!recordingLocked) {
+                        val dx=ev.rawX-downX;val dy=ev.rawY-downY
+                        when { dx < -dp(110) -> stopVoiceRecord(false); dy < -dp(90) -> lockRecording() }
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP->{
+                    if(recording&&!recordingLocked) {
+                        if(recordedMillis()<700) { stopVoiceRecord(false);toast("Hold to record, release to send") } else stopVoiceRecord(true)
+                    }
+                    true
+                }
+                MotionEvent.ACTION_CANCEL->{ if(recording&&!recordingLocked) stopVoiceRecord(false); true }
+                else->false } }
         }
-        bar.addView(micBtn, LinearLayout.LayoutParams(dp(48),dp(48)))
-        composerBar=bar
-        root.addView(bar)
+        barRow.addView(micBtn, LinearLayout.LayoutParams(dp(52),dp(52)))
+        composerBar.addView(barRow,LinearLayout.LayoutParams(-1,-2))
+        root.addView(composerBar)
+    }
+
+    private val EMOJIS="😀 😂 🤣 😊 😍 🥰 😘 😎 🤩 🥳 😇 🙂 😉 😋 😜 🤔 🤗 🤭 😴 😢 😭 😡 🥺 😱 👍 👎 👏 🙏 🤝 💪 👌 ✌️ 🤞 👋 ❤️ 💚 💙 💜 🖤 💯 🔥 ✨ 🎉 🌹 🌙 ☀️ ⭐ ☕ 🍕 🎂 ⚽ 🏏 🕌 📿 ✅ ❌".split(" ")
+    /** Inserts at the cursor; the keyboard's own emoji panel still works too. */
+    private fun showEmojiPicker() {
+        val dialog=android.app.Dialog(this)
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        val grid=android.widget.GridLayout(this).apply { columnCount=7;setPadding(dp(12),dp(12),dp(12),dp(12)) }
+        EMOJIS.forEach { emoji ->
+            grid.addView(TextView(this).apply {
+                text=emoji;textSize=26f;gravity=Gravity.CENTER;isFocusable=true;contentDescription=emoji
+                background=RabtaUi.ripple(this@ChatActivity,Color.TRANSPARENT,12)
+                setOnClickListener { val at=input.selectionStart.coerceAtLeast(0);input.text.insert(at,emoji) }
+            },android.widget.GridLayout.LayoutParams().apply { width=dp(46);height=dp(48) })
+        }
+        val sheet=LinearLayout(this).apply {
+            orientation=LinearLayout.VERTICAL;background=RabtaUi.shape(this@ChatActivity,RECV,24)
+            addView(LinearLayout(this@ChatActivity).apply {
+                gravity=Gravity.CENTER_VERTICAL;setPadding(dp(16),dp(8),dp(4),0)
+                addView(RabtaUi.text(this@ChatActivity,"Emoji",17f,true),LinearLayout.LayoutParams(0,-2,1f))
+                addView(RabtaUi.button(this@ChatActivity,"Stickers") { dialog.dismiss();Stickers.picker(this@ChatActivity,{sendContent(it,"sticker")},{pickAttachment("image/*",104)}) }.apply {
+                    layoutParams=LinearLayout.LayoutParams(-2,-2);background=RabtaUi.ripple(this@ChatActivity,Color.TRANSPARENT,16);setTextColor(AppTheme.accent(this@ChatActivity))
+                })
+            })
+            addView(ScrollView(this@ChatActivity).apply { addView(grid) },LinearLayout.LayoutParams(-2,dp(300)))
+        }
+        dialog.setContentView(sheet)
+        dialog.window?.apply { setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));setGravity(Gravity.BOTTOM) }
+        dialog.show()
+    }
+
+    private var captureUri:android.net.Uri?=null
+    private fun takePhoto() {
+        if(ContextCompat.checkSelfPermission(this,Manifest.permission.CAMERA)!=PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this,arrayOf(Manifest.permission.CAMERA),97);return
+        }
+        val file=java.io.File(filesDir,"attachments/camera-${System.currentTimeMillis()}.jpg").also { it.parentFile?.mkdirs() }
+        val uri=FileProvider.getUriForFile(this,"$packageName.files",file);captureUri=uri
+        runCatching { startActivityForResult(Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE).putExtra(android.provider.MediaStore.EXTRA_OUTPUT,uri).addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION),105) }
+            .onFailure { toast("No camera app available") }
     }
 
     // Shared call controls
@@ -584,8 +723,8 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             }.start()
             return
         }
-        if(req!=101) return
-        val uri=data?.data ?: return
+        if(req!=101&&req!=105) return
+        val uri=(if(req==105) captureUri else data?.data) ?: return
         toast("Photo load ho rahi hai…")
         Thread {
             val body=MediaHelper.imageToBase64(this,uri)
@@ -617,12 +756,42 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         if(recording || inCall || !hasMic()) return
         if(!WsClient.connected) { toast("Voice messages need internet");return }
         if(!MediaHelper.startRecording(this)) { toast("Recording shuru nahi hui"); return }
-        recording=true; recordingStarted=android.os.SystemClock.elapsedRealtime()
-        recordingPanel.visibility=View.VISIBLE; uiHandler.post(recordingTick)
+        recording=true; recordingLocked=false; recordingPaused=false; pausedTotal=0
+        recordingStarted=android.os.SystemClock.elapsedRealtime()
+        waveform.clear(); showRecordingUi()
+        micBtn.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        uiHandler.post(recordingTick)
+    }
+    /** Slide up (or a screen-reader tap) keeps recording hands-free with pause, delete and send. */
+    private fun lockRecording() {
+        if(!recording||recordingLocked) return
+        recordingLocked=true; showRecordingUi()
+        micBtn.performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK)
+    }
+    private fun togglePause() {
+        if(!recording||!recordingLocked) return
+        val now=android.os.SystemClock.elapsedRealtime()
+        if(!recordingPaused) { if(MediaHelper.pauseRecording()) { recordingPaused=true;pausedAt=now } else toast("This phone cannot pause recording") }
+        else if(MediaHelper.resumeRecording()) { recordingPaused=false;pausedTotal+=now-pausedAt }
+        showRecordingUi()
+    }
+    private fun showRecordingUi() {
+        val holding=recording&&!recordingLocked
+        pillContent.forEach { it.visibility=if(holding) View.GONE else View.VISIBLE }
+        if(!holding) { val has=!input.text.isNullOrBlank();stickerBtn.visibility=if(has) View.GONE else View.VISIBLE;cameraBtn.visibility=if(has) View.GONE else View.VISIBLE }
+        holdStrip.visibility=if(holding) View.VISIBLE else View.GONE
+        lockHint.visibility=if(holding) View.VISIBLE else View.GONE
+        lockedPanel.visibility=if(recording&&recordingLocked) View.VISIBLE else View.GONE
+        barRow.visibility=if(recording&&recordingLocked) View.GONE else View.VISIBLE
+        val icon=pauseBtn.getChildAt(0) as TextView;val label=pauseBtn.getChildAt(1) as TextView
+        UiIcons.set(icon,if(recordingPaused) "mic" else "pause",TXT,22,if(recordingPaused) "Resume" else "Pause")
+        label.text=if(recordingPaused) "Resume" else "Pause"
+        pauseBtn.contentDescription=if(recordingPaused) "Resume recording" else "Pause recording"
     }
     private fun stopVoiceRecord(send:Boolean) {
         if(!recording) return
-        recording=false; uiHandler.removeCallbacks(recordingTick); recordingPanel.visibility=View.GONE
+        recording=false; uiHandler.removeCallbacks(recordingTick)
+        recordingLocked=false; recordingPaused=false; showRecordingUi()
         if(!send) { MediaHelper.cancelRecording(); return }
         Thread {
             val result=MediaHelper.stopRecording()
@@ -700,7 +869,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
 
     override fun onRequestPermissionsResult(r:Int, p:Array<out String>, g:IntArray) {
         val ok = g.isNotEmpty()&&g[0]==PackageManager.PERMISSION_GRANTED
-        when(r) { 99->if(ok) startCall(pendingInitiate) else toast("Mic permission chahiye"); 98->if(ok) toast("Ab mic button hold karein") }
+        when(r) { 99->if(ok) startCall(pendingInitiate) else toast("Mic permission chahiye"); 98->if(ok) toast("Ab mic button hold karein"); 97->if(ok) takePhoto() else toast("Camera permission is needed to take a photo") }
     }
 
     // ── RabtaEvents ──

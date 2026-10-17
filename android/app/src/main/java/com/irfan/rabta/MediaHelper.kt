@@ -99,6 +99,12 @@ object MediaHelper {
         finally { try { device.release() } catch (_:Exception) {}; file?.delete() }
     }
 
+    /** Pause and resume keep one recording file (MediaRecorder, API 24+). */
+    @Synchronized fun pauseRecording() = runCatching { recorder!!.pause() }.isSuccess
+    @Synchronized fun resumeRecording() = runCatching { recorder!!.resume() }.isSuccess
+    /** Peak input level since the last call, 0..32767; 0 when not recording. */
+    @Synchronized fun recordingLevel() = runCatching { recorder?.maxAmplitude ?: 0 }.getOrDefault(0)
+
     @Synchronized fun cancelRecording() {
         try { recorder?.stop() } catch (_: Exception) {}
         try { recorder?.release() } catch (_: Exception) {}
