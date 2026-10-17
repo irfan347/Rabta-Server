@@ -250,6 +250,31 @@ class PremiumUiTest {
             waitUi("24-hour contract expiry closes content") {labels(a).contains("This update has expired.")&&!labels(a).contains("Expires while viewing")}
         }finally {ui {screens.forEach {it.finish()}};inst.waitForIdleSync();server.shutdown()}
     }
+    @Test fun unsupportedMediaFallbackRevalidatesAudienceBeforeOpeningAnotherApp()=fixture {_,_ ->
+        val server=MockWebServer();val allow=AtomicBoolean(true);val id="6".repeat(32);val remote="7".repeat(32)
+        val bytes="Not a decodable photo".toByteArray()
+        val hash=java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString(""){"%02x".format(it)}
+        val body=JSONObject().put("remote",remote).put("name","fixture.jpg").put("mime","image/jpeg").put("size",bytes.size).put("sha256",hash).toString()
+        server.dispatcher=object:Dispatcher() {override fun dispatch(r:RecordedRequest):MockResponse = when(r.path) {
+            "/api/status"->MockResponse().setBody(JSONObject().put("statuses",if(allow.get())JSONArray().put(JSONObject().put("id",id).put("owner","AAAABBBBCCCC").put("name","Ali").put("kind","image").put("body",body).put("created",System.currentTimeMillis()).put("expires",System.currentTimeMillis()+600000))else JSONArray()).toString())
+            "/api/status/$id/view"->MockResponse().setBody("{\"ok\":true}")
+            "/api/files/$remote"->MockResponse().setBody(okio.Buffer().write(bytes))
+            else->MockResponse().setResponseCode(404)
+        }}
+        server.start();Session.serverUrl=server.url("/").toString().trimEnd('/')
+        val filter=android.content.IntentFilter(Intent.ACTION_VIEW).apply {addDataType("image/jpeg")}
+        val monitor=inst.addMonitor(filter,android.app.Instrumentation.ActivityResult(Activity.RESULT_CANCELED,null),true)
+        try {
+            val a=launch(StatusViewerActivity::class.java,id)
+            waitUi("Unsupported format offers the existing real external viewer") {labels(a).contains("Open with another app")}
+            click("Open with another app")
+            waitUi("Real ACTION_VIEW intent reached Android") {monitor.hits==1}
+            allow.set(false);click("Open with another app")
+            waitUi("Revocation removes external opening even for a cached file") {labels(a).any {it.contains("no longer shared with you")}}
+            assertEquals(1,monitor.hits)
+            ui {assertFalse(labels(a).contains("Open with another app"))}
+        }finally {inst.removeMonitor(monitor);ui {screens.forEach {it.finish()}};inst.waitForIdleSync();server.shutdown()}
+    }
     @Test fun networkGraphPagesAndKeyboardSelectionUseObservedNodesOnly()=fixture {_,account ->
         val radio=Radio()
         repeat(27) {n->radio.peers.add(RadarPeer("e$n","%012X".format(n+1),"Private $n"))}
