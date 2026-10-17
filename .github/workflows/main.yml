@@ -144,6 +144,19 @@ jobs:
         run: python3 "$ANDROID_PROJECT_DIR/scripts/check_live_server.py"
       - name: Inspect existing QR dependency
         run: gradle --project-dir android :app:dependencyInsight --dependency com.google.zxing:core --configuration debugRuntimeClasspath --no-daemon
+      - name: Restore stable test signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.RABTA_TEST_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.RABTA_TEST_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "No test signing secrets: this runner's temporary debug key is used, so the APK cannot update an earlier install."
+            exit 0
+          fi
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/rabta-test.jks"
+          echo "RABTA_TEST_KEYSTORE=$RUNNER_TEMP/rabta-test.jks" >> "$GITHUB_ENV"
+          echo "RABTA_TEST_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "Stable test signing key restored."
       - name: Build and test APK
         env:
           ANDROID_PROJECT_DIR: ${{ steps.project.outputs.directory }}
