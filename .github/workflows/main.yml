@@ -142,10 +142,23 @@ jobs:
         env:
           ANDROID_PROJECT_DIR: ${{ steps.project.outputs.directory }}
         run: python3 "$ANDROID_PROJECT_DIR/scripts/check_live_server.py"
+      - name: Inspect existing QR dependency
+        run: gradle --project-dir android :app:dependencyInsight --dependency com.google.zxing:core --configuration debugRuntimeClasspath --no-daemon
       - name: Build and test APK
         env:
           ANDROID_PROJECT_DIR: ${{ steps.project.outputs.directory }}
         run: gradle --project-dir "$ANDROID_PROJECT_DIR" :app:testDebugUnitTest :app:assembleDebug --no-daemon --stacktrace
+      - name: Record QR regression failure
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          for report in Path("android/app/build/test-results").rglob("TEST-*InstantQrTest*.xml"):
+              root=ET.parse(report).getroot()
+              for failure in root.iter("failure"):
+                  print((failure.text or "")[:10000])
+          PY
       - name: Verify integration ancestry and installable Debug APK
         env:
           ANDROID_PROJECT_DIR: ${{ steps.project.outputs.directory }}
