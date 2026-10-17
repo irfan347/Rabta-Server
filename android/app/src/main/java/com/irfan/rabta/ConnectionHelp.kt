@@ -1,12 +1,45 @@
 package com.irfan.rabta
+
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.net.Uri
+
 object ConnectionHelp {
-    fun show(a:Activity) {
-        val nearby=NearbySetup.problem(a)?:MeshBridge.status
-        AlertDialog.Builder(a).setTitle("Connection details").setMessage("Internet: ${WsClient.status}\nServer: ${Session.serverUrl}\n\nNearby: $nearby\nConnected phones: ${MeshBridge.peersConnected}\n\n${if(WsClient.connected&&WsClient.protocol<2) "This server uses the old call protocol. Deploy the updated Rabta backend for calls.\n\n" else ""}Both phones need Rabta open, Bluetooth, Wi-Fi, Location and Nearby permissions. Nearby uses the app; pairing in Bluetooth settings alone does not connect a chat.")
-            .setPositiveButton(if(WsClient.authRequired)"Sign in again" else "Retry") { _,_ -> if(WsClient.authRequired)a.startActivity(Intent(a,AuthActivity::class.java).putExtra("reauth",true))else {WsClient.retry();MessageService.restartNearby(a)} }
-            .setNeutralButton("Nearby settings") { _,_ ->a.startActivity(Intent(a,NearbyActivity::class.java)) }.setNegativeButton("Close",null).show()
+    fun show(activity: Activity) {
+        val nearby = NearbySetup.problem(activity) ?: MeshBridge.status
+        val internetDetail = buildString {
+            append("${WsClient.status}\n")
+            append("Server: ${Uri.parse(Session.serverUrl).host ?: "Not configured"}")
+            if (WsClient.connected && WsClient.protocol < 2) append("\nThis server uses an older call protocol. Calls need the current Rabta server.")
+        }
+        val nearbyDetail = buildString {
+            append(nearby)
+            append("\nConnected phones: ${MeshBridge.peersConnected}")
+            append("\nBoth phones need Rabta open, Bluetooth, Wi-Fi and Nearby permissions.")
+        }
+        RabtaUi.sheet(activity, "Connection & permissions", listOf(
+            RabtaUi.SheetAction("Connectivity diagnostics", "Radios, peers, delivery queues and relay evidence") {
+                activity.startActivity(Intent(activity,ConnectivityDiagnosticsActivity::class.java))
+            },
+            RabtaUi.SheetAction("Internet connection", internetDetail) {
+                AlertDialog.Builder(activity).setTitle("Internet diagnostics").setMessage(internetDetail)
+                    .setPositiveButton("Close", null).show()
+            },
+            RabtaUi.SheetAction("Nearby network", nearbyDetail) {
+                activity.startActivity(Intent(activity, NearbyActivity::class.java))
+            },
+            RabtaUi.SheetAction(if (WsClient.authRequired) "Sign in again" else "Retry connections", "Restart internet and Nearby connection") {
+                if (WsClient.authRequired) activity.startActivity(Intent(activity, AuthActivity::class.java).putExtra("reauth", true))
+                else { WsClient.retry(); MessageService.restartNearby(activity) }
+            },
+            RabtaUi.SheetAction("Nearby permissions", "Review Bluetooth, Wi-Fi and location access") { NearbySetup.request(activity) },
+            RabtaUi.SheetAction("Android app permissions", "Open Rabta's system permission controls") {
+                activity.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${activity.packageName}")))
+            },
+            RabtaUi.SheetAction("Bluetooth settings", "Bluetooth pairing alone does not connect Rabta chats") {
+                activity.startActivity(Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS))
+            }
+        ))
     }
 }

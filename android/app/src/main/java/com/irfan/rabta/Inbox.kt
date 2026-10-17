@@ -4,11 +4,11 @@ import android.content.Context
 import java.util.concurrent.Executors
 
 object Inbox {
-    private var db: Db? = null
+    private val db: Db? get() = if (::context.isInitialized) Db.get(context) else null // follows the signed-in account
     private lateinit var context: Context
     private val worker = Executors.newSingleThreadExecutor()
 
-    fun init(ctx: Context) { context=ctx.applicationContext; if (db == null) db = Db.get(ctx.applicationContext) }
+    fun init(ctx: Context) { context=ctx.applicationContext }
 
     /** convId = peerId for DMs, groupId for groups. Returns true if new. */
     fun receive(msgId: String, fromId: String, fromName: String, body: String, sentAt: Long,

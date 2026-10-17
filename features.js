@@ -1,9 +1,9 @@
 const crypto=require('crypto');
 module.exports=function install({app,authId,users,getPool}) {
-  const statuses=new Map(),uploads=new Map(),blocks=new Set(),grants=new Map(),reports=[];
+  const statuses=new Map(),uploads=new Map(),blocks=new Set(),grants=new Map(),reports=[],photos=new Map();
   const busy=new Set();
   async function exclusive(key,fn){ensure(!busy.has(key),"Upload busy; retry from saved offset");busy.add(key);try{return await fn()}finally{busy.delete(key)}}
-  const LIFE=86400000, MAX=8*1024*1024, CHUNK=128*1024;
+  const LIFE=86400000, MAX=8*1024*1024, CHUNK=128*1024, PHOTO_MAX=256*1024, PNG=Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]);
   const id=()=>crypto.randomBytes(16).toString('hex');
   const blocked=(a,b)=>blocks.has(a+':'+b)||blocks.has(b+':'+a);
   async function persist(kind,key,value) {
@@ -14,7 +14,7 @@ module.exports=function install({app,authId,users,getPool}) {
     const db=getPool(); if(!db)return;
     await db.query('CREATE TABLE IF NOT EXISTS rf_data(kind TEXT,id TEXT,data TEXT,PRIMARY KEY(kind,id))');
     for(const row of (await db.query('SELECT kind,id,data FROM rf_data')).rows) {
-      try { const value=JSON.parse(row.data);if(row.kind==='status'&&value.expires>Date.now())statuses.set(row.id,value);if(row.kind==='upload')uploads.set(row.id,value);if(row.kind==='grant')grants.set(row.id,value);if(row.kind==='block')blocks.add(row.id); }catch{}
+      try { const value=JSON.parse(row.data);if(row.kind==='status'&&value.expires>Date.now())statuses.set(row.id,value);if(row.kind==='upload')uploads.set(row.id,value);if(row.kind==='grant')grants.set(row.id,value);if(row.kind==='block')blocks.add(row.id);if(row.kind==='photo')photos.set(row.id,value); }catch{}
     }
   }
   async function cleanup(){for(const [key,s] of statuses)if(s.expires<=Date.now()){statuses.delete(key);await remove('status',key)};for(const [key,u] of uploads)if(!u.done&&u.created<Date.now()-LIFE&&!busy.has(key)){uploads.delete(key);await remove('upload',key)};while(reports.length&&reports[0].created<Date.now()-3600000)reports.shift()}
@@ -41,6 +41,12 @@ module.exports=function install({app,authId,users,getPool}) {
     if(process.env.TURN_URL&&process.env.TURN_SECRET){const username=(Math.floor(Date.now()/1000)+3600)+':'+authId(req);servers.push({urls:process.env.TURN_URL.split(','),username,credential:crypto.createHmac('sha1',process.env.TURN_SECRET).update(username).digest('base64')});}
     res.json({servers,relayConfigured:servers.length>1});
   }));
+  app.post('/api/me/photo',wrap(async(req,res,me)=>{const photo=String(req.body.photo||'');
+    if(!photo){await remove('photo',me);photos.delete(me);return res.json({ok:true});}
+    ensure(/^[A-Za-z0-9+/]+={0,2}$/.test(photo),'Invalid photo');const bytes=Buffer.from(photo,'base64');
+    ensure(bytes.length>0&&bytes.length<=PHOTO_MAX,'Photo must be up to 256 KB');ensure((bytes[0]===0xff&&bytes[1]===0xd8)||bytes.subarray(0,8).equals(PNG),'Photo must be JPEG or PNG');
+    await persist('photo',me,photo);photos.set(me,photo);res.json({ok:true});}));
+  app.get('/api/user/photo/:id',wrap(async(req,res,me)=>{const owner=String(req.params.id||'').toUpperCase(),photo=photos.get(owner);if(!photo||blocked(owner,me))return res.status(404).json({error:'No photo'});res.json({photo});}));
   app.get('/api/privacy',wrap(async(req,res,me)=>res.json({blocked:[...blocks].filter(x=>x.startsWith(me+':')).map(x=>x.split(':')[1])})));
   app.post('/api/block',wrap(async(req,res,me)=>{const target=String(req.body.target||'');ensure(users.has(target)&&target!==me,'Invalid contact');const key=me+':'+target;
     if(req.body.blocked===false){await remove('block',key);blocks.delete(key)}else{await persist('block',key,true);blocks.add(key)}res.json({ok:true});}));

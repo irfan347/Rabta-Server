@@ -11,7 +11,7 @@ import com.google.android.gms.nearby.connection.*
  *
  * Endpoint name carries both the display name and a stable user id:  "name\u0001userId".
  */
-class Mesh(private val ctx: Context, private val cb: Listener) {
+class Mesh(private val ctx: Context, private val cb: Listener,clientFactory:(()->ConnectionsClient)?=null) : MeshTransport {
 
     interface Listener {
         fun onFound(endpointId: String, name: String, userId: String)
@@ -25,6 +25,10 @@ class Mesh(private val ctx: Context, private val cb: Listener) {
         fun onStream(endpointId: String, payload: Payload)
         fun onAudio(endpointId: String, frame: ByteArray)
         fun onStatus(msg: String)
+        fun onRadarRequest(name:String) {}
+        fun onDropControl(endpointId: String, message: String) {}
+        /** An outgoing or incoming payload stopped before completing. */
+        fun onPayloadFailed(endpointId: String, payloadId: Long) {}
     }
 
     companion object {
@@ -32,71 +36,128 @@ class Mesh(private val ctx: Context, private val cb: Listener) {
         private const val SEP = "\u0001"
     }
 
-    private val client by lazy { Nearby.getConnectionsClient(ctx) }
+    private val clientDelegate=lazy { clientFactory?.invoke()?:Nearby.getConnectionsClient(ctx) }
+    private val client by clientDelegate
     private var advName = "Rabta user"
-    val connected = java.util.concurrent.ConcurrentHashMap<String, String>()   // endpointId -> display name
-    val userIdOf = java.util.concurrent.ConcurrentHashMap<String, String>()          // endpointId -> stable user id
+    override val connected = java.util.concurrent.ConcurrentHashMap<String, String>()   // endpointId -> display name
+    override val userIdOf = java.util.concurrent.ConcurrentHashMap<String, String>()          // endpointId -> stable user id
     private val pendingNames=java.util.concurrent.ConcurrentHashMap<String,Pair<String,String>>()
     private val pendingFiles = HashMap<Long, String>() // payloadId -> endpointId
 
-    @Volatile var active=false; private set
-    private var starting=false
-    private var epoch=0
+    @Volatile override var active=false; private set
+    @Volatile private var starting=false
+    @Volatile private var epoch=0
+    private var lifecycle:ConnectionLifecycleCallback?=null
     private var retryAt=0L
     private var selfId=""
     private val found=java.util.concurrent.ConcurrentHashMap<String,Pair<String,String>>()
-    private val attempted=java.util.concurrent.ConcurrentHashMap<String,Long>()
-    fun retryConnections() {
-        val now=android.os.SystemClock.elapsedRealtime()
-        found.forEach { (endpoint,person) -> if(selfId<person.second&&!connected.containsKey(endpoint)&&now-(attempted[endpoint]?:-30000L)>=15000)connect(endpoint) }
+    private val attempts=MeshAttempts()
+    private val radar=RadarGate { Privacy.blocked(ctx,it,selfId) }
+    private fun now()=android.os.SystemClock.elapsedRealtime()
+    override val discoveredCount get()=found.size
+    override fun discoveredPeerIds()=found.values.map { it.second }.toSet()
+    override val connectingCount get()=radar.pendingCount()
+    private fun current(generation:Int)=generation==epoch && (starting||active)
+    override fun retryConnections() {
+        if(!active)return
+        radar.expired(now()).forEach { endpoint ->
+            pendingNames.remove(endpoint);attempts.remove(endpoint)
+            runCatching { client.rejectConnection(endpoint);client.disconnectFromEndpoint(endpoint) }
+        }
+        radar.snapshot().filter { it.stage in setOf(RadarStage.FAILED,RadarStage.REJECTED)&&!found.containsKey(it.endpoint) }.forEach { radar.lost(it.endpoint) }
+        userIdOf.values.filter { Privacy.blocked(ctx,it,selfId) }.toSet().forEach { disconnectUser(it) }
     }
-    fun start(name: String, userId: String) {
+    override fun radarPeers():List<RadarPeer> { retryConnections();return radar.snapshot() }
+    override fun start(name: String, userId: String) {
+        if(!RadarPrefs.enabled(ctx,userId)){cb.onStatus("Radar is off — enable discoverability in Nearby");return}
+        NearbySetup.problem(ctx)?.let { cb.onStatus(it);return }
         if(starting||active||android.os.SystemClock.elapsedRealtime()<retryAt)return
         selfId=userId;advName=name.ifBlank { "Rabta user" }.take(24)+SEP+userId
         starting=true;val attempt=++epoch;var advertising=false;var discovering=false
+        val callbacks=lifecycleFor(attempt);lifecycle=callbacks
         cb.onStatus("Starting Bluetooth / Wi-Fi discovery…")
         fun failed(error:Exception) {
             if(attempt!=epoch)return
             epoch++;starting=false;active=false;retryAt=android.os.SystemClock.elapsedRealtime()+10000
-            runCatching {client.stopAdvertising();client.stopDiscovery()}
+            runCatching {client.stopAdvertising();client.stopDiscovery();client.stopAllEndpoints()}
+            connected.clear();userIdOf.clear();pendingNames.clear();found.clear();attempts.clear();radar.clear()
             val code=(error as? com.google.android.gms.common.api.ApiException)?.statusCode
             cb.onStatus("Nearby could not start${if(code!=null) " (code $code)" else ""} — retrying; check permissions and radios")
         }
         fun ready() {if(attempt==epoch&&advertising&&discovering){starting=false;active=true;cb.onStatus("Nearby searching — keep both phones open")} }
         try {
             client.stopAdvertising();client.stopDiscovery()
-            client.startAdvertising(advName,SERVICE_ID,lifecycle,AdvertisingOptions.Builder().setStrategy(Strategy.P2P_CLUSTER).build())
+            client.startAdvertising(advName,SERVICE_ID,callbacks,AdvertisingOptions.Builder().setStrategy(Strategy.P2P_CLUSTER).build())
                 .addOnSuccessListener { if(attempt==epoch){advertising=true;ready()} }.addOnFailureListener {failed(it)}
-            client.startDiscovery(SERVICE_ID,discoveryCb,DiscoveryOptions.Builder().setStrategy(Strategy.P2P_CLUSTER).build())
+            client.startDiscovery(SERVICE_ID,discoveryFor(attempt),DiscoveryOptions.Builder().setStrategy(Strategy.P2P_CLUSTER).build())
                 .addOnSuccessListener { if(attempt==epoch){discovering=true;ready()} }.addOnFailureListener {failed(it)}
         }catch(e:Exception){failed(e)}
     }
 
-    fun stop() {
-        epoch++;starting=false;active=false;retryAt=0
-        try {client.stopAdvertising();client.stopDiscovery();client.stopAllEndpoints()}catch(_:Exception){}
-        connected.clear();userIdOf.clear();pendingNames.clear();found.clear();attempted.clear()
+    override fun stop() {
+        epoch++;starting=false;active=false;retryAt=0;lifecycle=null
+        if(clientDelegate.isInitialized())try {client.stopAdvertising();client.stopDiscovery();client.stopAllEndpoints()}catch(_:Exception){}
+        connected.clear();userIdOf.clear();pendingNames.clear();found.clear();attempts.clear();pendingFiles.clear();radar.clear()
     }
 
-    fun connect(endpointId: String) {
-        val now=android.os.SystemClock.elapsedRealtime()
-        if(connected.containsKey(endpointId)||now-(attempted[endpointId]?:-30000L)<15000)return
-        attempted[endpointId]=now
-        try { client.requestConnection(advName,endpointId,lifecycle).addOnFailureListener {
-            pendingNames.remove(endpointId);cb.onStatus("Nearby connection failed — will retry")
-        } }catch(_:Exception){cb.onStatus("Nearby connection unavailable — check permissions")}
+    override fun connect(endpointId:String) { requestConnection(endpointId) }
+    override fun requestConnection(endpointId:String):Boolean {
+        val callbacks=lifecycle?:return false
+        if(!active||!RadarPrefs.enabled(ctx,selfId)||connected.containsKey(endpointId)||!radar.request(endpointId,now()))return false
+        if(!attempts.begin(endpointId,now())){radar.failed(endpointId);return false}
+        val generation=epoch
+        try { client.requestConnection(advName,endpointId,callbacks).addOnFailureListener {
+            if(current(generation)){attempts.failed(endpointId);pendingNames.remove(endpointId);radar.failed(endpointId);cb.onStatus("Radar request failed or was declined — try again after the cooldown")}
+        } }catch(_:Exception){attempts.failed(endpointId);radar.failed(endpointId);cb.onStatus("Nearby connection unavailable — check permissions");return false}
+        cb.onStatus("Connection request sent — waiting for approval");return true
+    }
+    override fun approveConnection(endpointId:String):Boolean {
+        if(!active||!RadarPrefs.enabled(ctx,selfId)||!radar.approve(endpointId,now()))return false
+        acceptApproved(endpointId,epoch);return true
+    }
+    private fun acceptApproved(endpointId:String,generation:Int) {
+        try { client.acceptConnection(endpointId,payloadFor(generation)).addOnFailureListener {
+            if(current(generation)){attempts.failed(endpointId);pendingNames.remove(endpointId);radar.failed(endpointId);cb.onStatus("Radar approval could not connect — retry after the cooldown")}
+        } }catch(_:Exception){attempts.failed(endpointId);pendingNames.remove(endpointId);radar.failed(endpointId);cb.onStatus("Nearby permission changed — check permissions")}
+    }
+    override fun rejectConnection(endpointId:String) {
+        radar.reject(endpointId,now());pendingNames.remove(endpointId);attempts.failed(endpointId)
+        runCatching { client.rejectConnection(endpointId);client.disconnectFromEndpoint(endpointId) }
+    }
+    override fun disconnectUser(id:String) {
+        val endpoints=(radar.removeUser(id)+userIdOf.filterValues { it==id }.keys).toSet()
+        endpoints.forEach { endpoint ->
+            pendingNames.remove(endpoint);found.remove(endpoint);attempts.remove(endpoint)
+            connected.remove(endpoint);userIdOf.remove(endpoint)
+            runCatching { client.rejectConnection(endpoint);client.disconnectFromEndpoint(endpoint) }
+            cb.onDisconnected(endpoint)
+        }
     }
 
-    // ---------- sending bytes ----------
-    fun sendEnvelopeToAll(json: String, exceptEndpoint: String? = null) {
-        val targets = connected.keys.filter { it != exceptEndpoint }
-        if (targets.isEmpty()) return
-        client.sendPayload(targets, Payload.fromBytes(("M" + json).toByteArray(Charsets.UTF_8)))
+    override fun sendEnvelopeToAll(json:String,exceptEndpoint:String?) {
+        sendBytes(connected.keys.filter { it!=exceptEndpoint },json)
+    }
+    override fun sendEnvelopeTo(endpointId:String,json:String) { sendBytes(listOf(endpointId),json) }
+    private fun sendBytes(targets:List<String>,json:String) {
+        if(!active || targets.isEmpty())return
+        val generation=epoch
+        try {
+            client.sendPayload(targets,Payload.fromBytes(("M"+json).toByteArray(Charsets.UTF_8)))
+                .addOnFailureListener { if(current(generation))cb.onStatus("Nearby transfer failed — encrypted queue will retry") }
+        }catch(_:Exception){if(current(generation))cb.onStatus("Nearby transfer unavailable — encrypted queue retained")}
     }
 
-    fun sendEnvelopeTo(endpointId: String, json: String) {
-        client.sendPayload(endpointId, Payload.fromBytes(("M" + json).toByteArray(Charsets.UTF_8)))
+    override fun sendDrop(endpointId:String,message:String):Boolean {
+        if(!active||!connected.containsKey(endpointId))return false
+        return runCatching { client.sendPayload(endpointId,Payload.fromBytes(("D"+message).toByteArray(Charsets.UTF_8)));true }.getOrDefault(false)
     }
+    override fun sendStream(endpointId:String,data:java.io.InputStream):Long? {
+        if(!active||!connected.containsKey(endpointId))return null
+        // Nearby reads the stream on its own thread and moves it over the best medium the link has upgraded to.
+        val payload=Payload.fromStream(data)
+        return runCatching { client.sendPayload(endpointId,payload);payload.id }.getOrNull()
+    }
+    override fun cancelPayload(payloadId:Long) { if(clientDelegate.isInitialized())runCatching { client.cancelPayload(payloadId) } }
 
     fun sendFile(uri: android.net.Uri, displayName: String, size: Long) {
         if (connected.isEmpty()) { cb.onStatus("No one connected yet"); return }
@@ -125,41 +186,56 @@ class Mesh(private val ctx: Context, private val cb: Listener) {
     private fun parseUserId(raw: String) = raw.substringAfter(SEP, "")
 
     // ---------- callbacks ----------
-    private val discoveryCb = object : EndpointDiscoveryCallback() {
+    private fun discoveryFor(generation:Int) = object : EndpointDiscoveryCallback() {
         override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
+            if(!current(generation))return
             if (info.serviceId==SERVICE_ID) {
                 val id=parseUserId(info.endpointName)
-                if(!MeshPolicy.validId(id)||id==selfId)return
-                if(found.size<200)found[endpointId]=parseName(info.endpointName) to id
+                if(!MeshPolicy.validId(id)||id==selfId||!radar.found(endpointId,id,parseName(info.endpointName)))return
+                if(found.size>=200&&!found.containsKey(endpointId))return
+                found[endpointId]=parseName(info.endpointName) to id
                 cb.onFound(endpointId,parseName(info.endpointName),id)
             }
         }
-        override fun onEndpointLost(endpointId: String) { found.remove(endpointId);attempted.remove(endpointId);cb.onLost(endpointId) }
+        override fun onEndpointLost(endpointId: String) { if(!current(generation))return;found.remove(endpointId);radar.lost(endpointId);if(!pendingNames.containsKey(endpointId))attempts.remove(endpointId);cb.onLost(endpointId) }
     }
 
-    private val lifecycle = object : ConnectionLifecycleCallback() {
+    private fun lifecycleFor(generation:Int) = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(endpointId: String, info: ConnectionInfo) {
+            if(!current(generation))return
             val id=parseUserId(info.endpointName)
-            if(!MeshPolicy.validId(id)||id==selfId){client.rejectConnection(endpointId);return}
+            if(!RadarPrefs.enabled(ctx,selfId)||!MeshPolicy.validId(id)||id==selfId){runCatching {client.rejectConnection(endpointId)};return}
+            val decision=radar.initiated(endpointId,id,parseName(info.endpointName),info.authenticationDigits,now())
+            if(decision==RadarGate.Decision.REJECT){runCatching {client.rejectConnection(endpointId)};return}
+            if(decision==RadarGate.Decision.IGNORE)return
+            attempts.initiated(endpointId,android.os.SystemClock.elapsedRealtime())
             cb.onConnecting(endpointId, parseName(info.endpointName))
             pendingNames[endpointId] = parseName(info.endpointName) to parseUserId(info.endpointName)
-            client.acceptConnection(endpointId, payloadCb).addOnFailureListener {pendingNames.remove(endpointId);cb.onStatus("Nearby accept failed — retrying")}
+            if(decision==RadarGate.Decision.ACCEPT)acceptApproved(endpointId,generation)
+            else { cb.onStatus("Radar connection request — open Nearby to accept or reject");cb.onRadarRequest(parseName(info.endpointName)) }
         }
         override fun onConnectionResult(endpointId: String, result: ConnectionResolution) {
+            if(!current(generation))return
             if (result.status.isSuccess) {
-                val info=pendingNames.remove(endpointId) ?: return
-                connected[endpointId]=info.first; userIdOf[endpointId]=info.second
-                cb.onConnected(endpointId,info.second,info.first)
+                attempts.remove(endpointId)
+                val peer=if(RadarPrefs.enabled(ctx,selfId))radar.connected(endpointId,now()) else null
+                pendingNames.remove(endpointId)
+                if(peer==null){runCatching {client.disconnectFromEndpoint(endpointId)};return}
+                connected[endpointId]=peer.name; userIdOf[endpointId]=peer.id
+                cb.onConnected(endpointId,peer.id,peer.name)
             }
-            else { pendingNames.remove(endpointId);connected.remove(endpointId); userIdOf.remove(endpointId); cb.onStatus("Nearby connection failed — retrying") }
+            else { attempts.failed(endpointId);pendingNames.remove(endpointId);connected.remove(endpointId); userIdOf.remove(endpointId);radar.failed(endpointId); cb.onStatus("Radar request declined or connection failed") }
         }
         override fun onDisconnected(endpointId: String) {
-            connected.remove(endpointId); userIdOf.remove(endpointId); cb.onDisconnected(endpointId)
+            if(!current(generation))return
+            attempts.remove(endpointId);pendingNames.remove(endpointId)
+            connected.remove(endpointId); userIdOf.remove(endpointId);radar.failed(endpointId); cb.onDisconnected(endpointId)
         }
     }
 
-    private val payloadCb = object : PayloadCallback() {
+    private fun payloadFor(generation:Int) = object : PayloadCallback() {
         override fun onPayloadReceived(endpointId: String, payload: Payload) {
+            if(!current(generation)||!connected.containsKey(endpointId)||Privacy.blocked(ctx,userIdOf[endpointId].orEmpty(),selfId))return
             when (payload.type) {
                 Payload.Type.BYTES -> {
                     val raw = payload.asBytes() ?: return
@@ -167,6 +243,7 @@ class Mesh(private val ctx: Context, private val cb: Listener) {
                     when (raw[0].toInt().toChar()) {
                         'A' -> cb.onAudio(endpointId, raw.copyOfRange(1, raw.size))
                         'M' -> cb.onEnvelope(endpointId, String(raw, 1, raw.size - 1, Charsets.UTF_8))
+                        'D' -> if (raw.size <= 16_001) cb.onDropControl(endpointId, String(raw, 1, raw.size - 1, Charsets.UTF_8))
                         'F' -> {
                             val body = String(raw, 1, raw.size - 1, Charsets.UTF_8)
                             val c1 = body.indexOf(':'); val c2 = body.indexOf(':', c1 + 1)
@@ -185,10 +262,13 @@ class Mesh(private val ctx: Context, private val cb: Listener) {
             }
         }
         override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {
+            if(!current(generation))return
             val pid = update.payloadId
+            if (update.status == PayloadTransferUpdate.Status.FAILURE || update.status == PayloadTransferUpdate.Status.CANCELED) cb.onPayloadFailed(endpointId, pid)
             if (pendingFiles.containsKey(pid) && update.status == PayloadTransferUpdate.Status.SUCCESS) {
                 cb.onFileDone(pendingFiles[pid] ?: endpointId, pid); pendingFiles.remove(pid)
             }
         }
     }
 }
+

@@ -94,12 +94,18 @@ object WsClient {
 
     private fun handle(o: JSONObject) {
         when (o.optString("type")) {
-            "msg" -> Inbox.receive(o.optString("id"), o.optString("from"), o.optString("fromName"), o.optString("body"), o.optLong("t",System.currentTimeMillis()), o.optString("from"), o.optString("fromName"), o.optString("msgType","text"))
+            "msg" -> {
+                val id = o.optString("id"); val from = o.optString("from")
+                // Confirm only after the message (or an earlier copy with the same ID) is stored on this phone.
+                Inbox.receive(id, from, o.optString("fromName"), o.optString("body"), o.optLong("t",System.currentTimeMillis()), from, o.optString("fromName"), o.optString("msgType","text")) { sendReceipt(from, id) }
+            }
             "group_msg" -> {
                 val gId = o.optString("groupId"); val gName = o.optString("groupName")
                 Inbox.receive(o.optString("id"), o.optString("from"), o.optString("fromName"), o.optString("body"), o.optLong("t",System.currentTimeMillis()), gId, gName, o.optString("msgType","text"), true)
             }
-            "ack" -> RabtaEvents.postAck(o.optString("id"), o.optString("status"))
+            "ack" -> RabtaEvents.postAck(o.optString("id"), MessageDelivery.SERVER_PREFIX + o.optString("status"))
+            "receipt" -> RabtaEvents.postReceipt(o.optString("id"), o.optString("by"), false)
+            "device_request" -> o.optJSONObject("request")?.let { RabtaEvents.postDeviceRequest(it.optString("id"), it.optString("name")) }
             "typing" -> RabtaEvents.postTyping(o.optString("from"))
             "read" -> RabtaEvents.postRead(o.optString("msgId"), o.optString("by"))
             "incoming_call" -> RabtaEvents.postIncomingCall(o.optString("from"), o.optString("fromName"),o.optString("callId"))
@@ -133,22 +139,44 @@ object WsClient {
 
     fun sendRaw(json: String): Boolean = if (connected) (ws?.send(json) == true) else false
     fun sendTyping(toId: String) = sendRaw(JSONObject().put("type","typing").put("to",toId).toString())
+    fun sendReceipt(toId: String, msgId: String) = sendRaw(JSONObject().put("type","receipt").put("to",toId).put("id",msgId).toString())
     fun sendRead(toId: String, msgId: String) = sendRaw(JSONObject().put("type","read").put("to",toId).put("msgId",msgId).toString())
 
     // HTTP
-    fun register(ctx: Context, srv: String, un: String, pin: String, name: String, cb: (Boolean,String,JSONObject?)->Unit) =
-        post(srv, "/api/register", JSONObject().put("username",un).put("pin",pin).put("name",name).toString(), null, cb)
-    fun login(ctx: Context, srv: String, un: String, pin: String, cb: (Boolean,String,JSONObject?)->Unit) =
-        post(srv, "/api/login", JSONObject().put("username",un).put("pin",pin).toString(), null, cb)
+    /** Signs this phone's Keystore proof into [body]; a phone without a usable key store cannot sign in safely. */
+    private fun withDevice(body: JSONObject, purpose: String, cb: (Boolean,String,JSONObject?)->Unit): String? =
+        runCatching { body.put("device", DeviceIdentity.proof(purpose)).toString() }.getOrElse { handler.post { cb(false, "This phone's secure key store is unavailable", null) }; null }
+    fun register(ctx: Context, srv: String, un: String, pin: String, name: String, cb: (Boolean,String,JSONObject?)->Unit) {
+        val body = withDevice(JSONObject().put("username",un).put("pin",pin).put("name",name), "register:$un", cb) ?: return
+        post(srv, "/api/register", body, null, cb)
+    }
+    /** A 202 response with "pending" means a trusted phone must approve this one; see [pollLogin]. */
+    fun login(ctx: Context, srv: String, un: String, pin: String, recoveryCode: String? = null, cb: (Boolean,String,JSONObject?)->Unit) {
+        val body = withDevice(JSONObject().put("username",un).put("pin",pin).apply { if (recoveryCode != null) put("recoveryCode", recoveryCode) }, "login:$un", cb) ?: return
+        post(srv, "/api/login", body, null, cb)
+    }
+    fun pollLogin(srv: String, requestId: String, cb: (Boolean,String,JSONObject?)->Unit) {
+        val body = withDevice(JSONObject(), "poll:$requestId", cb) ?: return
+        post(srv, "/api/login/request/$requestId", body, null, cb)
+    }
+    /** Authenticated JSON request for account screens; [cb] gets the HTTP status (0 when unreachable) and body. */
+    fun api(method: String, path: String, body: JSONObject?, cb: (Int, JSONObject) -> Unit) {
+        val payload = body?.toString()?.toRequestBody("application/json".toMediaType())
+        val rb = Request.Builder().url(Session.serverUrl.trimEnd('/') + path).header("Authorization", "Bearer ${Session.token}")
+            .method(method, if (method == "GET") null else payload ?: "{}".toRequestBody("application/json".toMediaType()))
+        http.newCall(rb.build()).enqueue(object : Callback {
+            override fun onFailure(c: Call, e: IOException) { handler.post { cb(0, JSONObject().put("error", "Server unreachable — check internet")) } }
+            override fun onResponse(c: Call, r: Response) { val b = r.body?.string() ?: ""; val o = runCatching { JSONObject(b) }.getOrDefault(JSONObject()); handler.post { cb(r.code, o) } }
+        })
+    }
     fun findUser(srv: String, un: String, tok: String, cb: (Boolean,String,JSONObject?)->Unit) {
         http.newCall(Request.Builder().url(srv.trimEnd('/')+"/api/user/${un.lowercase()}").header("Authorization","Bearer $tok").build()).enqueue(object:Callback{
             override fun onFailure(c: Call, e: IOException) { handler.post { cb(false,e.message?:"Network error",null) } }
             override fun onResponse(c: Call, r: Response) { val b=r.body?.string()?: ""; val o=try{JSONObject(b)}catch(_:Exception){JSONObject()}; handler.post { if(r.isSuccessful) cb(true,"ok",o) else cb(false,o.optString("error","Not found"),null) } }
         })
     }
-    fun uploadPhoto(srv: String, tok: String, b64: String) {
-        Thread { try { post(srv, "/api/me/photo", org.json.JSONObject().put("photo", b64.take(200000)).toString(), tok) { _,_,_ -> } } catch (_: Exception) {} }.start()
-    }
+    fun uploadPhoto(srv: String, tok: String, b64: String, cb: (Boolean,String) -> Unit) =
+        post(srv, "/api/me/photo", JSONObject().put("photo", b64).toString(), tok) { ok, msg, _ -> cb(ok, msg) }
     fun fetchPhoto(srv: String, tok: String, userId: String, cb: (String?) -> Unit) {
         http.newCall(Request.Builder().url(srv.trimEnd('/')+"/api/user/photo/$userId").header("Authorization","Bearer $tok").build()).enqueue(object:Callback{
             override fun onFailure(c: Call, e: IOException) { handler.post { cb(null) } }
@@ -162,8 +190,22 @@ object WsClient {
         val rb = Request.Builder().url(srv.trimEnd('/')+path).post(body.toRequestBody("application/json".toMediaType()))
         if (tok != null) rb.header("Authorization","Bearer $tok")
         http.newCall(rb.build()).enqueue(object:Callback{
-            override fun onFailure(c: Call, e: IOException) { handler.post { cb(false, when { e.message?.contains("timeout",true)==true -> "Server so gaya hai — 1 min ruk kar dobara try karein"; else -> e.message?:"Network error" }, null) } }
+            override fun onFailure(c: Call, e: IOException) { handler.post { cb(false, unreachable(e), null) } }
             override fun onResponse(c: Call, r: Response) { val b=r.body?.string()?: ""; val o=try{JSONObject(b)}catch(_:Exception){JSONObject()}; handler.post { if(r.isSuccessful) cb(true,"ok",o) else cb(false,o.optString("error","Error"),null) } }
+        })
+    }
+    /** What the user can do about a request that never reached the server. */
+    fun unreachable(e: IOException) = when {
+        e is java.net.SocketTimeoutException || e.message?.contains("timeout", true) == true -> "The server is taking too long. It may be waking up — try again in a minute."
+        e is java.net.UnknownHostException -> "No internet connection, or the server address could not be found."
+        e is javax.net.ssl.SSLException -> "Secure connection failed. Check the phone's date and time."
+        else -> "Can't reach the Rabta server. Check your internet and try again."
+    }
+    /** Public check used while creating an account; [cb] gets the HTTP status (0 when unreachable) and body. */
+    fun usernameAvailable(srv: String, name: String, cb: (Int, JSONObject) -> Unit) {
+        http.newCall(Request.Builder().url(srv.trimEnd('/') + "/api/username/available?u=" + java.net.URLEncoder.encode(name, "UTF-8")).build()).enqueue(object : Callback {
+            override fun onFailure(c: Call, e: IOException) { handler.post { cb(0, JSONObject().put("error", unreachable(e))) } }
+            override fun onResponse(c: Call, r: Response) { val b = r.body?.string() ?: ""; val o = runCatching { JSONObject(b) }.getOrDefault(JSONObject()); handler.post { cb(r.code, o) } }
         })
     }
 }

@@ -11,8 +11,33 @@ android {
         targetSdk = 34
         versionCode = 33
         versionName = "1.9.1"
+        manifestPlaceholders["appLabel"] = "Rabta"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
+    // One stable key for every test build, so a new Rabta Test APK installs over the previous one.
+    // CI restores it from GitHub Secrets; without it, Android's per-machine debug key is used as before.
+    val testKeystore = System.getenv("RABTA_TEST_KEYSTORE")?.let { file(it) }?.takeIf { it.exists() }
+    signingConfigs {
+        if (testKeystore != null) create("rabtaTest") {
+            storeFile = testKeystore
+            storePassword = System.getenv("RABTA_TEST_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("RABTA_TEST_KEY_ALIAS") ?: "rabta-test"
+            keyPassword = System.getenv("RABTA_TEST_KEYSTORE_PASSWORD")
+        }
+    }
+    buildTypes {
+        getByName("debug") { if (testKeystore != null) signingConfig = signingConfigs.getByName("rabtaTest") }
+        create("device") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".testing"
+            versionNameSuffix = "-test"
+            manifestPlaceholders["appLabel"] = "Rabta Test"
+            matchingFallbacks += listOf("debug")
+        }
+    }
+    // Reuse the existing debug network configuration for the isolated device-test build.
+    sourceSets.getByName("device").manifest.srcFile("src/debug/AndroidManifest.xml")
+    sourceSets.getByName("device").res.srcDir("src/debug/res")
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -31,3 +56,4 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.github.webrtc-sdk:android:114.5735.07")
 }
+

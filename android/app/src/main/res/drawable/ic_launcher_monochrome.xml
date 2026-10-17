@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Themed icon (Android 13+): the launcher tints this single-colour R. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="512" android:viewportHeight="512">
+    <path android:pathData="M163,376 V135 H272 C345,135 381,171 381,228 C381,286 344,314 276,314 H179" android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" android:strokeWidth="54" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M269,314 L367,383" android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" android:strokeWidth="54" android:strokeLineCap="round" />
+    <path android:pathData="M371,112 A8,8 0,1 1,387,112 A8,8 0,1 1,371,112 Z" android:fillColor="#FFFFFFFF" />
+</vector>

@@ -16,7 +16,7 @@ object FeatureApi {
         http.newCall(b.build()).execute().use { response ->
             val raw=response.body?.string().orEmpty();val json=runCatching { JSONObject(raw) }.getOrDefault(JSONObject())
             if(response.code>=500)throw java.io.IOException("Server temporarily unavailable — try again")
-            check(response.isSuccessful) { json.optString("error","Server feature unavailable (${response.code}) — deploy the matching backend") }
+            check(response.isSuccessful) { json.optString("error","This feature is unavailable on the server (${response.code})") }
             return json
         }
     }

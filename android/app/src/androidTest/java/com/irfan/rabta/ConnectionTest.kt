@@ -13,7 +13,7 @@ class ConnectionTest {
     private val inst=InstrumentationRegistry.getInstrumentation()
     private val ctx=inst.targetContext
     private fun until(test:()->Boolean){val limit=System.currentTimeMillis()+10000;while(!test()&&System.currentTimeMillis()<limit)Thread.sleep(30);assertTrue("Connection state did not recover: ${WsClient.status}",test())}
-    private fun configure(server:MockWebServer){inst.runOnMainSync {MessageService.stop(ctx);Session.init(ctx);WsClient.disconnect();Session.id="AAAABBBBCCCC";Session.token="expired-test-token";Session.serverUrl=server.url("/").toString().trimEnd('/');WsClient.connect(Session)}}
+    private fun configure(server:MockWebServer){val url=server.url("/").toString().trimEnd('/');inst.runOnMainSync {MessageService.stop(ctx);Session.init(ctx);WsClient.disconnect();Session.id="AAAABBBBCCCC";Session.token="expired-test-token";Session.serverUrl=url;WsClient.connect(Session)}}
     @Test fun rejectedSessionDoesNotClaimOnlineAndCanReauthenticate(){
         val server=MockWebServer();val delivered=CountDownLatch(1)
         server.enqueue(MockResponse().withWebSocketUpgrade(object:WebSocketListener(){override fun onOpen(ws:WebSocket,r:Response){ws.close(1008,"auth")}}))

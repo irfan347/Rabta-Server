@@ -104,8 +104,9 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
     private fun oval(c: Int) = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(c) }
 
     private fun buildUi() {
-        val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+        val root = FrameLayout(this).apply { setBackgroundColor(0xFF080D14.toInt()) }
         setContentView(root)
+        RabtaUi.systemBars(this,true)
 
         remoteView = SurfaceViewRenderer(this)
         root.addView(remoteView, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
@@ -116,7 +117,7 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
 
         // Name + status (center)
         val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
-        info.addView(TextView(this).apply { text = peerName; textSize = 26f; typeface = Typeface.DEFAULT_BOLD; setTextColor(Color.WHITE); gravity = Gravity.CENTER })
+        info.addView(TextView(this).apply { text = peerName; textSize = 24f; typeface = Typeface.DEFAULT_BOLD; setTextColor(Color.WHITE); gravity = Gravity.CENTER })
         statusTv = TextView(this).apply { text = if(isCaller) "Calling…" else "Connecting…"; textSize = 14f; setTextColor(0xCCFFFFFF.toInt()); gravity = Gravity.CENTER }
         info.addView(statusTv)
         root.addView(info, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
@@ -128,9 +129,9 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
             UiIcons.set(this,UiIcons.fromSymbol(icon) ?: "phone"); textSize = 24f; gravity = Gravity.CENTER; background = oval(bg)
             isClickable = true; setOnClickListener { act() }
         }
-        muteBtn = cBtn("🎤", 0x99444444.toInt(), dp(60)) { toggleMute() }
+        muteBtn = cBtn("🎤", 0xEE172230.toInt(), dp(60)) { toggleMute() }
         val endBtn = cBtn("📵", 0xFFD32F2F.toInt(), dp(70)) { hangUp() }
-        val flipBtn = cBtn("🔄", 0x99444444.toInt(), dp(60)) { flipCamera() }
+        val flipBtn = cBtn("🔄", 0xEE172230.toInt(), dp(60)) { flipCamera() }
         speakerBtn=cBtn("🔊",AppTheme.ACCENT,dp(60)) { toggleSpeaker() }
         listOf(muteBtn,endBtn,flipBtn,speakerBtn).forEach { ctrl.addView(it,LinearLayout.LayoutParams(dp(56),dp(56)).apply { marginStart=dp(8); marginEnd=dp(8) }) }
         muteBtn.contentDescription="Mute microphone"; endBtn.contentDescription="End call"; flipBtn.contentDescription="Switch camera"; speakerBtn.contentDescription="Speaker on"
@@ -267,12 +268,12 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
     private fun toggleMute() {
         muted = !muted; localAudioTrack?.setEnabled(!muted)
         UiIcons.set(muteBtn,if(muted) "muted" else "mic",label=if(muted) "Unmute microphone" else "Mute microphone")
-        muteBtn.background=oval(if(muted) AppTheme.ACCENT else 0x99444444.toInt()); muteBtn.isSelected=muted
+        muteBtn.background=oval(if(muted) AppTheme.ACCENT else 0xEE172230.toInt()); muteBtn.isSelected=muted
     }
     private fun toggleSpeaker() {
         speakerOn=!speakerOn
         (getSystemService(AUDIO_SERVICE) as android.media.AudioManager).isSpeakerphoneOn=speakerOn
-        speakerBtn.background=oval(if(speakerOn) AppTheme.ACCENT else 0x99444444.toInt()); speakerBtn.isSelected=speakerOn
+        speakerBtn.background=oval(if(speakerOn) AppTheme.ACCENT else 0xEE172230.toInt()); speakerBtn.isSelected=speakerOn
         speakerBtn.contentDescription=if(speakerOn) "Speaker on" else "Speaker off"
     }
 

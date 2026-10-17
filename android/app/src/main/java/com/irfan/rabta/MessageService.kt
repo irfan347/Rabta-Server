@@ -16,8 +16,13 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
 
     companion object {
         const val MSG_CHANNEL  = "rabta_messages"
+        const val SERVICE_CHANNEL = "rabta_connection"
         const val CALL_CHANNEL = "rabta_calls_ringtone_v2"
         const val CALL_NOTIF   = 2
+        const val RADAR_NOTIF = 3
+        const val RADAR_CHANNEL = "rabta_radar_requests"
+        const val DEVICE_NOTIF = 4
+        const val SECURITY_CHANNEL = "rabta_security"
         private var msgId      = 100
         private val pendingCalls=java.util.concurrent.ConcurrentHashMap<String,Long>()
         fun accepted(ctx:Context,id:String) { pendingCalls.remove(id)?.let { Db.get(ctx).deleteCall(it) } }
@@ -55,6 +60,7 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
 
     override fun onDestroy() {
         cancelRinging();callHandler.removeCallbacks(repair)
+        getSystemService(NotificationManager::class.java).cancel(RADAR_NOTIF)
         if(networkRegistered)runCatching {(getSystemService(CONNECTIVITY_SERVICE) as android.net.ConnectivityManager).unregisterNetworkCallback(network)}
         RabtaEvents.remove(this)
         MeshBridge.detach(); router?.stop(); router = null
@@ -70,18 +76,29 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
 
     // ---------- offline mesh ----------
     private fun startMeshIfAllowed() {
-        if(!Session.loggedIn){MeshBridge.status="Sign in once to use Nearby";return}
-        val problem=NearbySetup.problem(this)
-        if(problem!=null){router?.pauseTransport();MeshBridge.status=problem;return}
+        if(!Session.loggedIn){router?.pauseTransport();MeshBridge.status="Sign in once to use Nearby";return}
         try {
-            val current=router
-            if(current?.running==true){current.retryTransport();return}
-            if(current!=null){current.stop();router=null;MeshBridge.detach()}
-            val r=Router(this,this);r.start(Session.id,Session.name)
-            router=r;MeshBridge.attach(r)
+            if(router!=null&&router?.myId!=Session.id){router?.stop();router=null;MeshBridge.detach()}
+            if(router?.running!=true) {
+                router?.stop()
+                val r=Router(this,this);r.start(Session.id,Session.name);router=r;MeshBridge.attach(r)
+            }
+            if(!RadarPrefs.enabled(this)){router?.pauseTransport();MeshBridge.status="Radar is off — you are not discoverable";return}
+            val problem=NearbySetup.problem(this)
+            if(problem!=null){router?.pauseTransport();MeshBridge.status=problem;return}
+            router?.retryTransport()
         }catch(_:Exception){MeshBridge.status="Nearby could not start — reopen app and check permissions"}
     }
     override fun onStatus(msg:String){MeshBridge.status=msg}
+    override fun onRadarRequest(name:String) {
+        if(!RadarPrefs.enabled(this))return
+        val review=PendingIntent.getActivity(this,RADAR_NOTIF,Intent(this,NearbyActivity::class.java),PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val notification=Notification.Builder(this,RADAR_CHANNEL).setSmallIcon(R.drawable.ic_stat_rabta)
+            .setContentTitle("Radar connection request")
+            .setContentText(if(Privacy.hidePreviews(this))"Open Radar to review" else "${name.take(80)} wants to connect")
+            .setContentIntent(review).setAutoCancel(true).setOnlyAlertOnce(true).setTimeoutAfter(RadarGate.REQUEST_LIFE).build()
+        runCatching { getSystemService(NotificationManager::class.java).notify(RADAR_NOTIF,notification) }
+    }
 
     // Router.UiListener: a message reached us over the mesh
     override fun onMeshMessage(msgId: String, fromId: String, fromName: String, body: String, sentAt: Long, hops: Int, type: String, stored: () -> Unit) {
@@ -89,6 +106,13 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
     }
 
     // --- RabtaEvents.Listener ---
+    override fun onDeviceRequest(requestId: String, deviceName: String) {
+        val review=PendingIntent.getActivity(this,DEVICE_NOTIF,Intent(this,DevicesActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val notification=Notification.Builder(this,SECURITY_CHANNEL).setSmallIcon(R.drawable.ic_stat_rabta)
+            .setContentTitle("New sign-in request").setContentText("${deviceName.take(40)} wants to use your account. Allow only if it's you.")
+            .setContentIntent(review).setAutoCancel(true).setTimeoutAfter(5*60_000L).build()
+        runCatching { getSystemService(NotificationManager::class.java).notify(DEVICE_NOTIF,notification) }
+    }
     override fun onMessage(fromId: String, fromName: String, msgId: String, body: String, t: Long, msgType: String, groupId: String) {
         if (msgType!="reaction" && !Privacy.blocked(this,fromId) && ChatActivity.openPeer != fromId) showMessageNotification(fromId, fromName, when(msgType) { "file"->"File"; "video"->"Video"; "image"->"Photo"; "voice"->"Voice note"; "sticker"->"Sticker"; else->body.take(160) })
     }
@@ -106,7 +130,7 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         val pi = PendingIntent.getActivity(this, fromId.hashCode(), chatIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val n = Notification.Builder(this, MSG_CHANNEL)
-            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setSmallIcon(R.drawable.ic_stat_rabta)
             .setContentTitle(fromName)
             .setContentText(if(Privacy.hidePreviews(this)) "New message" else body)
             .setAutoCancel(true)
@@ -130,7 +154,7 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         val pi = PendingIntent.getActivity(this, 0, callIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val n = Notification.Builder(this, CALL_CHANNEL)
-            .setSmallIcon(android.R.drawable.ic_menu_call)
+            .setSmallIcon(R.drawable.ic_stat_rabta)
             .setContentTitle(if (isVideo) "Incoming Video Call" else "Incoming Call")
             .setContentText("$fromName is ${if (isVideo) "video " else ""}calling...")
             .setTimeoutAfter(45000)
@@ -149,10 +173,10 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
 
     private fun persistentNotification(): Notification {
         val pi = PendingIntent.getActivity(this, 0, Intent(this, ConversationListActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-        return Notification.Builder(this, MSG_CHANNEL)
-            .setSmallIcon(android.R.drawable.ic_dialog_email)
+        return Notification.Builder(this, SERVICE_CHANNEL)
+            .setSmallIcon(R.drawable.ic_stat_rabta)
             .setContentTitle("Rabta")
-            .setContentText("Messages ki waiting mein...")
+            .setContentText("Tap to open your conversations")
             .setContentIntent(pi)
             .setOngoing(true)
             .build()
@@ -160,10 +184,13 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
 
     private fun createChannels() {
         val nm = getSystemService(NotificationManager::class.java) ?: return
+        nm.createNotificationChannel(NotificationChannel(SERVICE_CHANNEL,"Connection service",NotificationManager.IMPORTANCE_LOW).apply {description="Keeps Rabta available in the background"})
+        nm.createNotificationChannel(NotificationChannel(RADAR_CHANNEL,"Radar requests",NotificationManager.IMPORTANCE_DEFAULT).apply { description="Review nearby connection requests in Radar" })
+        nm.createNotificationChannel(NotificationChannel(SECURITY_CHANNEL,"Sign-in requests",NotificationManager.IMPORTANCE_HIGH).apply { description="A new phone wants to sign in to your account" })
         nm.createNotificationChannel(NotificationChannel(MSG_CHANNEL, "Messages", NotificationManager.IMPORTANCE_HIGH).apply {
             description = "New message notifications"; enableLights(true); enableVibration(true)
         })
-        nm.createNotificationChannel(NotificationChannel(CALL_CHANNEL, "Calls", NotificationManager.IMPORTANCE_MAX).apply {
+        nm.createNotificationChannel(NotificationChannel(CALL_CHANNEL, "Calls", NotificationManager.IMPORTANCE_HIGH).apply {
             description = "Incoming calls use your phone ringtone and respect silent / Do Not Disturb settings"
             setSound(android.provider.Settings.System.DEFAULT_RINGTONE_URI,android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE).setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
             enableVibration(true)
