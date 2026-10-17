@@ -190,8 +190,22 @@ object WsClient {
         val rb = Request.Builder().url(srv.trimEnd('/')+path).post(body.toRequestBody("application/json".toMediaType()))
         if (tok != null) rb.header("Authorization","Bearer $tok")
         http.newCall(rb.build()).enqueue(object:Callback{
-            override fun onFailure(c: Call, e: IOException) { handler.post { cb(false, when { e.message?.contains("timeout",true)==true -> "Server so gaya hai — 1 min ruk kar dobara try karein"; else -> e.message?:"Network error" }, null) } }
+            override fun onFailure(c: Call, e: IOException) { handler.post { cb(false, unreachable(e), null) } }
             override fun onResponse(c: Call, r: Response) { val b=r.body?.string()?: ""; val o=try{JSONObject(b)}catch(_:Exception){JSONObject()}; handler.post { if(r.isSuccessful) cb(true,"ok",o) else cb(false,o.optString("error","Error"),null) } }
+        })
+    }
+    /** What the user can do about a request that never reached the server. */
+    fun unreachable(e: IOException) = when {
+        e is java.net.SocketTimeoutException || e.message?.contains("timeout", true) == true -> "The server is taking too long. It may be waking up — try again in a minute."
+        e is java.net.UnknownHostException -> "No internet connection, or the server address could not be found."
+        e is javax.net.ssl.SSLException -> "Secure connection failed. Check the phone's date and time."
+        else -> "Can't reach the Rabta server. Check your internet and try again."
+    }
+    /** Public check used while creating an account; [cb] gets the HTTP status (0 when unreachable) and body. */
+    fun usernameAvailable(srv: String, name: String, cb: (Int, JSONObject) -> Unit) {
+        http.newCall(Request.Builder().url(srv.trimEnd('/') + "/api/username/available?u=" + java.net.URLEncoder.encode(name, "UTF-8")).build()).enqueue(object : Callback {
+            override fun onFailure(c: Call, e: IOException) { handler.post { cb(0, JSONObject().put("error", unreachable(e))) } }
+            override fun onResponse(c: Call, r: Response) { val b = r.body?.string() ?: ""; val o = runCatching { JSONObject(b) }.getOrDefault(JSONObject()); handler.post { cb(r.code, o) } }
         })
     }
 }
