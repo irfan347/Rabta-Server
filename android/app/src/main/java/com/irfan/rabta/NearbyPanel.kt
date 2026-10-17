@@ -148,7 +148,7 @@ class NearbyPanel(private val activity:Activity) {
             RadarStage.CONNECTED -> RadarView.Orbit.CONNECTED
             RadarStage.OUTGOING,RadarStage.INCOMING,RadarStage.APPROVED -> RadarView.Orbit.PENDING
             else -> RadarView.Orbit.DISCOVERED
-        } })
+        }) })
         val matches=NearbySearch.filter(peers,query)
         count.text=if(query.isBlank())"Nearby users · ${peers.size}" else "${matches.size} of ${peers.size} users"
         val now=SystemClock.elapsedRealtime()
