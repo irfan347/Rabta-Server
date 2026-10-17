@@ -12,6 +12,7 @@ import java.text.DateFormat
 import java.util.Date
 
 class StatusActivity : ThemedActivity() {
+    private val ADD = 33
     private lateinit var feed: LinearLayout // loading, errors and empty state under the cards
     private var posting = false
     private val handler=android.os.Handler(android.os.Looper.getMainLooper())
@@ -66,7 +67,16 @@ class StatusActivity : ThemedActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (resultCode != RESULT_OK || requestCode !in 31..32) return
+        if (resultCode != RESULT_OK) return
+        if (requestCode == ADD) {
+            // Picked on the Add status screen: text opens the composer; media goes through the same audience flow.
+            when (val kind = data?.getStringExtra("kind")) {
+                "text" -> composeText()
+                "image", "video" -> data.data?.let { uri -> FeatureApi.run(this, { Attachments.pick(this, uri, false) }) { body -> audience(kind, body) } }
+            }
+            return
+        }
+        if (requestCode !in 31..32) return
         val uri = data?.data ?: return
         FeatureApi.run(this, { Attachments.pick(this, uri, false) }) { body -> audience(if (requestCode == 31) "image" else "video", body) }
     }
@@ -165,7 +175,7 @@ class StatusActivity : ThemedActivity() {
     }
 
     private fun addCard()=card().apply {
-        contentDescription="Add status";setOnClickListener {addSheet()}
+        contentDescription="Add status";setOnClickListener {startActivityForResult(Intent(this@StatusActivity,AddStatusActivity::class.java),ADD)}
         background=RabtaUi.ripple(this@StatusActivity,AppTheme.surface(this@StatusActivity),20)
         val avatarBox=FrameLayout(this@StatusActivity)
         val photo=Session.profilePic.takeIf {it.isNotEmpty()}?.let {MediaHelper.base64ToBitmap(it)}
@@ -183,12 +193,6 @@ class StatusActivity : ThemedActivity() {
             gravity=Gravity.CENTER;setPadding(RabtaUi.dp(this@StatusActivity,6),0,RabtaUi.dp(this@StatusActivity,6),RabtaUi.dp(this@StatusActivity,12))
         },FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM))
     }
-    private fun addSheet()=RabtaUi.sheet(this,"Add status",listOf(
-        RabtaUi.SheetAction("Text status") {composeText()},
-        RabtaUi.SheetAction("Photo") {pick("image/*",31)},
-        RabtaUi.SheetAction("Video") {pick("video/*",32)}
-    ))
-
     private fun statusCard(status:JSONObject)=card().apply {
         val own=status.optString("owner")==owner
         val name=if(own)"My status" else status.optString("name").ifBlank {"Rabta contact"}

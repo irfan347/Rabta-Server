@@ -223,7 +223,7 @@ class PremiumUiTest {
             val a=launch(StatusActivity::class.java)
             waitUi("Authenticated real image preview") {all(a.window.decorView).filterIsInstance<StatusMediaPreview>().any {preview->all(preview).filterIsInstance<ImageView>().any {it.drawable is BitmapDrawable}}}
             ui {assertFalse(labels(a).contains("Expired secret"))};assertTrue(files.get()>0);capture("status")
-            click("Add status");inst.waitForIdleSync();click("Text status");inst.waitForIdleSync();setDialogText("A real private moment");click("Continue");click("Ali");click("Share")
+            click("Add status");inst.waitForIdleSync();click("Text");inst.waitForIdleSync();setDialogText("A real private moment");click("Continue");click("Ali");click("Share")
             waitUi("Creation reaches real API") {posted.get()!=null}
             assertEquals("text",posted.get().getString("kind"));assertEquals("A real private moment",posted.get().getString("body"));assertEquals(listOf(peer),(0 until posted.get().getJSONArray("audience").length()).map {posted.get().getJSONArray("audience").getString(it)})
             val viewer=launch(StatusViewerActivity::class.java,photoId)
