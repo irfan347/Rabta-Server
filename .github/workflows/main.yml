@@ -146,11 +146,40 @@ jobs:
         env:
           ANDROID_PROJECT_DIR: ${{ steps.project.outputs.directory }}
         run: gradle --project-dir "$ANDROID_PROJECT_DIR" :app:testDebugUnitTest :app:assembleDebug --no-daemon --stacktrace
+      - name: Verify integration ancestry and installable Debug APK
+        env:
+          ANDROID_PROJECT_DIR: ${{ steps.project.outputs.directory }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=100 origin integration/rabta-device-test-20261017
+          for commit in d7c480a8e169013935435995141de5ba36277aa6 ff9092a5d52cf13a9bbee0bc41627258dff5d63c 378266076b850471731c73614ad9dfa5fd16b71c a1bfd2fa439428f9b4d9335321c3eb20a657812e; do
+            git merge-base --is-ancestor "$commit" FETCH_HEAD
+          done
+          node --check index.js
+          node --check features.js
+          apk="$ANDROID_PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$apk"
+          tools="$ANDROID_HOME/build-tools/34.0.0"
+          "$tools/apksigner" verify --verbose --print-certs "$apk" > "$apk.signature.txt"
+          "$tools/aapt" dump badging "$apk" > "$apk.badging.txt"
+          grep -q "package: name='com.irfan.rabta'" "$apk.badging.txt"
+          grep -q "application-debuggable" "$apk.badging.txt"
+          {
+            echo "Source commit: ${{ github.sha }}"
+            sha256sum "$apk"
+            stat --format='APK bytes: %s' "$apk"
+            cat "$apk.signature.txt"
+            cat "$apk.badging.txt"
+          } > "$ANDROID_PROJECT_DIR/app/build/outputs/apk/debug/APK-VERIFICATION.txt"
+          cat "$ANDROID_PROJECT_DIR/app/build/outputs/apk/debug/APK-VERIFICATION.txt"
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Rabta-debug-apk
-          path: ${{ steps.project.outputs.directory }}/app/build/outputs/apk/debug/*.apk
+          path: |
+            ${{ steps.project.outputs.directory }}/app/build/outputs/apk/debug/*.apk
+            ${{ steps.project.outputs.directory }}/app/build/outputs/apk/debug/APK-VERIFICATION.txt
           if-no-files-found: error
       - name: Upload test reports
         if: always()
