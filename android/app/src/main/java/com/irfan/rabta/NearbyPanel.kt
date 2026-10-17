@@ -54,7 +54,7 @@ class NearbyPanel(private val activity:Activity) {
         privacyPill=RabtaUi.text(activity,"Private",12f,true,AppTheme.text(activity)).apply {
             gravity=Gravity.CENTER;minHeight=d(36);setPadding(d(12),0,d(12),0);isFocusable=true
             background=android.graphics.drawable.InsetDrawable(RabtaUi.ripple(activity,AppTheme.raised(activity),999),0,d(6),0,d(6))
-            setOnClickListener { discoverable.isChecked=!discoverable.isChecked }
+            setOnClickListener { toggleDiscoverable() }
         }
         header.addView(privacyPill,LinearLayout.LayoutParams(-2,d(48)))
         header.addView(RabtaUi.iconButton(activity,"more","Nearby options") { options() }.apply { UiIcons.set(this,"more",AppTheme.sub(activity),22,"Nearby options") })
@@ -114,6 +114,7 @@ class NearbyPanel(private val activity:Activity) {
         view.addView(RabtaUi.text(activity,"No phone numbers are shared. Radar shows activity, not distance or location.",12f,color=AppTheme.sub(activity)).apply {setPadding(d(4),d(8),0,d(12))})
         view.addView(RabtaUi.row(activity,"Connection help","Permissions, radios and discovery","connection") { guidance() })
     }
+    private fun toggleDiscoverable() { discoverable.isChecked=!discoverable.isChecked }
     private fun tile(icon:String,title:String,detail:String,action:()->Unit)=LinearLayout(activity).apply {
         orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER_HORIZONTAL;isFocusable=true;minimumHeight=RabtaUi.dp(activity,104)
         setPadding(RabtaUi.dp(activity,6),RabtaUi.dp(activity,14),RabtaUi.dp(activity,6),RabtaUi.dp(activity,12))
