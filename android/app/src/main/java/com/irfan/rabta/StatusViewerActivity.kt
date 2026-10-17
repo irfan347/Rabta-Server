@@ -59,14 +59,14 @@ class StatusViewerActivity:ThemedActivity() {
     }
     private fun render(status:JSONObject,request:Int) {
         expires=status.optLong("expires");if(expires<=System.currentTimeMillis()){unavailable("This update has expired.");return}
-        title.text=if(status.optString("owner")==owner)"Your status"else status.optString("name","Rabta contact")
+        title.text=if(status.optString("owner")==owner)"Your status" else  status.optString("name","Rabta contact")
         subtitle.text=android.text.format.DateUtils.getRelativeTimeSpanString(status.optLong("created"),System.currentTimeMillis(),60000).toString()+" · 24-hour update"
         content.removeAllViews();handler.post(expiry)
         if(status.optString("kind")=="text") {
             content.addView(ScrollView(this).apply {isFillViewport=true;addView(RabtaUi.text(this@StatusViewerActivity,status.optString("body"),24f,true).apply {
                 gravity=Gravity.CENTER;setPadding(RabtaUi.dp(context,24),RabtaUi.dp(context,24),RabtaUi.dp(context,24),RabtaUi.dp(context,24))
                 background=RabtaUi.shape(context,AppTheme.sent(context),20)
-            },ScrollView.LayoutParams(-1,-1))});return
+            },FrameLayout.LayoutParams(-1,-1))});return
         }
         content.addView(RabtaUi.loading(this,"Loading media…"))
         StatusMedia.worker.execute {

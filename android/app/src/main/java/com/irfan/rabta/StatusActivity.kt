@@ -131,7 +131,7 @@ class StatusActivity : ThemedActivity() {
         }
         updates.distinctBy {it.optString("owner")}.take(20).forEach {status ->
             val own=status.optString("owner")==owner
-            val name=if(own)"Your status"else status.optString("name").ifBlank {"Rabta contact"}
+            val name=if(own)"Your status" else  status.optString("name").ifBlank {"Rabta contact"}
             val item=LinearLayout(this).apply {
                 orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER;minimumHeight=RabtaUi.dp(this@StatusActivity,88)
                 setPadding(RabtaUi.dp(this@StatusActivity,4),RabtaUi.dp(this@StatusActivity,4),RabtaUi.dp(this@StatusActivity,4),RabtaUi.dp(this@StatusActivity,4))
@@ -146,7 +146,7 @@ class StatusActivity : ThemedActivity() {
         }
         updates.take(limit).forEach {status ->
             val own=status.optString("owner")==owner
-            val name=if(own)"Your status"else status.optString("name").ifBlank {"Rabta contact"}
+            val name=if(own)"Your status" else  status.optString("name").ifBlank {"Rabta contact"}
             val kind=status.optString("kind")
             val card=RabtaUi.card(this)
             card.tag="status:${status.optString("id")}";card.isFocusable=true;card.setOnClickListener {view(status)}
@@ -167,7 +167,7 @@ class StatusActivity : ThemedActivity() {
                 maxLines=4;ellipsize=android.text.TextUtils.TruncateAt.END;setPadding(0,RabtaUi.dp(this@StatusActivity,16),0,RabtaUi.dp(this@StatusActivity,8))
             })else card.addView(StatusMediaPreview(this,status.getString("body"),kind,status.getLong("expires")){view(status)},LinearLayout.LayoutParams(-1,RabtaUi.dp(this,160)).apply {topMargin=RabtaUi.dp(this@StatusActivity,16)})
             val remaining=((status.optLong("expires")-now)/60000).coerceAtLeast(1)
-            card.addView(RabtaUi.text(this,"${if(own)(status.optJSONArray("viewers")?.length()?:0).toString()+" views · " else ""}Expires in ${if(remaining>=60)"${remaining/60}h ${remaining%60}m"else "${remaining}m"}",12f,color=AppTheme.sub(this)).apply {setPadding(0,RabtaUi.dp(this@StatusActivity,8),0,0)})
+            card.addView(RabtaUi.text(this,"${if(own)(status.optJSONArray("viewers")?.length()?:0).toString()+" views · " else ""}Expires in ${if(remaining>=60)"${remaining/60}h ${remaining%60}m" else  "${remaining}m"}",12f,color=AppTheme.sub(this)).apply {setPadding(0,RabtaUi.dp(this@StatusActivity,8),0,0)})
             feed.addView(card)
         }
         if(updates.size>limit)feed.addView(RabtaUi.button(this,"Show more updates") {limit+=30;render(items)})

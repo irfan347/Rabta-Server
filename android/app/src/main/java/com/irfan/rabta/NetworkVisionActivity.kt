@@ -50,14 +50,14 @@ class NetworkVisionActivity:ThemedActivity() {
         head.addView(text("Network Vision",24f,true),LinearLayout.LayoutParams(0,-2,1f));root.addView(head)
         val body=LinearLayout(this).apply {orientation=LinearLayout.VERTICAL;setPadding(dp(20),0,dp(20),dp(24))}
         counts=text("Checking current peers…",15f,true);counts.tag="vision-counts";body.addView(counts)
-        condition=text("",13f,color=AppTheme.sub(this)).apply {setPadding(0,dp(6),0,0)};body.addView(condition)
+        condition=text("",13f,color=AppTheme.sub(this@NetworkVisionActivity)).apply {setPadding(0,dp(6),0,0)};body.addView(condition)
         graph=NetworkVisionView(this).apply {
             tag="network-graph"
             onPeer={ selectPeer(it) }
         }
         body.addView(graph,LinearLayout.LayoutParams(-1,dp(300)).apply {topMargin=dp(16)})
         val graphTools=LinearLayout(this).apply {gravity=Gravity.CENTER_VERTICAL}
-        graphTools.addView(text("Network view",13f,color=AppTheme.sub(this)),LinearLayout.LayoutParams(0,-2,1f))
+        graphTools.addView(text("Network view",13f,color=AppTheme.sub(this@NetworkVisionActivity)),LinearLayout.LayoutParams(0,-2,1f))
         graphTools.addView(RabtaUi.iconButton(this,"zoom_out","Zoom out") {graph.zoomBy(0.8f)})
         graphTools.addView(RabtaUi.iconButton(this,"zoom_in","Zoom in") {graph.zoomBy(1.25f)})
         graphTools.addView(RabtaUi.iconButton(this,"restore","Reset network view") {graph.resetViewport()})
@@ -65,16 +65,16 @@ class NetworkVisionActivity:ThemedActivity() {
         paging=LinearLayout(this).apply {gravity=Gravity.CENTER_VERTICAL}
         previous=RabtaUi.iconButton(this,"back","Previous peers") {graph.changePage(-1)}
         next=RabtaUi.iconButton(this,"forward","Next peers") {graph.changePage(1)}
-        pageNumber=text("",13f,color=AppTheme.sub(this)).apply {gravity=Gravity.CENTER}
+        pageNumber=text("",13f,color=AppTheme.sub(this@NetworkVisionActivity)).apply {gravity=Gravity.CENTER}
         paging.addView(previous);paging.addView(pageNumber,LinearLayout.LayoutParams(0,-2,1f));paging.addView(next);body.addView(paging)
         graph.onViewportChanged={updatePaging()}
         updatePaging()
-        graphCaption=text("Schematic layout · no distance estimates\nTeal: verified direct link · Violet: verifying key",12f,color=AppTheme.sub(this))
+        graphCaption=text("Schematic layout · no distance estimates\nTeal: verified direct link · Violet: verifying key",12f,color=AppTheme.sub(this@NetworkVisionActivity))
         body.addView(graphCaption)
         empty=LinearLayout(this).apply {
             orientation=LinearLayout.VERTICAL;setPadding(0,dp(18),0,dp(12))
             addView(text("No nearby devices yet",18f,true))
-            addView(text("Turn on discoverability in Radar on both phones. Connections appear here after discovery; approval stays in your control.",13f,color=AppTheme.sub(this)))
+            addView(text("Turn on discoverability in Radar on both phones. Connections appear here after discovery; approval stays in your control.",13f,color=AppTheme.sub(this@NetworkVisionActivity)))
             addView(button("Open Radar") {startActivity(Intent(this@NetworkVisionActivity,NearbyActivity::class.java))})
         };body.addView(empty)
         details=text("",14f).apply {
@@ -85,10 +85,10 @@ class NetworkVisionActivity:ThemedActivity() {
         body.addView(text("Peers",18f,true))
         list=LinearLayout(this).apply {orientation=LinearLayout.VERTICAL};body.addView(list)
         body.addView(text("Network activity",16f,true).apply {setPadding(0,dp(20),0,dp(8))})
-        evidence=text("",13f,color=AppTheme.sub(this));body.addView(evidence)
+        evidence=text("",13f,color=AppTheme.sub(this@NetworkVisionActivity));body.addView(evidence)
         body.addView(text("Latest message activity",16f,true).apply {setPadding(0,dp(20),0,dp(8))})
         activity=LinearLayout(this).apply {orientation=LinearLayout.VERTICAL};body.addView(activity)
-        body.addView(text("Peer labels are private to this screen. Names, phone numbers, account IDs, endpoint IDs, message contents and keys are not displayed.",12f,color=AppTheme.sub(this)).apply {setPadding(0,dp(20),0,dp(8))})
+        body.addView(text("Peer labels are private to this screen. Names, phone numbers, account IDs, endpoint IDs, message contents and keys are not displayed.",12f,color=AppTheme.sub(this@NetworkVisionActivity)).apply {setPadding(0,dp(20),0,dp(8))})
         body.addView(RabtaUi.row(this,"About network information","Privacy, link quality and relay limits","info") {
             android.app.AlertDialog.Builder(this).setTitle("Network information").setMessage("Only observed devices and direct connections are drawn. Layout does not represent location or distance. Signal strength and radio RTT are not exposed by the current Nearby transport. Remote relay routes cannot be verified: packets contain no signed route proof. Motion means a live link, not message traffic.").setPositiveButton("Close",null).show()
         })
@@ -153,11 +153,11 @@ class NetworkVisionActivity:ThemedActivity() {
     }
     private fun renderEvents() {
         activity.removeAllViews()
-        if(current.events.isEmpty()){activity.addView(text("No observed message events in this service session.",13f,color=AppTheme.sub(this)));return}
+        if(current.events.isEmpty()){activity.addView(text("No observed message events in this service session.",13f,color=AppTheme.sub(this@NetworkVisionActivity)));return}
         current.events.takeLast(6).asReversed().forEach { event ->
             val label=when(event.kind){NetworkEventKind.QUEUED->"Nearby message queued";NetworkEventKind.RECEIVED->"Nearby message saved";NetworkEventKind.DELIVERED->"Recipient delivery confirmed";NetworkEventKind.RELAY_ACCEPTED->"Signed relay envelope accepted"}
             val time=android.text.format.DateFormat.getTimeFormat(this).format(Date(event.time))
-            activity.addView(text("$time · $label${event.peerLabel?.let { " · $it" }.orEmpty()}",13f,color=AppTheme.sub(this)).apply {setPadding(0,dp(5),0,dp(5))})
+            activity.addView(text("$time · $label${event.peerLabel?.let { " · $it" }.orEmpty()}",13f,color=AppTheme.sub(this@NetworkVisionActivity)).apply {setPadding(0,dp(5),0,dp(5))})
         }
     }
 }

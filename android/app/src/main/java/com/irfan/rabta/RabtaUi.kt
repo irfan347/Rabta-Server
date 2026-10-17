@@ -128,7 +128,15 @@ object RabtaUi {
         val items=LinearLayout(a).apply { orientation=LinearLayout.VERTICAL }
         actions.forEach { item ->
             val row=button(a,item.label) { dialog.dismiss();item.run() }
-            item.detail?.let { row.text="${L.t(a,item.label)}\n${L.t(a,it)}" }
+            item.detail?.let { detail ->
+                val heading=L.t(a,item.label)
+                row.text=android.text.SpannableString(heading+"\n"+L.t(a,detail)).apply {
+                    val start=heading.length+1
+                    setSpan(android.text.style.ForegroundColorSpan(AppTheme.sub(a)),start,length,android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    setSpan(android.text.style.AbsoluteSizeSpan(12,true),start,length,android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    setSpan(android.text.style.TypefaceSpan("sans-serif"),start,length,android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+            }
             items.addView(row)
         }
         val scroll=ScrollView(a).apply { isFillViewport=false;addView(items);isVerticalScrollBarEnabled=false }
