@@ -15,6 +15,8 @@ import androidx.test.platform.app.InstrumentationRegistry
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import okhttp3.mockwebserver.Dispatcher
+import okhttp3.mockwebserver.RecordedRequest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.json.JSONObject
@@ -132,13 +134,20 @@ class CallsScreenTest {
     @Test fun callbackUsesExistingVoiceSignalingAndRetainsHistory()=fixture { db ->
         inst.uiAutomation.executeShellCommand("pm grant ${ctx.packageName} android.permission.RECORD_AUDIO").use { android.os.ParcelFileDescriptor.AutoCloseInputStream(it).readBytes() }
         val server=MockWebServer();val init=CountDownLatch(1);var to=""
-        server.enqueue(MockResponse().withWebSocketUpgrade(object:WebSocketListener() {
-            override fun onOpen(ws:WebSocket,response:Response) { ws.send("{\"type\":\"ready\",\"id\":\"CA1100000001\",\"protocol\":2}") }
-            override fun onMessage(ws:WebSocket,raw:String) {
-                val o=JSONObject(raw)
-                if(o.optString("type")=="call_init") { to=o.optString("to");init.countDown() }
+        // MessageService's initial network callback may retry a connecting socket.
+        // Serve every upgrade so a cancelled attempt cannot consume the only reply.
+        server.dispatcher=object:Dispatcher() {
+            override fun dispatch(request:RecordedRequest):MockResponse {
+                if(request.path!="/ws")return MockResponse().setResponseCode(404)
+                return MockResponse().withWebSocketUpgrade(object:WebSocketListener() {
+                    override fun onOpen(ws:WebSocket,response:Response) { ws.send("{\"type\":\"ready\",\"id\":\"CA1100000001\",\"protocol\":2}") }
+                    override fun onMessage(ws:WebSocket,raw:String) {
+                        val o=JSONObject(raw)
+                        if(o.optString("type")=="call_init") { to=o.optString("to");init.countDown() }
+                    }
+                })
             }
-        }))
+        }
         server.start();val url=server.url("/").toString().trimEnd('/')
         ui { Session.serverUrl=url }
         val original=db.logCallStart("CA1100000002","Call target","outgoing")
