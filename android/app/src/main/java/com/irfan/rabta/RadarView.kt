@@ -49,6 +49,9 @@ class RadarView(c:Context):View(c) {
     override fun onVisibilityChanged(changedView:View,visibility:Int){super.onVisibilityChanged(changedView,visibility);animateIfVisible()}
     private fun ring(orbit:Orbit)=when(orbit) { Orbit.CONNECTED -> 0.5f; Orbit.PENDING -> 0.74f; Orbit.DISCOVERED -> 0.98f }
     private val glow=Paint(Paint.ANTI_ALIAS_FLAG)
+    private var shaderKey=""
+    private var glowShader:android.graphics.Shader?=null
+    private var sweepShader:android.graphics.Shader?=null
     override fun onDraw(canvas:Canvas) {
         super.onDraw(canvas)
         val d=resources.displayMetrics.density
@@ -57,12 +60,19 @@ class RadarView(c:Context):View(c) {
         val lime=AppTheme.accent(context)
         fun alpha(color:Int,a:Int)=(color and 0x00FFFFFF) or (a shl 24)
         // Soft lime glow behind the orbit (restrained, not neon).
-        glow.shader=android.graphics.RadialGradient(cx,cy,radius*1.05f,intArrayOf(alpha(lime,if(scanning)0x2E else 0x18),alpha(lime,0x08),0),floatArrayOf(0f,0.6f,1f),android.graphics.Shader.TileMode.CLAMP)
+        // Shaders are rebuilt only when size, colour or scanning changes, never per animation frame.
+        val key="$width:$height:$lime:$scanning"
+        if(key!=shaderKey) {
+            shaderKey=key
+            glowShader=android.graphics.RadialGradient(cx,cy,radius*1.05f,intArrayOf(alpha(lime,if(scanning)0x2E else 0x18),alpha(lime,0x08),0),floatArrayOf(0f,0.6f,1f),android.graphics.Shader.TileMode.CLAMP)
+            sweepShader=android.graphics.SweepGradient(cx,cy,intArrayOf(0,0,alpha(lime,if(scanning)0x55 else 0x22)),floatArrayOf(0f,0.82f,1f))
+        }
+        glow.shader=glowShader
         canvas.drawCircle(cx,cy,radius*1.05f,glow)
         // Sweep: a fading wedge that turns only while discovery is running.
         val angle=if(scanning)(android.os.SystemClock.elapsedRealtime()%6000)/6000f*360f else 300f
         canvas.save();canvas.rotate(angle,cx,cy)
-        glow.shader=android.graphics.SweepGradient(cx,cy,intArrayOf(0,0,alpha(lime,if(scanning)0x55 else 0x22)),floatArrayOf(0f,0.82f,1f))
+        glow.shader=sweepShader
         canvas.drawCircle(cx,cy,radius,glow)
         canvas.restore()
         paint.shader=null;paint.style=Paint.Style.STROKE;paint.strokeWidth=d

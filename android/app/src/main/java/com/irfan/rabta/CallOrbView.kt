@@ -10,6 +10,8 @@ import android.view.View
 class CallOrbView(c: Context) : View(c) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val path = Path()
+    private var shaderKey = ""
+    private var glow: android.graphics.Shader? = null
     init { importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
 
     override fun onDraw(canvas: Canvas) {
@@ -20,7 +22,9 @@ class CallOrbView(c: Context) : View(c) {
         val lime = AppTheme.accent(context)
         fun alpha(a: Int) = (lime and 0x00FFFFFF) or (a shl 24)
         paint.style = Paint.Style.FILL
-        paint.shader = android.graphics.RadialGradient(cx, cy, r, intArrayOf(alpha(0x30), alpha(0x0C), 0), floatArrayOf(0f, 0.55f, 1f), android.graphics.Shader.TileMode.CLAMP)
+        val key = "$width:$height:$lime"
+        if (key != shaderKey) { shaderKey = key; glow = android.graphics.RadialGradient(cx, cy, r, intArrayOf(alpha(0x30), alpha(0x0C), 0), floatArrayOf(0f, 0.55f, 1f), android.graphics.Shader.TileMode.CLAMP) }
+        paint.shader = glow
         canvas.drawCircle(cx, cy, r, paint)
         paint.shader = null; paint.style = Paint.Style.STROKE
         // Gently warped rings give the orbital look without animation.
