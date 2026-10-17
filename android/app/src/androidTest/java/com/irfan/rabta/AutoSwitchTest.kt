@@ -66,10 +66,11 @@ class AutoSwitchTest {
         server.start()
         Session.init(ctx)
         old = listOf(Session.id, Session.name, Session.username, Session.token, Session.serverUrl)
+        val url = server.url("/").toString().trimEnd('/') // resolves the host name: never on the main thread
         ui {
             MessageService.stop(ctx); WsClient.disconnect()
             Session.id = account; Session.name = "AutoSwitch fixture"; Session.username = "autoswitch_fixture"; Session.token = "local-autoswitch-test"
-            Session.serverUrl = server.url("/").toString().trimEnd('/')
+            Session.serverUrl = url
         }
         db().upsertConversation(peer, "AutoSwitch contact", "", System.currentTimeMillis(), false)
     }
