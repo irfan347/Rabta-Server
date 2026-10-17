@@ -1,5 +1,7 @@
 # Rabta integration/testing audit — 2026-10-17
 
+Initial integration checkpoint: 113c3b0dc40252429968dfa08c52012bfd00c255. The subsequent authorized QR reliability fix and read-only backend findings are recorded in [QR_PERSISTENCE_DIAGNOSTICS.md](QR_PERSISTENCE_DIAGNOSTICS.md); the audit below describes the initial integration snapshot.
+
 This branch is for device testing only. No merge into main, production deployment, data reset, redesign or new application feature is part of this integration.
 
 ## PR inventory and dependency resolution
