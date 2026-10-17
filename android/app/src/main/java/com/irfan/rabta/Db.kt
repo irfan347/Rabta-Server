@@ -104,7 +104,9 @@ class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(
     fun deleteMessage(id:String) { writableDatabase.execSQL("UPDATE messages SET body='Message deleted',msg_type='text' WHERE id=?",arrayOf(id)) }
     private fun selected(where:String):List<Message> { val out=mutableListOf<Message>();readableDatabase.rawQuery("SELECT id,conv_id,from_id,from_name,body,sent_at,mine,status,msg_type FROM messages WHERE "+where+" ORDER BY sent_at DESC",null).use { c -> while(c.moveToNext())out.add(Message(c.getString(0),c.getString(1),c.getString(2),c.getString(3)?:"",c.getString(4),c.getLong(5),c.getInt(6)==1,c.getString(7),c.getString(8))) };return out }
     fun pausedMessages()=selected("mine=1 AND status='paused'")
-    fun pendingMesh()=selected("mine=1 AND status IN ('mesh','mesh_wait')")
+    /** Outgoing messages AutoSwitch still has to place on a transport (see [MessageDelivery.pending]). */
+    fun pendingOutgoing()=selected("mine=1 AND status IN ('queued','sending','mesh','mesh_wait')")
+    fun outgoing(id:String):Message?=readableDatabase.rawQuery("SELECT id,conv_id,from_id,from_name,body,sent_at,mine,status,msg_type FROM messages WHERE id=? AND mine=1",arrayOf(id)).use { c -> if(c.moveToFirst())Message(c.getString(0),c.getString(1),c.getString(2),c.getString(3)?:"",c.getString(4),c.getLong(5),true,c.getString(7),c.getString(8)) else null }
     fun deliveryStates(account:String):Map<String,Int> = readableDatabase.rawQuery(
         "SELECT status,COUNT(*) FROM messages WHERE mine=1 AND from_id=? GROUP BY status",arrayOf(account)
     ).use { c -> buildMap { while(c.moveToNext())put(c.getString(0),c.getInt(1)) } }
@@ -125,17 +127,22 @@ class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(
         return list.asReversed()
     }
 
-    @Synchronized fun updateStatus(msgId: String, status: String) {
-        val old = this.status(msgId) ?: return
-        if (MessageDelivery.canTransition(old, status)) writableDatabase.execSQL(
-            "UPDATE messages SET status=? WHERE id=? AND mine=1", arrayOf(status, msgId))
+    /** Applies only forward transitions; returns whether the stored state changed. */
+    @Synchronized fun updateStatus(msgId: String, status: String): Boolean {
+        val old = this.status(msgId) ?: return false
+        if (!MessageDelivery.canTransition(old, status)) return false
+        writableDatabase.execSQL("UPDATE messages SET status=? WHERE id=? AND mine=1", arrayOf(status, msgId))
+        return true
     }
+    fun isGroupConversation(id: String) = group(id) != null ||
+        readableDatabase.rawQuery("SELECT 1 FROM conversations WHERE peer_id=? AND is_group=1", arrayOf(id)).use { it.moveToFirst() }
     fun status(id: String): String? = readableDatabase.rawQuery("SELECT status FROM messages WHERE id=? AND mine=1", arrayOf(id)).use { if (it.moveToFirst()) it.getString(0) else null }
     fun conversationForMessage(id: String): String? = readableDatabase.rawQuery("SELECT conv_id FROM messages WHERE id=?", arrayOf(id)).use { if (it.moveToFirst()) it.getString(0) else null }
-    fun failInterruptedSends() = writableDatabase.execSQL("UPDATE messages SET status='failed' WHERE mine=1 AND status='sending'")
+    /** A send interrupted by the app stopping is queued again; AutoSwitch resends it with the same ID. */
+    fun requeueInterruptedSends() = writableDatabase.execSQL("UPDATE messages SET status='queued' WHERE mine=1 AND status='sending'")
     fun applyReadReceipt(id: String, byId: String) {
         if (byId.isBlank()) return
-        if (id == "all") writableDatabase.execSQL("UPDATE messages SET status='read' WHERE conv_id=? AND mine=1 AND status IN ('sent','delivered')", arrayOf(byId))
+        if (id == "all") writableDatabase.execSQL("UPDATE messages SET status='read' WHERE conv_id=? AND mine=1 AND status IN ('sent','relayed','delivered','direct_delivered')", arrayOf(byId))
         else writableDatabase.execSQL("UPDATE messages SET status='read' WHERE id=? AND conv_id=? AND mine=1", arrayOf(id, byId))
     }
     fun searchConversations(query: String): List<Conversation> {

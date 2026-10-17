@@ -65,6 +65,8 @@ class Router(private val ctx:Context,private val ui:UiListener,transportFactory:
         worker.execute { if(::store.isInitialized)store.close() };worker.shutdown()
     }
     fun hasKey(peer:String)=running && security.key(peer)!=null
+    fun direct(peer:String)=running && mesh.connected.keys.any { endpoint -> mesh.userIdOf[endpoint]==peer && matchedKeys[endpoint]==peer }
+    fun carrying(msgId:String)=running && (store.contains(msgId) || store.pending().any { it.id==msgId })
     @Synchronized fun sendDirect(toId:String,msgId:String,body:String,type:String="text"):Boolean {
         if(!running || toId==myId || !MeshPolicy.validId(toId) || !MeshPolicy.validId(msgId) || body.toByteArray().size>12000) return false
         if(type!="text" && !(type=="sticker" && Stickers.valid(body))) return false
@@ -77,7 +79,7 @@ class Router(private val ctx:Context,private val ui:UiListener,transportFactory:
         return ok
     }
     private fun maintain() {
-        store.prune(System.currentTimeMillis()).forEach { id -> RabtaEvents.postAck(id,"expired") }
+        store.prune(System.currentTimeMillis()).forEach { id -> RabtaEvents.postAck(id,MessageDelivery.NEARBY_EXPIRED) }
     }
     private fun aad(o:JSONObject)=JSONArray(listOf(o.getString("i"),o.getString("f"),o.getString("t"),o.getLong("s"),o.getLong("x"))).toString()
     private fun signed(o:JSONObject)=JSONArray(listOf(o.getInt("v"),o.getString("k"),aad(o),o.getString("p"),o.optString("e"),o.optString("iv"),o.optString("c"),o.optString("a"))).toString()
@@ -98,7 +100,7 @@ class Router(private val ctx:Context,private val ui:UiListener,transportFactory:
             try {
                 val plain=JSONObject().put("body",p.body).put("type",p.type).put("name",myName).toString()
                 val env=packet(p.id,p.to,"message",p.sent,plain)
-                if(store.promote(p,env.toString(),env.getLong("x"))) RabtaEvents.postAck(p.id,"mesh")
+                if(store.promote(p,env.toString(),env.getLong("x"))) RabtaEvents.postAck(p.id,MessageDelivery.NEARBY_QUEUED)
                 else main.post { ui.onStatus("Nearby carry queue full — pending message retained") }
             } catch(_:Exception) { main.post { ui.onStatus("Message waiting for offline security key") } }
         }
@@ -131,7 +133,7 @@ class Router(private val ctx:Context,private val ui:UiListener,transportFactory:
             if(!MeshCrypto.verify(key,from+":"+pub,o.optString("sig"))) return
             // Only learn self-announced keys from the directly connected peer.
             if(mesh.userIdOf[source]!=from) return
-            if(security.pin(from,pub)) { matchedKeys[source]=from;flushPending();carry(source) }
+            if(security.pin(from,pub)) { matchedKeys[source]=from;flushPending();carry(source);RabtaEvents.postNearbyLinked() }
             else main.post { ui.onStatus("Nearby identity key changed — compare contact security codes") }
             return
         }
@@ -150,7 +152,8 @@ class Router(private val ctx:Context,private val ui:UiListener,transportFactory:
             if(to==myId) {
                 if(!store.seen(id) && Db.get(ctx).status(original)!=null && Db.get(ctx).conversationForMessage(original)==from) {
                     vision.delivered(original,from,android.os.SystemClock.elapsedRealtime(),System.currentTimeMillis())
-                    receiptsAccepted.incrementAndGet();RabtaEvents.postAck(original,"delivered")
+                    // The receipt is signed by the recipient; it is "direct" only when it arrived from the recipient's own key-verified link.
+                    receiptsAccepted.incrementAndGet();RabtaEvents.postReceipt(original,from,matchedKeys[source]==from)
                 }
                 store.mark(id,expiry); return
             }

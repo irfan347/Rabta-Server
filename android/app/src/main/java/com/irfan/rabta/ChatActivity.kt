@@ -526,7 +526,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             val value=text.toString();val offset=value.indexOf("  ·  ")+5
             text=android.text.SpannableString(value).apply {
                 setSpan(android.text.style.ForegroundColorSpan(when(m.status) {
-                    "read","delivered"->AppTheme.teal(this@ChatActivity)
+                    "read","delivered","direct_delivered"->AppTheme.teal(this@ChatActivity)
                     "failed","expired","canceled"->AppTheme.error(this@ChatActivity)
                     else->SUB
                 }),offset,length,android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)

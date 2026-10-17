@@ -62,9 +62,9 @@ class MessageQueryTests(unittest.TestCase):
         self.assertEqual(states,{'a':'read','b':'sent','incoming':'received'})
 
     def test_bulk_read_does_not_claim_unsent_or_failed_messages_were_read(self):
-        for state in ('sent','delivered','failed','sending','mesh'): self.message(state,status=state)
+        for state in ('sent','relayed','delivered','direct_delivered','failed','sending','queued','mesh'): self.message(state,status=state)
         self.db.execute(sql_in('applyReadReceipt',"UPDATE messages SET status='read' WHERE conv_id="),('ali',))
         states=dict(self.db.execute('SELECT id,status FROM messages'))
-        self.assertEqual(states,{'sent':'read','delivered':'read','failed':'failed','sending':'sending','mesh':'mesh'})
+        self.assertEqual(states,{'sent':'read','relayed':'read','delivered':'read','direct_delivered':'read','failed':'failed','sending':'sending','queued':'queued','mesh':'mesh'})
 
 if __name__ == '__main__': unittest.main()

@@ -20,6 +20,7 @@ let pool = null;
 const memUsers = new Map();      // id -> {id,username,pass_hash,name,created_at}
 const memMessages = [];          // pending offline messages
 let memMsgId = 1;
+const memReceipts = [];          // recipient receipts waiting for an offline sender
 
 if (process.env.DATABASE_URL) {
   const { Pool } = require('pg');
@@ -45,6 +46,7 @@ async function initDb() {
     ALTER TABLE ru_messages ADD COLUMN IF NOT EXISTS group_name TEXT;
     CREATE INDEX IF NOT EXISTS idx_rum_to ON ru_messages (to_id, delivered_at);
     CREATE TABLE IF NOT EXISTS rg_groups(id TEXT PRIMARY KEY, name TEXT, creator TEXT, members TEXT, created_at BIGINT);
+    CREATE TABLE IF NOT EXISTS ru_receipts(msg_id TEXT NOT NULL, by_id TEXT NOT NULL, to_id TEXT NOT NULL, at BIGINT, PRIMARY KEY(msg_id, by_id, to_id));
   `);
   const rows = (await pool.query('SELECT id,username,pass_hash,name FROM ru_users')).rows;
   for (const r of rows) memUsers.set(r.id, r);
@@ -209,6 +211,33 @@ async function storeMessage(fromId, fromName, toId, msgId, body, type, sentAt, g
   }
 }
 
+// A receipt is sent by the recipient's app after it has stored a message; it is the only signal that
+// means "delivered". Server acks ('delivered' = written to the recipient's socket, 'stored') stay unchanged
+// for existing apps. Receipts for an offline sender wait in ru_receipts until it reconnects.
+async function relayReceipt(byId, toId, msgId) {
+  if (await sendFrame(online.get(toId), { type: 'receipt', id: msgId, by: byId })) return;
+  if (pool) await pool.query('INSERT INTO ru_receipts(msg_id,by_id,to_id,at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING', [msgId, byId, toId, Date.now()]);
+  else if (!memReceipts.some(r => r.msg_id === msgId && r.by_id === byId && r.to_id === toId)) {
+    memReceipts.push({ msg_id: msgId, by_id: byId, to_id: toId, at: Date.now() });
+    if (memReceipts.length > 5000) memReceipts.shift();
+  }
+}
+
+async function deliverReceipts(userId, ws) {
+  for (;;) {
+    const rows = pool
+      ? (await pool.query('SELECT msg_id,by_id FROM ru_receipts WHERE to_id=$1 ORDER BY at ASC LIMIT ' + PENDING_BATCH, [userId])).rows
+      : memReceipts.filter(r => r.to_id === userId).slice(0, PENDING_BATCH);
+    if (!rows.length) return;
+    const written = await Promise.all(rows.map(r => sendFrame(ws, { type: 'receipt', id: r.msg_id, by: r.by_id })));
+    const done = rows.filter((_, i) => written[i]);
+    if (!pool) for (const r of done) memReceipts.splice(memReceipts.indexOf(r), 1);
+    else if (done.length) await pool.query('DELETE FROM ru_receipts r USING unnest($2::text[],$3::text[]) AS d(m,b) WHERE r.to_id=$1 AND r.msg_id=d.m AND r.by_id=d.b',
+      [userId, done.map(r => r.msg_id), done.map(r => r.by_id)]);
+    if (done.length < rows.length || rows.length < PENDING_BATCH) return;
+  }
+}
+
 function updateLastSeen(userId) {
   const u = memUsers.get(userId); if (u) u.last_seen = Date.now();
   if (pool) pool.query('UPDATE ru_users SET last_seen=$1 WHERE id=$2', [Date.now(), userId]).catch(() => {});
@@ -223,8 +252,8 @@ wss.on('connection', (ws, req) => {
   online.set(userId, ws);
   updateLastSeen(userId);
 
-  ws.send(JSON.stringify({ type: 'ready', id: userId, name: user.name, protocol: 2 }));
-  deliverPending(userId, ws).catch(e => console.error('Offline delivery failed:', e.message));
+  ws.send(JSON.stringify({ type: 'ready', id: userId, name: user.name, protocol: 2, receipts: true }));
+  deliverPending(userId, ws).then(() => deliverReceipts(userId, ws)).catch(e => console.error('Offline delivery failed:', e.message));
   for(const call of [...voiceCalls.values(),...videoCalls.values()]) if(call.to===userId) deliverCall(call);
 
   ws.on('message', async (raw) => {
@@ -294,6 +323,10 @@ wss.on('connection', (ws, req) => {
         if (!(await sendFrame(online.get(mid), out))) { try { await storeMessage(userId, user.name, mid, msg.id, msg.body, msg.msgType||'text', now, g.id, g.name); } catch (_) { ws.send(JSON.stringify({type:'ack',id:msg.id,status:'error'})); return; } }
       }
       ws.send(JSON.stringify({ type:'ack', id:msg.id, status:'sent' }));
+    } else if (msg.type === 'receipt') {
+      const id = String(msg.id || ''), to = String(msg.to || '');
+      if (/^[0-9A-F]{12}$/.test(id) && to !== userId && memUsers.has(to) && !features.blocked(userId, to))
+        await relayReceipt(userId, to, id).catch(e => console.error('Receipt storage failed:', e.message));
     } else if (msg.type === 'ping') {
       ws.send(JSON.stringify({ type: 'pong' }));
     }

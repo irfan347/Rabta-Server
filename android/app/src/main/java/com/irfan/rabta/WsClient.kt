@@ -94,12 +94,17 @@ object WsClient {
 
     private fun handle(o: JSONObject) {
         when (o.optString("type")) {
-            "msg" -> Inbox.receive(o.optString("id"), o.optString("from"), o.optString("fromName"), o.optString("body"), o.optLong("t",System.currentTimeMillis()), o.optString("from"), o.optString("fromName"), o.optString("msgType","text"))
+            "msg" -> {
+                val id = o.optString("id"); val from = o.optString("from")
+                // Confirm only after the message (or an earlier copy with the same ID) is stored on this phone.
+                Inbox.receive(id, from, o.optString("fromName"), o.optString("body"), o.optLong("t",System.currentTimeMillis()), from, o.optString("fromName"), o.optString("msgType","text")) { sendReceipt(from, id) }
+            }
             "group_msg" -> {
                 val gId = o.optString("groupId"); val gName = o.optString("groupName")
                 Inbox.receive(o.optString("id"), o.optString("from"), o.optString("fromName"), o.optString("body"), o.optLong("t",System.currentTimeMillis()), gId, gName, o.optString("msgType","text"), true)
             }
-            "ack" -> RabtaEvents.postAck(o.optString("id"), o.optString("status"))
+            "ack" -> RabtaEvents.postAck(o.optString("id"), MessageDelivery.SERVER_PREFIX + o.optString("status"))
+            "receipt" -> RabtaEvents.postReceipt(o.optString("id"), o.optString("by"), false)
             "typing" -> RabtaEvents.postTyping(o.optString("from"))
             "read" -> RabtaEvents.postRead(o.optString("msgId"), o.optString("by"))
             "incoming_call" -> RabtaEvents.postIncomingCall(o.optString("from"), o.optString("fromName"),o.optString("callId"))
@@ -133,6 +138,7 @@ object WsClient {
 
     fun sendRaw(json: String): Boolean = if (connected) (ws?.send(json) == true) else false
     fun sendTyping(toId: String) = sendRaw(JSONObject().put("type","typing").put("to",toId).toString())
+    fun sendReceipt(toId: String, msgId: String) = sendRaw(JSONObject().put("type","receipt").put("to",toId).put("id",msgId).toString())
     fun sendRead(toId: String, msgId: String) = sendRaw(JSONObject().put("type","read").put("to",toId).put("msgId",msgId).toString())
 
     // HTTP

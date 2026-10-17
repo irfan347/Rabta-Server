@@ -7,6 +7,10 @@ object RabtaEvents {
     interface Listener {
         fun onMessage(fromId: String, fromName: String, msgId: String, body: String, t: Long, msgType: String = "text", groupId: String = "") {}
         fun onAck(msgId: String, status: String) {}
+        /** The recipient [byId] confirmed it stored [msgId]; [direct] when it came over a direct Nearby link. */
+        fun onReceipt(msgId: String, byId: String, direct: Boolean) {}
+        /** A Nearby peer completed its key exchange, so queued messages may now have a path. */
+        fun onNearbyLinked() {}
         fun onRead(msgId: String, byId: String) {}
         fun onTyping(fromId: String) {}
         fun onIncomingCall(fromId: String, fromName: String, callId: String) {}
@@ -35,6 +39,8 @@ object RabtaEvents {
     fun postMessage(fromId: String, fromName: String, msgId: String, body: String, t: Long, msgType: String = "text", groupId: String = "") =
         fire { onMessage(fromId, fromName, msgId, body, t, msgType, groupId) }
     fun postAck(msgId: String, status: String)               = fire { onAck(msgId, status) }
+    fun postReceipt(msgId: String, byId: String, direct: Boolean) = fire { onReceipt(msgId, byId, direct) }
+    fun postNearbyLinked()                                   = fire { onNearbyLinked() }
     fun postRead(msgId: String, byId: String)                = fire { onRead(msgId, byId) }
     fun postTyping(fromId: String)                           = fire { onTyping(fromId) }
     fun postIncomingCall(fromId: String, fromName: String, callId: String)   = fire { onIncomingCall(fromId, fromName, callId) }

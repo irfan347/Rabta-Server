@@ -26,6 +26,10 @@ object MeshBridge {
     fun peerNames():List<String> = router?.connected?.values?.toList() ?: emptyList()
 
     fun hasKey(peer:String)=router?.hasKey(peer)==true
+    /** [peer] is connected right now over a key-verified direct link. */
+    fun direct(peer:String)=router?.direct(peer)==true
+    /** The Nearby store still holds [msgId] for carrying (sealed or waiting for the contact's key). */
+    fun carrying(msgId:String)=router?.carrying(msgId)==true
 
     /** Send a 1-to-1 message over the offline mesh. False if mesh is off. */
     fun sendDirect(toId: String, msgId: String, body: String, type: String = "text"): Boolean =

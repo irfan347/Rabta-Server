@@ -141,3 +141,43 @@ test('database backlog larger than one batch is fully delivered and marked',asyn
   assert.equal(b.messages.filter(m=>m.type==='msg').length,450);
   assert.equal(rows.filter(r=>!r.delivered_at).length,0);
 });
+test('recipient receipt reaches an online sender; server acks keep their existing meaning',async()=>{
+  const f=await fixture();const a=f.socket(f.alice),b=f.socket(f.bob);
+  assert.equal(a.messages[0].receipts,true);
+  await a.send({type:'msg',id:'ABCDEF123456',to:f.bob.id,body:'hello'});
+  assert.equal(a.messages.at(-1).status,'delivered');assert.equal(a.messages.filter(m=>m.type==='receipt').length,0);
+  await b.send({type:'receipt',id:'ABCDEF123456',to:f.alice.id});
+  assert.deepEqual(a.messages.filter(m=>m.type==='receipt'),[{type:'receipt',id:'ABCDEF123456',by:f.bob.id}]);
+});
+test('receipt for an offline sender is kept until it reconnects, then delivered once',async()=>{
+  const f=await fixture();const a=f.socket(f.alice);
+  await a.send({type:'msg',id:'ABCDEF123456',to:f.bob.id,body:'hello'});a.ws.close();
+  const b=f.socket(f.bob);await settle();
+  await b.send({type:'receipt',id:'ABCDEF123456',to:f.alice.id});await b.send({type:'receipt',id:'ABCDEF123456',to:f.alice.id});
+  const lost=f.socket(f.alice,{broken:true});await settle();lost.ws.close();
+  const back=f.socket(f.alice);await settle();
+  assert.equal(back.messages.filter(m=>m.type==='receipt'&&m.by===f.bob.id).length,1);
+  const again=f.socket(f.alice);await settle();
+  assert.equal(again.messages.filter(m=>m.type==='receipt').length,0);
+});
+test('malformed, self, unknown and blocked receipts are dropped',async()=>{
+  const f=await fixture();const a=f.socket(f.alice),b=f.socket(f.bob);
+  await b.send({type:'receipt',id:'not-an-id',to:f.alice.id});
+  await b.send({type:'receipt',id:'ABCDEF123456',to:'FFFFFFFFFFFF'});
+  await a.send({type:'receipt',id:'ABCDEF123456',to:f.alice.id});
+  await f.routes.get('POST /api/block')({headers:{authorization:'Bearer '+f.alice.token},body:{target:f.bob.id}},{json(){},status(){return this}});
+  await b.send({type:'receipt',id:'ABCDEF123457',to:f.alice.id});
+  assert.equal(a.messages.filter(m=>m.type==='receipt').length,0);
+});
+test('database keeps receipts for an offline sender and removes them once written',async()=>{
+  const f=await fixture(true);const rows=[];
+  f.onSql((sql,args)=>{
+    if(sql.startsWith('INSERT INTO ru_receipts'))rows.push({msg_id:args[0],by_id:args[1],to_id:args[2]});
+    if(sql.startsWith('SELECT msg_id,by_id FROM ru_receipts'))return rows.filter(r=>r.to_id===args[0]);
+    if(sql.startsWith('DELETE FROM ru_receipts'))for(let i=rows.length-1;i>=0;i--)if(rows[i].to_id===args[0]&&args[1].some((m,j)=>m===rows[i].msg_id&&args[2][j]===rows[i].by_id))rows.splice(i,1);
+  });
+  const b=f.socket(f.bob);await b.send({type:'receipt',id:'ABCDEF123456',to:f.alice.id});
+  assert.equal(rows.length,1);
+  const a=f.socket(f.alice);await settle();await settle();
+  assert.equal(a.messages.filter(m=>m.type==='receipt').length,1);assert.equal(rows.length,0);
+});
