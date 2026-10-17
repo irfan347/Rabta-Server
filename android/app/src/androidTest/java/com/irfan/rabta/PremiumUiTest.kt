@@ -68,13 +68,16 @@ class PremiumUiTest {
         fail("Real UI action unavailable: $value")
     }
     private fun setDialogText(value:String) {
-        val root=inst.uiAutomation.rootInActiveWindow?:error("No active dialog")
         fun editor(n:AccessibilityNodeInfo):AccessibilityNodeInfo? {
             if(n.className?.toString()==EditText::class.java.name)return n
             for(i in 0 until n.childCount)n.getChild(i)?.let {editor(it)}?.let {return it}
             return null
         }
-        val node=editor(root)?:error("No dialog editor")
+        // The dialog opens after the previous screen returns its result; wait for it to become the active window, like click().
+        val until=System.currentTimeMillis()+8000
+        var node:AccessibilityNodeInfo?=null
+        while(node==null&&System.currentTimeMillis()<until) {node=inst.uiAutomation.rootInActiveWindow?.let {editor(it)};if(node==null)Thread.sleep(80)}
+        if(node==null)error("No dialog editor")
         assertTrue(node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,android.os.Bundle().apply {putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,value)}))
     }
     private fun capture(name:String) {
