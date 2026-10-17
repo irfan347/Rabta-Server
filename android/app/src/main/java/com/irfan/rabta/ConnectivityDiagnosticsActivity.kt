@@ -102,14 +102,14 @@ class ConnectivityDiagnosticsActivity:ThemedActivity() {
                 require(MeshPolicy.validId(account)){"Sign in to inspect your offline queue"}
                 val stats=if(getDatabasePath("mesh_v2_$account.db").exists())MeshStore(applicationContext,account).use { it.stats() } else MeshStore.Stats()
                 val database=Db.get(applicationContext)
-                Triple(stats,database.pendingMesh().filter { it.fromId==account },database.deliveryStates(account))
+                Triple(stats,database.pendingOutgoing().filter { it.fromId==account },database.deliveryStates(account))
             }
             uiHandler.post {
                 reading=false
                 if(!visible||isDestroyed||Session.id!=account)return@post
                 result.onSuccess { (stats,pending,states) ->
                     queues.text="Awaiting encryption or carry space: ${stats.pendingPlaintext}\nEncrypted outgoing packets: ${stats.ownPackets}\nStored relay messages: ${stats.relayMessages}\nQueued receipts: ${stats.receipts}\nEncrypted packet storage: ${stats.bytes/1024} KB\n\n"+
-                        (if(pending.isEmpty())"No outgoing messages marked as Nearby queued." else pending.take(20).joinToString("\n") { "${it.id} · ${MessageDelivery.label(it.status)}" })+
+                        (if(pending.isEmpty())"No outgoing messages waiting for a transport." else pending.take(20).joinToString("\n") { "${it.id} · ${MessageDelivery.label(it.status)}" })+
                         (if(pending.size>20)"\nShowing 20 of ${pending.size}" else "")
                     deliveries.text="Saved outgoing messages for this account, across online and offline transport:\n"+
                         (if(states.isEmpty())"No outgoing messages." else states.toSortedMap().entries.joinToString("\n") { "${MessageDelivery.label(it.key)}: ${it.value}" })

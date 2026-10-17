@@ -183,13 +183,13 @@ class PremiumUiTest {
             capture("nearby")
         }finally {ui {a.finish()};inst.waitForIdleSync();closeRouter(router)}
     }
-    @Test fun profileKeepsCircularAvatarCopiesRealIdAndDoesNotInventNameEditing()=fixture {_,account ->
+    @Test fun profileKeepsCircularAvatarCopiesRealIdAndOffersRealNameEditing()=fixture {_,account ->
         val a=launch(ProfileActivity::class.java)
         waitUi("Profile loaded") {labels(a).contains(account)}
         ui {
             val avatar=all(a.window.decorView).filterIsInstance<ImageView>().first {it.contentDescription.toString().contains("profile",true)}
             assertTrue(avatar.clipToOutline);assertTrue(avatar.background is android.graphics.drawable.GradientDrawable)
-            assertTrue(labels(a).contains("Editing is not supported by this server"))
+            assertTrue(labels(a).contains("Change any time · up to 30 characters"));assertTrue(labels(a).contains("Edit"))
             val label=all(a.window.decorView).filterIsInstance<TextView>().first {it.text=="Rabta ID"}
             (label.parent.parent as View).performClick()
             val clipboard=ctx.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager

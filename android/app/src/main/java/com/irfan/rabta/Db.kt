@@ -5,7 +5,8 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
-class Db(ctx: Context) : SQLiteOpenHelper(ctx, "rabta.db", null, 5) {
+/** [account] is set only by [get]; a Db constructed directly (isolated test fixtures) keeps the legacy file name. */
+class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(ctx, fileFor(account), null, 5) {
 
     data class Conversation(val peerId: String, val peerName: String, val lastMsg: String, val lastTime: Long, val unread: Int, val isGroup: Boolean = false)
     data class Message(val id: String, val convId: String, val fromId: String, val fromName: String, val body: String, val sentAt: Long, val mine: Boolean, val status: String, val msgType: String)
@@ -34,8 +35,42 @@ class Db(ctx: Context) : SQLiteOpenHelper(ctx, "rabta.db", null, 5) {
     }
 
     companion object {
+        private const val LEGACY = "rabta.db"
         @Volatile private var INST: Db? = null
-        fun get(ctx: Context) = INST ?: synchronized(this) { INST ?: Db(ctx.applicationContext).also { INST = it } }
+
+        /** Each account has its own history file; signed out, nothing is written to disk. */
+        private fun fileFor(account: String?) = when { account == null -> LEGACY; account.isEmpty() -> null; else -> "rabta_$account.db" }
+        private fun current(db: Db?, account: String) = db?.takeIf { it.account == null || it.account == account }
+
+        fun get(ctx: Context): Db {
+            val account = runCatching { Session.id }.getOrDefault("")
+            current(INST, account)?.let { return it }
+            return synchronized(this) {
+                current(INST, account) ?: run {
+                    val app = ctx.applicationContext
+                    if (account.isNotEmpty()) adoptLegacy(app, account)
+                    Db(app, account).also { INST = it }
+                }
+            }
+        }
+
+        /**
+         * Before per-account files, every account on the phone shared rabta.db. Hand that history to the first
+         * account that opens it after the update (normally the account that was signed in when the app updated);
+         * it is moved, never copied or deleted. Other accounts start with their own empty history.
+         */
+        private fun adoptLegacy(app: Context, account: String) {
+            val prefs = app.getSharedPreferences("rabta_storage", Context.MODE_PRIVATE)
+            if (prefs.contains("legacy_owner")) return
+            val legacy = app.getDatabasePath(LEGACY)
+            val target = app.getDatabasePath(fileFor(account)!!)
+            if (!legacy.exists() || target.exists()) return
+            val moved = listOf("", "-journal", "-wal", "-shm").all { suffix ->
+                val from = java.io.File(legacy.path + suffix)
+                !from.exists() || from.renameTo(java.io.File(target.path + suffix))
+            }
+            if (moved) prefs.edit().putString("legacy_owner", account).commit()
+        }
     }
 
     fun upsertConversation(peerId: String, peerName: String, lastMsg: String, time: Long, incUnread: Boolean, isGroup: Boolean = false) {
@@ -69,7 +104,9 @@ class Db(ctx: Context) : SQLiteOpenHelper(ctx, "rabta.db", null, 5) {
     fun deleteMessage(id:String) { writableDatabase.execSQL("UPDATE messages SET body='Message deleted',msg_type='text' WHERE id=?",arrayOf(id)) }
     private fun selected(where:String):List<Message> { val out=mutableListOf<Message>();readableDatabase.rawQuery("SELECT id,conv_id,from_id,from_name,body,sent_at,mine,status,msg_type FROM messages WHERE "+where+" ORDER BY sent_at DESC",null).use { c -> while(c.moveToNext())out.add(Message(c.getString(0),c.getString(1),c.getString(2),c.getString(3)?:"",c.getString(4),c.getLong(5),c.getInt(6)==1,c.getString(7),c.getString(8))) };return out }
     fun pausedMessages()=selected("mine=1 AND status='paused'")
-    fun pendingMesh()=selected("mine=1 AND status IN ('mesh','mesh_wait')")
+    /** Outgoing messages AutoSwitch still has to place on a transport (see [MessageDelivery.pending]). */
+    fun pendingOutgoing()=selected("mine=1 AND status IN ('queued','sending','mesh','mesh_wait')")
+    fun outgoing(id:String):Message?=readableDatabase.rawQuery("SELECT id,conv_id,from_id,from_name,body,sent_at,mine,status,msg_type FROM messages WHERE id=? AND mine=1",arrayOf(id)).use { c -> if(c.moveToFirst())Message(c.getString(0),c.getString(1),c.getString(2),c.getString(3)?:"",c.getString(4),c.getLong(5),true,c.getString(7),c.getString(8)) else null }
     fun deliveryStates(account:String):Map<String,Int> = readableDatabase.rawQuery(
         "SELECT status,COUNT(*) FROM messages WHERE mine=1 AND from_id=? GROUP BY status",arrayOf(account)
     ).use { c -> buildMap { while(c.moveToNext())put(c.getString(0),c.getInt(1)) } }
@@ -90,17 +127,22 @@ class Db(ctx: Context) : SQLiteOpenHelper(ctx, "rabta.db", null, 5) {
         return list.asReversed()
     }
 
-    @Synchronized fun updateStatus(msgId: String, status: String) {
-        val old = this.status(msgId) ?: return
-        if (MessageDelivery.canTransition(old, status)) writableDatabase.execSQL(
-            "UPDATE messages SET status=? WHERE id=? AND mine=1", arrayOf(status, msgId))
+    /** Applies only forward transitions; returns whether the stored state changed. */
+    @Synchronized fun updateStatus(msgId: String, status: String): Boolean {
+        val old = this.status(msgId) ?: return false
+        if (!MessageDelivery.canTransition(old, status)) return false
+        writableDatabase.execSQL("UPDATE messages SET status=? WHERE id=? AND mine=1", arrayOf(status, msgId))
+        return true
     }
+    fun isGroupConversation(id: String) = group(id) != null ||
+        readableDatabase.rawQuery("SELECT 1 FROM conversations WHERE peer_id=? AND is_group=1", arrayOf(id)).use { it.moveToFirst() }
     fun status(id: String): String? = readableDatabase.rawQuery("SELECT status FROM messages WHERE id=? AND mine=1", arrayOf(id)).use { if (it.moveToFirst()) it.getString(0) else null }
     fun conversationForMessage(id: String): String? = readableDatabase.rawQuery("SELECT conv_id FROM messages WHERE id=?", arrayOf(id)).use { if (it.moveToFirst()) it.getString(0) else null }
-    fun failInterruptedSends() = writableDatabase.execSQL("UPDATE messages SET status='failed' WHERE mine=1 AND status='sending'")
+    /** A send interrupted by the app stopping is queued again; AutoSwitch resends it with the same ID. */
+    fun requeueInterruptedSends() = writableDatabase.execSQL("UPDATE messages SET status='queued' WHERE mine=1 AND status='sending'")
     fun applyReadReceipt(id: String, byId: String) {
         if (byId.isBlank()) return
-        if (id == "all") writableDatabase.execSQL("UPDATE messages SET status='read' WHERE conv_id=? AND mine=1 AND status IN ('sent','delivered')", arrayOf(byId))
+        if (id == "all") writableDatabase.execSQL("UPDATE messages SET status='read' WHERE conv_id=? AND mine=1 AND status IN ('sent','relayed','delivered','direct_delivered')", arrayOf(byId))
         else writableDatabase.execSQL("UPDATE messages SET status='read' WHERE id=? AND conv_id=? AND mine=1", arrayOf(id, byId))
     }
     fun searchConversations(query: String): List<Conversation> {

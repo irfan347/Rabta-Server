@@ -26,6 +26,9 @@ class Mesh(private val ctx: Context, private val cb: Listener,clientFactory:(()-
         fun onAudio(endpointId: String, frame: ByteArray)
         fun onStatus(msg: String)
         fun onRadarRequest(name:String) {}
+        fun onDropControl(endpointId: String, message: String) {}
+        /** An outgoing or incoming payload stopped before completing. */
+        fun onPayloadFailed(endpointId: String, payloadId: Long) {}
     }
 
     companion object {
@@ -144,6 +147,18 @@ class Mesh(private val ctx: Context, private val cb: Listener,clientFactory:(()-
         }catch(_:Exception){if(current(generation))cb.onStatus("Nearby transfer unavailable — encrypted queue retained")}
     }
 
+    override fun sendDrop(endpointId:String,message:String):Boolean {
+        if(!active||!connected.containsKey(endpointId))return false
+        return runCatching { client.sendPayload(endpointId,Payload.fromBytes(("D"+message).toByteArray(Charsets.UTF_8)));true }.getOrDefault(false)
+    }
+    override fun sendStream(endpointId:String,data:java.io.InputStream):Long? {
+        if(!active||!connected.containsKey(endpointId))return null
+        // Nearby reads the stream on its own thread and moves it over the best medium the link has upgraded to.
+        val payload=Payload.fromStream(data)
+        return runCatching { client.sendPayload(endpointId,payload);payload.id }.getOrNull()
+    }
+    override fun cancelPayload(payloadId:Long) { if(clientDelegate.isInitialized())runCatching { client.cancelPayload(payloadId) } }
+
     fun sendFile(uri: android.net.Uri, displayName: String, size: Long) {
         if (connected.isEmpty()) { cb.onStatus("No one connected yet"); return }
         try {
@@ -228,6 +243,7 @@ class Mesh(private val ctx: Context, private val cb: Listener,clientFactory:(()-
                     when (raw[0].toInt().toChar()) {
                         'A' -> cb.onAudio(endpointId, raw.copyOfRange(1, raw.size))
                         'M' -> cb.onEnvelope(endpointId, String(raw, 1, raw.size - 1, Charsets.UTF_8))
+                        'D' -> if (raw.size <= 16_001) cb.onDropControl(endpointId, String(raw, 1, raw.size - 1, Charsets.UTF_8))
                         'F' -> {
                             val body = String(raw, 1, raw.size - 1, Charsets.UTF_8)
                             val c1 = body.indexOf(':'); val c2 = body.indexOf(':', c1 + 1)
@@ -248,6 +264,7 @@ class Mesh(private val ctx: Context, private val cb: Listener,clientFactory:(()-
         override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {
             if(!current(generation))return
             val pid = update.payloadId
+            if (update.status == PayloadTransferUpdate.Status.FAILURE || update.status == PayloadTransferUpdate.Status.CANCELED) cb.onPayloadFailed(endpointId, pid)
             if (pendingFiles.containsKey(pid) && update.status == PayloadTransferUpdate.Status.SUCCESS) {
                 cb.onFileDone(pendingFiles[pid] ?: endpointId, pid); pendingFiles.remove(pid)
             }

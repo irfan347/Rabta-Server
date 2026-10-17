@@ -14,8 +14,8 @@ import java.io.File
 
 object MediaHelper {
 
-    /** Compress image from URI to base64 JPEG (max 800px). */
-    fun imageToBase64(ctx: Context, uri: Uri): String? {
+    /** Compress image from URI to base64 JPEG (max [maxPx], default 800px). */
+    fun imageToBase64(ctx: Context, uri: Uri, maxPx: Int = 800, quality: Int = 75): String? {
         return try {
             val bounds=BitmapFactory.Options().apply { inJustDecodeBounds=true }
             ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it,null,bounds); true } ?: return null
@@ -38,11 +38,10 @@ object MediaHelper {
                 exifStream.close()
             } catch (_: Exception) {}
             // Scale down
-            val maxPx = 800
             val scale = maxPx.toFloat() / maxOf(bmp.width, bmp.height)
             if (scale < 1f) bmp = Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt(), (bmp.height * scale).toInt(), true)
             val out = ByteArrayOutputStream()
-            bmp.compress(Bitmap.CompressFormat.JPEG, 75, out)
+            bmp.compress(Bitmap.CompressFormat.JPEG, quality, out)
             Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
         } catch (_: Exception) {
             null

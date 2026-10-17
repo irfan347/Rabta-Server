@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="rabta_graphite">#0B1020</color>
-    <color name="rabta_violet">#8F74F8</color>
-    <color name="rabta_teal">#35C9BC</color>
+    <!-- Rabta NOVA brand tokens. AppTheme.kt holds the full runtime palette. -->
+    <color name="rabta_graphite">#080D14</color>
+    <color name="rabta_surface">#111B27</color>
+    <color name="rabta_lime">#BFFF76</color>
+    <color name="rabta_violet">#A997FF</color>
+    <color name="rabta_teal">#54DDC5</color>
 </resources>

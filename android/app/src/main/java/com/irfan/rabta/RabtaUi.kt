@@ -39,7 +39,7 @@ object RabtaUi {
     }
 
     fun ripple(c: Context, color: Int, radius: Int = 16) = RippleDrawable(
-        ColorStateList.valueOf(if(AppTheme.dark(c)) 0x338F74F8 else 0x226D46D9),
+        ColorStateList.valueOf(if(AppTheme.dark(c)) 0x33BFFF76 else 0x223A6E12),
         shape(c,color,radius), shape(c,Color.WHITE,radius))
 
     fun text(c: Context, value: String, size: Float = 15f, strong: Boolean = false, color: Int = AppTheme.text(c)) = TextView(c).apply {
@@ -265,6 +265,19 @@ object RabtaUi {
         addView(labels,LinearLayout.LayoutParams(0,-2,1f))
         addView(text(c,"›",20f,color=AppTheme.sub(c)).apply {importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO})
         layoutParams=LinearLayout.LayoutParams(-1,-2).apply {bottomMargin=dp(c,8)}
+    }
+
+    /** A visible, honest placeholder for a feature Rabta does not have yet. */
+    fun comingSoon(c:Context,title:String,detail:String,icon:String):LinearLayout = row(c,title,detail,icon) {
+        android.widget.Toast.makeText(c,"${L.t(c,title)}: ${L.t(c,"coming soon")}",android.widget.Toast.LENGTH_SHORT).show()
+    }.apply {
+        removeViewAt(childCount-1)
+        addView(badge(c,"Coming soon"))
+        contentDescription="$title. ${L.t(c,"Coming soon")}"
+    }
+    fun badge(c:Context,label:String) = text(c,label,11f,true,AppTheme.violet(c)).apply {
+        background=shape(c,AppTheme.raised(c),999);setPadding(dp(c,10),dp(c,4),dp(c,10),dp(c,4))
+        importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
     }
 
     private fun TextView.isAccessibilityHeadingCompat() { ViewCompat.setAccessibilityHeading(this,true) }
