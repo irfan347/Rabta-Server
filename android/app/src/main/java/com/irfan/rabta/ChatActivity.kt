@@ -248,6 +248,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         callOverlay.addView(callTop)
         // Center: avatar
         callAvatarFrame = FrameLayout(this)
+        callAvatarFrame.addView(CallOrbView(this), FrameLayout.LayoutParams(dp(300),dp(300)).apply { gravity=Gravity.CENTER })
         callAvatarFrame.addView(avatar(peerName, dp(112)), FrameLayout.LayoutParams(dp(112),dp(112)).apply { gravity=Gravity.CENTER })
         callOverlay.addView(callAvatarFrame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,0,1f))
         // Bottom: call controls
