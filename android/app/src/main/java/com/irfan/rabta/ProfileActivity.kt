@@ -37,7 +37,7 @@ class ProfileActivity : ThemedActivity() {
         val heroCol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(0, d(12), 0, d(16)) }
         avatar = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP; background = RabtaUi.shape(this@ProfileActivity, AppTheme.accent(this@ProfileActivity), 999)
-            clipToOutline = true; contentDescription = "Profile photo"
+            clipToOutline = true; contentDescription = "Profile photo"; isFocusable = true
         }
         loadAvatar()
         val ring = FrameLayout(this).apply {
@@ -167,8 +167,13 @@ class ProfileActivity : ThemedActivity() {
 
     private fun divider(parent: LinearLayout) = parent.addView(View(this).apply { setBackgroundColor(AppTheme.line(this@ProfileActivity)) }, LinearLayout.LayoutParams(-1, RabtaUi.dp(this, 1)).apply { marginStart = RabtaUi.dp(this@ProfileActivity, 70) })
 
+    override fun onResume() { super.onResume(); if (::avatar.isInitialized) loadAvatar() }
+
+    /** Tapping the photo opens it full screen with Gallery, Camera, Crop and Remove. */
+    private fun openPhoto() = startActivity(Intent(this, ProfilePhotoActivity::class.java))
+
     private fun loadAvatar() {
-        avatar.setOnClickListener {pickPhoto()}
+        avatar.setOnClickListener {openPhoto()}
         avatar.background=RabtaUi.shape(this,AppTheme.sent(this),999)
         avatar.setImageDrawable(null)
         if (Session.profilePic.isNotEmpty()) MediaHelper.base64ToBitmap(Session.profilePic)?.let(avatar::setImageBitmap)
@@ -176,7 +181,7 @@ class ProfileActivity : ThemedActivity() {
             avatar.background=RabtaUi.shape(this,AppTheme.sent(this),999)
             avatar.setImageDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
             avatar.contentDescription = "${Session.name.ifBlank { Session.username }} profile initials"
-            avatar.setOnClickListener { pickPhoto() }
+            avatar.setOnClickListener { openPhoto() }
             avatar.setImageBitmap(initialsBitmap())
         }
     }
@@ -200,21 +205,8 @@ class ProfileActivity : ThemedActivity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != pickCode || resultCode != RESULT_OK) return
         val uri = data?.data ?: return
-        Toast.makeText(this, "Updating photo…", Toast.LENGTH_SHORT).show()
-        val owner=Session.id
-        Thread {
-            // A small avatar keeps the upload well under the server's 256 KB profile photo limit.
-            val encoded = MediaHelper.imageToBase64(this, uri, maxPx = 320, quality = 80)
-            if (encoded != null && Session.id==owner) {
-                Session.profilePic = encoded
-                handler.post {
-                    if (!isDestroyed) loadAvatar()
-                    WsClient.uploadPhoto(Session.serverUrl, Session.token, encoded) { ok, msg ->
-                        if (!isDestroyed) Toast.makeText(this, if (ok) "Profile photo updated" else "Photo saved on this phone, but it could not be shared: $msg", Toast.LENGTH_LONG).show()
-                    }
-                }
-            } else handler.post { if (!isDestroyed) Toast.makeText(this, "Could not open that image", Toast.LENGTH_LONG).show() }
-        }.start()
+        // The camera badge still picks straight from the gallery, now through the same circle crop.
+        ProfilePhoto.cropAndSave(this, uri) { if (!isDestroyed) loadAvatar() }
     }
 
     private fun copy(label: String, value: String) {

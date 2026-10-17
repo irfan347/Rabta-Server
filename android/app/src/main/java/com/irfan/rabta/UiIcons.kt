@@ -66,21 +66,47 @@ object UiIcons {
         "photo" to "M12,15.2a3.2,3.2 0,1 0,0,-6.4 3.2,3.2 0,0 0,0,6.4z M9,2L7.17,4H4c-1.1,0 -2,.9 -2,2v12c0,1.1 .9,2 2,2h16c1.1,0 2,-.9 2,-2V6c0,-1.1 -.9,-2 -2,-2h-3.17L15,2H9zm3,15c-2.76,0 -5,-2.24 -5,-5s2.24,-5 5,-5 5,2.24 5,5 -2.24,5 -5,5z",
         "copy" to "M16,1H4c-1.1,0 -2,.9 -2,2v14h2V3h12V1zm3,4H8c-1.1,0 -2,.9 -2,2v14c0,1.1 .9,2 2,2h11c1.1,0 2,-.9 2,-2V7c0,-1.1 -.9,-2 -2,-2zm0,16H8V7h11v14z",
         "star" to "M12,17.27L18.18,21l-1.64,-7.03L22,9.24l-7.19,-0.61L12,2 9.19,8.63 2,9.24l5.46,4.73L5.82,21z",
-        "help" to "M12,2a10,10 0,1 0,0,20 10,10 0,0 0,0,-20z M11,16h2v2h-2z M12,6a4,4 0,0 1,4,4c0,2.5 -3,2.8 -3,5h-2c0,-3.3 3,-3.2 3,-5a2,2 0,0 0,-4,0H8a4,4 0,0 1,4,-4z"
+        "help" to "M12,2a10,10 0,1 0,0,20 10,10 0,0 0,0,-20z M11,16h2v2h-2z M12,6a4,4 0,0 1,4,4c0,2.5 -3,2.8 -3,5h-2c0,-3.3 3,-3.2 3,-5a2,2 0,0 0,-4,0H8a4,4 0,0 1,4,-4z",
+        "crop" to "M17,15h2V7c0,-1.1 -.9,-2 -2,-2H9v2h8v8zM7,17V1H5v4H1v2h4v10c0,1.1 .9,2 2,2h10v4h2v-4h4v-2H7z",
+        "crop_rotate" to "M7.47,21.49C4.2,19.93 1.86,16.76 1.5,13H0c.51,6.16 5.66,11 11.95,11l.66,-.03 -3.81,-3.82 -1.33,1.34zM12.05,0l-.66,.03 3.81,3.81 1.33,-1.33c3.27,1.55 5.61,4.72 5.96,8.48h1.5C23.49,4.84 18.34,0 12.05,0zM16,14h2V8c0,-1.11 -.9,-2 -2,-2h-6v2h6v6zm-8,2V4H6v2H4v2h2v8c0,1.1 .89,2 2,2h8v2h2v-2h2v-2H8z",
+        "rotate" to "M15.55,5.55L11,1v3.07C7.06,4.56 4,7.92 4,12s3.05,7.44 7,7.93v-2.02c-2.84,-.48 -5,-2.94 -5,-5.91s2.16,-5.43 5,-5.91V10l4.55,-4.45zM19.93,11c-.17,-1.39 -.72,-2.73 -1.62,-3.89l-1.42,1.42c.54,.75 .88,1.6 1.02,2.47h2.02zM13,17.9v2.02c1.39,-.17 2.74,-.71 3.9,-1.61l-1.44,-1.44c-.75,.54 -1.59,.89 -2.46,1.03zm3.89,-2.42l1.42,1.41c.9,-1.16 1.45,-2.5 1.62,-3.89h-2.02c-.14,.87 -.48,1.72 -1.02,2.48z",
+        "draw" to "M7,14c-1.66,0 -3,1.34 -3,3 0,1.31 -1.16,2 -2,2 .92,1.22 2.49,2 4,2 2.21,0 4,-1.79 4,-4 0,-1.66 -1.34,-3 -3,-3zm13.71,-9.37l-1.34,-1.34c-.39,-.39 -1.02,-.39 -1.41,0L9,12.25 11.75,15l8.96,-8.96c.39,-.39 .39,-1.02 0,-1.41z",
+        "undo" to "M12.5,8c-2.65,0 -5.05,.99 -6.9,2.6L2,7v9h9l-3.62,-3.62c1.39,-1.16 3.16,-1.88 5.12,-1.88 3.54,0 6.55,2.31 7.6,5.5l2.37,-.78C21.08,11.03 17.15,8 12.5,8z",
+        "done_all" to "M18,7l-1.41,-1.41 -6.34,6.34 1.41,1.41L18,7zm4.24,-1.41L11.66,16.17 7.48,12l-1.41,1.41L11.66,19l12,-12 -1.42,-1.41zM.41,13.41L6,19l1.41,-1.41L1.83,12 .41,13.41z",
+        "block" to "M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2zM4,12c0,-4.42 3.58,-8 8,-8 1.85,0 3.55,.63 4.9,1.69L5.69,16.9C4.63,15.55 4,13.85 4,12zm8,8c-1.85,0 -3.55,-.63 -4.9,-1.69L18.31,7.1C19.37,8.45 20,10.15 20,12c0,4.42 -3.58,8 -8,8z",
+        "report" to "M14.4,6L14,4H5v17h2v-7h5.6l.4,2h7V6z",
+        "music" to "M12,3v10.55c-.59,-.34 -1.27,-.55 -2,-.55 -2.21,0 -4,1.79 -4,4s1.79,4 4,4 4,-1.79 4,-4V7h4V3h-6z",
+        "gallery" to "M21,19V5c0,-1.1 -.9,-2 -2,-2H5c-1.1,0 -2,.9 -2,2v14c0,1.1 .9,2 2,2h14c1.1,0 2,-.9 2,-2zM8.5,13.5l2.5,3.01L14.5,12l4.5,6H5l3.5,-4.5z",
+        "chevron_down" to "M7.41,8.59L12,13.17l4.59,-4.58L18,10l-6,6 -6,-6 1.41,-1.41z",
+        "volume_off" to "M16.5,12c0,-1.77 -1.02,-3.29 -2.5,-4.03v2.21l2.45,2.45c.03,-.2 .05,-.41 .05,-.63zm2.5,0c0,.94 -.2,1.82 -.54,2.64l1.51,1.51C20.63,14.91 21,13.5 21,12c0,-4.28 -2.99,-7.86 -7,-8.77v2.06c2.89,.86 5,3.54 5,6.71zM4.27,3L3,4.27 7.73,9H3v6h4l5,5v-6.73l4.25,4.25c-.67,.52 -1.42,.93 -2.25,1.18v2.06c1.38,-.31 2.63,-.95 3.69,-1.81L19.73,21 21,19.73l-9,-9L4.27,3zM12,4L9.91,6.09 12,8.18V4z",
+        "reply" to "M10,9V5l-7,7 7,7v-4.1c5,0 8.5,1.6 11,5.1 -1,-5 -4,-10 -11,-11z",
+        "people" to "M16,11c1.66,0 2.99,-1.34 2.99,-3S17.66,5 16,5c-1.66,0 -3,1.34 -3,3s1.34,3 3,3zm-8,0c1.66,0 2.99,-1.34 2.99,-3S9.66,5 8,5C6.34,5 5,6.34 5,8s1.34,3 3,3zm0,2c-2.33,0 -7,1.17 -7,3.5V19h14v-2.5c0,-2.33 -4.67,-3.5 -7,-3.5zm8,0c-.29,0 -.62,.02 -.97,.05 1.16,.84 1.97,1.97 1.97,3.45V19h6v-2.5c0,-2.33 -4.67,-3.5 -7,-3.5z",
+        "clock" to "M11.99,2C6.47,2 2,6.48 2,12s4.47,10 9.99,10C17.52,22 22,17.52 22,12S17.52,2 11.99,2zM12,20c-4.42,0 -8,-3.58 -8,-8s3.58,-8 8,-8 8,3.58 8,8 -3.58,8 -8,8zm.5,-13H11v6l5.25,3.15 .75,-1.23 -4.5,-2.67z",
+        "error" to "M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2zm1,15h-2v-2h2v2zm0,-4h-2V7h2v6z",
+        "aspect" to "M19,12h-2v3h-3v2h5v-5zM7,9h3V7H5v5h2V9zm14,-6H3c-1.1,0 -2,.9 -2,2v14c0,1.1 .9,2 2,2h18c1.1,0 2,-.9 2,-2V5c0,-1.1 -.9,-2 -2,-2zm0,16.01H3V4.99h18v14.02z"
     )
     fun set(view: TextView, name: String, color: Int = Color.WHITE, size: Int = 24, label: String = name) {
+        val drawable = drawable(view.context, name, color, size)
+        view.text = SpannableString(" ").apply { setSpan(ImageSpan(drawable, ImageSpan.ALIGN_BASELINE), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) }
+        view.contentDescription = label
+    }
+    /** The icon as a plain drawable of [size] dp, for ImageViews that must sit exactly centred. */
+    fun drawable(c: android.content.Context, name: String, color: Int = Color.WHITE, size: Int = 24): Drawable {
         val path = PathParser.createPathFromPathData(paths.getValue(name))!!
-        val drawable = object : Drawable() {
+        val px = (size * c.resources.displayMetrics.density).toInt()
+        return object : Drawable() {
             private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color }
             override fun draw(canvas: Canvas) { canvas.save(); canvas.translate(bounds.left.toFloat(), bounds.top.toFloat()); canvas.scale(bounds.width()/24f, bounds.height()/24f); canvas.drawPath(path, paint); canvas.restore() }
             override fun setAlpha(alpha: Int) { paint.alpha = alpha }
             override fun setColorFilter(filter: ColorFilter?) { paint.colorFilter = filter }
+            override fun getIntrinsicWidth() = px
+            override fun getIntrinsicHeight() = px
             @Deprecated("Deprecated in Java") override fun getOpacity() = PixelFormat.TRANSLUCENT
-        }
-        val px = (size * view.resources.displayMetrics.density).toInt()
-        drawable.setBounds(0, 0, px, px)
-        view.text = SpannableString(" ").apply { setSpan(ImageSpan(drawable, ImageSpan.ALIGN_BASELINE), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) }
-        view.contentDescription = label
+        }.apply { setBounds(0, 0, px, px) }
+    }
+    /** A centred icon button that never shifts with font metrics. */
+    fun image(c: android.content.Context, name: String, color: Int, size: Int = 24, label: String = name) = android.widget.ImageView(c).apply {
+        setImageDrawable(drawable(c, name, color, size)); scaleType = android.widget.ImageView.ScaleType.CENTER; contentDescription = label
     }
     fun fromSymbol(symbol: String) = when(symbol) {
         "📞" -> "phone"; "🎥", "📹" -> "video"; "🎤" -> "mic"; "🔇" -> "muted"

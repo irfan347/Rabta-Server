@@ -472,6 +472,8 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
                     }
                 }
                 val unreadChats=runCatching { db.searchConversations("").count { it.unread>0 } }.getOrDefault(0)
+                // The newest message's real delivery state drives the ✓ / ✓✓ / blue ✓✓ in each row.
+                val ticks=result.getOrNull()?.associate { it.peerId to runCatching { db.lastMessageState(it.peerId) }.getOrNull() }.orEmpty()
             uiHandler.post {
                 if(isDestroyed||isFinishing||version!=loadVersion||destination!=activeTab)return@post
                 chatsBadge.text=if(unreadChats>99) "99+" else unreadChats.toString()
@@ -492,7 +494,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
                                 if(spaces||filter==2) "Create a group to bring people together." else "Find someone by username or Rabta ID, or add a nearby contact.",
                                 if(spaces||filter==2) "New group" else "New chat") { if(spaces||filter==2) showCreateGroup() else showNewChat() }
                         })
-                    } else list.forEach { target.addView(convRow(it)) }
+                    } else list.forEach { target.addView(convRow(it,ticks[it.peerId])) }
                     // Spaces: temporary nearby rooms need networking Rabta does not have yet.
                     if(destination==2&&query.isBlank()) target.addView(RabtaUi.comingSoon(this,"AirSpace","Temporary rooms with people nearby","nearby").apply {
                         (layoutParams as LinearLayout.LayoutParams).topMargin=dp(16)
@@ -502,7 +504,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         }.start()
     }
 
-    private fun convRow(c: Db.Conversation): View {
+    private fun convRow(c: Db.Conversation, last: Pair<Boolean,String>? = null): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             background=RabtaUi.ripple(this@ConversationListActivity,Color.TRANSPARENT,16);setPadding(dp(4),dp(10),dp(4),dp(10))
@@ -529,7 +531,10 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         if (c.lastTime > 0) top.addView(TextView(this).apply { text = fmtTime(c.lastTime); textSize = 12f; setTextColor(if (c.unread > 0) AppTheme.accent(this@ConversationListActivity) else SUB) })
         mid.addView(top)
         val bot = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0,dp(2),0,0) }
-        bot.addView(TextView(this).apply { text = preview(c.lastMsg); textSize = 14f; setTextColor(SUB); maxLines = 1;ellipsize=android.text.TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        bot.addView(TextView(this).apply {
+            text = preview(c.lastMsg, last?.takeIf { it.first }?.second); textSize = 14f; setTextColor(SUB); maxLines = 1;ellipsize=android.text.TextUtils.TruncateAt.END
+            last?.takeIf { it.first }?.let { contentDescription = "You: ${c.lastMsg}. ${MessageDelivery.label(it.second).removePrefix("✓✓ ").removePrefix("✓ ")}" }
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         if (c.unread > 0) bot.addView(TextView(this).apply {
             text = if (c.unread > 99) "99+" else c.unread.toString()
             textSize = 12f; typeface = Typeface.DEFAULT_BOLD; setTextColor(AppTheme.onPrimary(this@ConversationListActivity)); gravity = Gravity.CENTER
@@ -542,14 +547,27 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
     }
 
     /** Voice notes get a lime mic icon, as in WhatsApp; older rows saved before durations were added read "Voice message". */
-    private fun preview(last:String):CharSequence {
+    private fun preview(last:String, mineStatus:String?=null):CharSequence {
         if(last.isEmpty()) return "No messages yet"
+        val out=android.text.SpannableStringBuilder()
+        // Own last message: ✓ relayed, ✓✓ delivered, blue ✓✓ read, a clock while waiting, red ! when it failed.
+        if(mineStatus!=null) {
+            val (icon,color)=when {
+                mineStatus==MessageDelivery.READ -> "done_all" to READ_BLUE
+                MessageDelivery.delivered(mineStatus) -> "done_all" to SUB
+                mineStatus==MessageDelivery.RELAYED||mineStatus=="sent" -> "check" to SUB
+                MessageDelivery.retryable(mineStatus) -> "error" to AppTheme.error(this)
+                else -> "clock" to SUB
+            }
+            out.append(TextView(this).also { UiIcons.set(it,icon,color,17,icon) }.text).append(" ")
+        }
         val voice=last=="Voice note"||last.startsWith("🎤 ")
-        if(!voice) return last
+        if(!voice) return out.append(last)
         val label=last.removePrefix("🎤 ").let { if(it=="Voice note") "Voice message" else it }
         val icon=TextView(this).also { UiIcons.set(it,"mic",AppTheme.accent(this),16,"Voice") }.text
-        return android.text.SpannableStringBuilder(icon).append(" ").append(label)
+        return out.append(icon).append(" ").append(label)
     }
+    private val READ_BLUE = 0xFF53BDEB.toInt()
 
     private fun divider() = View(this).apply { setBackgroundColor(DIV) }.also {
         it.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)).apply { marginStart = dp(78) }

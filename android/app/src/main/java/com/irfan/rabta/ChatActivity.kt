@@ -86,9 +86,9 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     private lateinit var barRow: LinearLayout
     private lateinit var holdStrip: LinearLayout
     private lateinit var holdTimer: TextView
-    private lateinit var emojiBtn: TextView
-    private lateinit var stickerBtn: TextView
-    private lateinit var cameraBtn: TextView
+    private lateinit var emojiBtn: View
+    private lateinit var stickerBtn: View
+    private lateinit var cameraBtn: View
     private var pillContent: List<View> = emptyList()
     private var recordingLocked = false
     private var recordingPaused = false
@@ -205,6 +205,15 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     }
 
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
+    private val myPhoto by lazy { Session.profilePic.takeIf { it.isNotEmpty() }?.let { MediaHelper.base64ToBitmap(it) } }
+    private val PROFILE = 120
+    private fun openContactProfile() {
+        startActivityForResult(Intent(this,ContactProfileActivity::class.java).putExtra("peerId",peerId).putExtra("peerName",peerName),PROFILE)
+    }
+    private fun openSearch() {
+        searchField.visibility=View.VISIBLE;searchField.requestFocus()
+        androidx.core.view.WindowCompat.getInsetsController(window,searchField).show(androidx.core.view.WindowInsetsCompat.Type.ime())
+    }
     private fun pill(c: Int, r: Int = 999) = GradientDrawable().apply { setColor(c); cornerRadius = dp(r).toFloat() }
     private fun oval(c: Int) = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(c) }
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
@@ -231,6 +240,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         headerAvatar.addView(avatar(peerName,dp(40)),FrameLayout.LayoutParams(dp(40),dp(40)))
         if(!isGroup) ProfileHelper.loadIfNeeded(peerId,Session.serverUrl,Session.token) { bmp ->
             if(bmp!=null) uiHandler.post { if(!isDestroyed) headerAvatar.addView(ImageView(this).apply {
+                importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 setImageBitmap(bmp);scaleType=ImageView.ScaleType.CENTER_CROP;background=oval(RECV);clipToOutline=true
             },FrameLayout.LayoutParams(dp(40),dp(40))) }
         }
@@ -247,9 +257,14 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         if (!isGroup) hdr.addView(headerBtn("🎥") { startVideoCall() })
         hdr.addView(RabtaUi.iconButton(this,"search","Search chat") {
             if(searchField.visibility==View.VISIBLE) { searchField.setText("");searchField.visibility=View.GONE;input.requestFocus() }
-            else { searchField.visibility=View.VISIBLE;searchField.requestFocus();androidx.core.view.WindowCompat.getInsetsController(window,searchField).show(androidx.core.view.WindowInsetsCompat.Type.ime()) }
+            else openSearch()
         })
-        hdrCol.setOnClickListener { if(!isGroup) MessageActions.contact(this,peerId) }
+        if(!isGroup) {
+            hdrCol.setOnClickListener { openContactProfile() }
+            headerAvatar.setOnClickListener { openContactProfile() }
+            headerAvatar.isFocusable=true;headerAvatar.importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_YES
+            headerAvatar.contentDescription="$peerName. Open profile"
+        }
         headerBar=hdr
         root.addView(hdr)
         offlineBanner=RabtaUi.text(this,"",12f,color=AppTheme.sub(this)).apply {
@@ -365,13 +380,16 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         lockedPanel.addView(lockedActions)
         composerBar.addView(lockedPanel,LinearLayout.LayoutParams(-1,-2))
 
-        barRow=LinearLayout(this).apply { gravity=Gravity.BOTTOM;setPadding(dp(10),dp(6),dp(12),dp(12));clipChildren=false;clipToPadding=false }
+        // Room above the gesture bar, like WhatsApp; system insets are added on top of this.
+        barRow=LinearLayout(this).apply { gravity=Gravity.BOTTOM;setPadding(dp(8),dp(6),dp(10),dp(18));clipChildren=false;clipToPadding=false }
         val pill=LinearLayout(this).apply {
-            gravity=Gravity.BOTTOM;minimumHeight=dp(52);setPadding(dp(4),0,dp(4),0)
+            gravity=Gravity.BOTTOM;minimumHeight=dp(52);setPadding(dp(6),0,dp(6),0)
             background=RabtaUi.shape(this@ChatActivity,RECV,26)
         }
-        fun pillIcon(icon:String,label:String,action:()->Unit)=RabtaUi.iconButton(this,icon,label,action).apply {
-            UiIcons.set(this,icon,SUB,24,label);layoutParams=LinearLayout.LayoutParams(dp(42),dp(52))
+        // ImageViews keep every icon exactly centred in its 52dp row (text-based icons drift with font metrics).
+        fun pillIcon(icon:String,label:String,action:()->Unit)=UiIcons.image(this,icon,SUB,24,label).apply {
+            isFocusable=true;isClickable=true;background=RabtaUi.ripple(this@ChatActivity,Color.TRANSPARENT,999)
+            setOnClickListener { action() };layoutParams=LinearLayout.LayoutParams(dp(42),dp(52))
         }
         emojiBtn=pillIcon("emoji","Emoji") { showEmojiPicker() }
         pill.addView(emojiBtn)
@@ -398,7 +416,8 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         pill.addView(input, LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
         stickerBtn=pillIcon("sticker","Stickers") { Stickers.picker(this@ChatActivity,{sendContent(it,"sticker")},{pickAttachment("image/*",104)}) }
         pill.addView(stickerBtn)
-        pill.addView(pillIcon("attach","attach") { showAttachments() })
+        val attachBtn=pillIcon("attach","attach") { showAttachments() }
+        pill.addView(attachBtn)
         cameraBtn=pillIcon("photo","Camera") { takePhoto() }
         pill.addView(cameraBtn)
         // While holding the mic, the pill shows the timer and how to cancel.
@@ -408,7 +427,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         holdStrip.addView(holdTimer)
         holdStrip.addView(RabtaUi.text(this,"‹  Slide to cancel",14f,color=SUB).apply { gravity=Gravity.END;maxLines=1 },LinearLayout.LayoutParams(0,-2,1f))
         pill.addView(holdStrip,LinearLayout.LayoutParams(0,-2,1f))
-        pillContent=listOf(emojiBtn,input,stickerBtn,pill.getChildAt(3),cameraBtn)
+        pillContent=listOf(emojiBtn,input,stickerBtn,attachBtn,cameraBtn)
         barRow.addView(pill,LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f).apply { marginEnd=dp(6) })
         sendBtn = TextView(this).apply {
             UiIcons.set(this,"send",AppTheme.onPrimary(this@ChatActivity),24,"Send message"); gravity=Gravity.CENTER
@@ -617,8 +636,11 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
                 else bubble.addView(textLine("Photo unavailable"))
             }
             "voice" -> {
-                val voice=VoiceMessageView(this,m.body,if(m.mine) Session.name else m.fromName.ifBlank { peerName })
-                voiceViews.add(voice);bubble.addView(voice,LinearLayout.LayoutParams(dp(240),-2))
+                val voice=VoiceMessageView(this,m.body,if(m.mine) Session.name else m.fromName.ifBlank { peerName },if(m.mine) myPhoto else null,if(m.mine) SENT else RECV)
+                if(!m.mine) (if(isGroup) m.fromId else peerId).takeIf { it.isNotBlank() }?.let { who ->
+                    ProfileHelper.loadIfNeeded(who,Session.serverUrl,Session.token) { bmp -> if(!isDestroyed) voice.setPhoto(bmp) }
+                }
+                voiceViews.add(voice);bubble.addView(voice,LinearLayout.LayoutParams(dp(250),-2))
             }
             "file","video" -> {
                 bubble.addView(RabtaUi.text(this,if(m.msgType=="video") "Video" else "Document",12f,true,AppTheme.accent(this)))
@@ -710,6 +732,19 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     override fun onActivityResult(req:Int,res:Int,data:Intent?) {
         super.onActivityResult(req,res,data)
         if(res!=RESULT_OK) return
+        if(req==PROFILE) {
+            if(Privacy.blocked(this,peerId)&&data?.getStringExtra("action")!="search") { toast("Unblock this contact to call");return }
+            when(data?.getStringExtra("action")) { "voice"->startCall(true);"video"->startVideoCall();"search"->openSearch() }
+            return
+        }
+        if(req==102) {
+            val uri=data?.data ?: return
+            VideoCompressor.prepareWithDialog(this,uri,null) { body ->
+                android.app.AlertDialog.Builder(this).setTitle("Send ${Attachments.name(body)}?").setMessage("${Attachments.details(body)} · $peerName").setOnCancelListener { Attachments.discard(this,body) }
+                    .setNegativeButton("Cancel") { _,_ -> Attachments.discard(this,body) }.setPositiveButton("Send") { _,_ -> sendContent(body,"video") }.show()
+            }
+            return
+        }
         if(req in 102..104) {
             val uri=data?.data ?: return
             toast("Preparing attachment…")
@@ -745,7 +780,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     private fun showAttachments() {
         RabtaUi.sheet(this,"Share with $peerName",listOf(
             RabtaUi.SheetAction("Photo") { pickImage() },
-            RabtaUi.SheetAction("Video","Up to 8 MB") { pickAttachment("video/*",102) },
+            RabtaUi.SheetAction("Video","Large videos are compressed on this phone") { pickAttachment("video/*",102) },
             RabtaUi.SheetAction("Document / file","Up to 8 MB") { pickAttachment("*/*",103) },
             RabtaUi.SheetAction("Stickers") { Stickers.picker(this,{sendContent(it,"sticker")},{pickAttachment("image/*",104)}) },
             RabtaUi.SheetAction("Offline security") { MeshSecurity.showContact(this,peerId) }

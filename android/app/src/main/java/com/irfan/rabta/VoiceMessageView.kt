@@ -15,7 +15,7 @@ import java.io.File
  * WhatsApp-style voice note: play, a waveform decoded from the note itself, its real length, and the
  * sender's avatar with a mic badge. Duration and progress come from the decoder, never a fake waveform.
  */
-class VoiceMessageView(context:Context,private val body:String,private val sender:String=""):LinearLayout(context) {
+class VoiceMessageView(context:Context,private val body:String,private val sender:String="",photo:android.graphics.Bitmap?=null,badgeRing:Int=AppTheme.surface(context)):LinearLayout(context) {
     private val mainHandler=android.os.Handler(android.os.Looper.getMainLooper())
     private var player:MediaPlayer?=null
     private var temporary:File?=null
@@ -26,6 +26,7 @@ class VoiceMessageView(context:Context,private val body:String,private val sende
     private lateinit var play:TextView
     private lateinit var time:TextView
     private lateinit var seek:SeekBar
+    private lateinit var photoView:android.widget.ImageView
     private val wave=VoiceWaveView(context)
     private val tick=object:Runnable {
         override fun run() {
@@ -67,16 +68,27 @@ class VoiceMessageView(context:Context,private val body:String,private val sende
         time=RabtaUi.text(context,"",12f,color=AppTheme.sub(context)).apply { setPadding(dp(8),0,0,0) }
         middle.addView(time)
         addView(middle,LayoutParams(0,-2,1f))
-        // Sender avatar with a small mic badge, as in WhatsApp.
-        val avatar=FrameLayout(context).apply { importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO }
+        // Sender's profile photo (initials until it loads) with a small mic badge, as in WhatsApp.
+        val avatar=FrameLayout(context).apply { importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO;clipChildren=false }
+        val circle=android.graphics.drawable.GradientDrawable().apply { shape=android.graphics.drawable.GradientDrawable.OVAL;setColor(0xFF325E71.toInt()) }
         avatar.addView(RabtaUi.text(context,sender.filter { it.isLetterOrDigit() }.take(1).uppercase().ifEmpty { "R" },18f,true,Color.WHITE).apply {
-            gravity=Gravity.CENTER;background=RabtaUi.shape(context,0xFF325E71.toInt(),999)
-        },FrameLayout.LayoutParams(dp(44),dp(44)))
-        avatar.addView(TextView(context).apply {
-            UiIcons.set(this,"mic",AppTheme.accent(context),14,"Voice");gravity=Gravity.CENTER
-            background=android.graphics.drawable.GradientDrawable().apply { shape=android.graphics.drawable.GradientDrawable.OVAL;setColor(AppTheme.surface(context)) }
+            gravity=Gravity.CENTER;includeFontPadding=false;background=circle
+        },FrameLayout.LayoutParams(dp(46),dp(46),Gravity.CENTER))
+        photoView=android.widget.ImageView(context).apply {
+            scaleType=android.widget.ImageView.ScaleType.CENTER_CROP;background=circle.constantState?.newDrawable();clipToOutline=true;visibility=View.GONE
+        }
+        avatar.addView(photoView,FrameLayout.LayoutParams(dp(46),dp(46),Gravity.CENTER))
+        // The badge ring matches the bubble so it reads as a cut-out on the photo.
+        avatar.addView(UiIcons.image(context,"mic",AppTheme.accent(context),13,"Voice").apply {
+            background=android.graphics.drawable.GradientDrawable().apply { shape=android.graphics.drawable.GradientDrawable.OVAL;setColor(badgeRing) }
         },FrameLayout.LayoutParams(dp(20),dp(20),Gravity.BOTTOM or Gravity.START))
-        addView(avatar,LayoutParams(dp(46),dp(46)))
+        addView(avatar,LayoutParams(dp(50),dp(50)).apply { marginStart=dp(2) })
+        setPhoto(photo)
+    }
+    /** Shows the sender's real photo once it is known; null keeps the initials. */
+    fun setPhoto(bitmap:android.graphics.Bitmap?) {
+        if(bitmap==null)return
+        photoView.setImageBitmap(bitmap);photoView.visibility=View.VISIBLE
     }
     override fun onAttachedToWindow() { super.onAttachedToWindow();prepareInfo() }
     /** Reads length and waveform in the background so they show before the first tap. */
