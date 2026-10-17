@@ -73,7 +73,7 @@ class IncomingCallActivity : ThemedActivity(), RabtaEvents.Listener {
 
         // Caller avatar
         root.addView(TextView(this).apply {
-            val cols = listOf(0xFF6248A5,0xFF325E71,0xFF286F68)
+            val cols = listOf(0xFF4B3F8F,0xFF325E71,0xFF286F68)
             text = fromName.filter { it.isLetterOrDigit() }.take(1).uppercase().ifEmpty { "?" }
             textSize = 40f; typeface = Typeface.DEFAULT_BOLD; setTextColor(Color.WHITE); gravity = Gravity.CENTER
             background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(cols[(fromName.hashCode() and 0x7FFFFFFF) % cols.size].toInt()) }

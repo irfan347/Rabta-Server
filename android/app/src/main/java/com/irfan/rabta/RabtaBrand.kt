@@ -17,6 +17,8 @@ object RabtaBrand {
         }
         row.addView(ImageView(context).apply {
             setImageResource(R.drawable.ic_launcher_fg)
+            // The lime mark always sits on a NOVA navy tile, so it reads in light mode too.
+            background = android.graphics.drawable.GradientDrawable().apply { setColor(0xFF080D14.toInt()); cornerRadius = dp(context, iconSizeDp) * 0.28f }
             contentDescription = null
             scaleType = ImageView.ScaleType.FIT_CENTER
         }, LinearLayout.LayoutParams(dp(context, iconSizeDp), dp(context, iconSizeDp)))

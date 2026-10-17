@@ -39,7 +39,7 @@ object RabtaUi {
     }
 
     fun ripple(c: Context, color: Int, radius: Int = 16) = RippleDrawable(
-        ColorStateList.valueOf(if(AppTheme.dark(c)) 0x338F74F8 else 0x226D46D9),
+        ColorStateList.valueOf(if(AppTheme.dark(c)) 0x33BFFF76 else 0x223A6E12),
         shape(c,color,radius), shape(c,Color.WHITE,radius))
 
     fun text(c: Context, value: String, size: Float = 15f, strong: Boolean = false, color: Int = AppTheme.text(c)) = TextView(c).apply {

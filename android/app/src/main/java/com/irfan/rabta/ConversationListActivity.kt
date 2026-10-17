@@ -430,7 +430,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
             gravity=Gravity.CENTER_VERTICAL;setPadding(dp(12),0,dp(4),0)
             background=RabtaUi.shape(this@ConversationListActivity,
                 if(AppTheme.dark(this@ConversationListActivity)) AppTheme.surface(this@ConversationListActivity) else WHITE,12,
-                if(AppTheme.dark(this@ConversationListActivity)) 0xFF2A3142.toInt() else DIV)
+                if(AppTheme.dark(this@ConversationListActivity)) 0xFF223040.toInt() else DIV)
             visibility=View.GONE
         }
         callSearchRow.addView(TextView(this).apply {
@@ -585,7 +585,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
 
     // ── Helpers ──
     private fun initials(name: String, size: Int): TextView {
-        val cols = listOf(0xFF6248A5,0xFF325E71,0xFF3D577E,0xFF286F68)
+        val cols = listOf(0xFF4B3F8F,0xFF325E71,0xFF3D6B2A,0xFF286F68)
         return TextView(this).apply {
             text = name.filter { it.isLetterOrDigit() }.take(1).uppercase().ifEmpty { "?" }
             setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, size*0.38f); includeFontPadding=false; typeface = Typeface.DEFAULT_BOLD; setTextColor(Color.WHITE); gravity = Gravity.CENTER

@@ -41,7 +41,7 @@ class RadarView(c:Context):View(c) {
         paint.color=AppTheme.accent(context);paint.alpha=if(scanning)170 else 45
         paint.strokeWidth=resources.displayMetrics.density*2
         canvas.drawArc(cx-radius,cy-radius,cx+radius,cy+radius,(android.os.SystemClock.elapsedRealtime()%6000)/6000f*360f,70f,false,paint)
-        paint.alpha=255;paint.style=Paint.Style.FILL;paint.color=AppTheme.surface(context)
+        paint.alpha=255;paint.style=Paint.Style.FILL;paint.color=0xFF080D14.toInt() // the lime mark always sits on NOVA navy
         canvas.drawCircle(cx,cy,radius*0.36f,paint)
         val half=(radius*0.45f).toInt()
         mark?.setBounds(cx.toInt()-half,cy.toInt()-half,cx.toInt()+half,cy.toInt()+half);mark?.draw(canvas)

@@ -14,11 +14,11 @@ import kotlin.math.*
 /** Schematic layout only. A line means a live direct Nearby connection, never distance or remote reachability. */
 class NetworkVisionView(c:Context):View(c) {
     companion object {
-        const val GRAPHITE=0xFF0B1020.toInt()
-        const val VIOLET=0xFF8F74F8.toInt()
-        const val TEAL=0xFF35C9BC.toInt()
-        const val TEXT=0xFFF3F4FA.toInt()
-        const val SUB=0xFFAAB5CC.toInt()
+        const val GRAPHITE=0xFF080D14.toInt()
+        const val VIOLET=0xFFA997FF.toInt()
+        const val TEAL=0xFF54DDC5.toInt()
+        const val TEXT=0xFFF3F6F5.toInt()
+        const val SUB=0xFF94A5B5.toInt()
     }
     private val paint=Paint(Paint.ANTI_ALIAS_FLAG)
     private val mark=c.getDrawable(R.drawable.ic_launcher_fg)
