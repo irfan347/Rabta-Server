@@ -163,10 +163,40 @@ class AuthActivity : ThemedActivity() {
     private fun doLogin() {
         if (!validate()) return
         statusText.text = "Login ho raha hai..."; statusText.setTextColor(AppTheme.accent(this@AuthActivity)); setLoading(true)
-        WsClient.login(this, Config.SERVER, usernameField.text.toString().trim().lowercase(), pinField.text.toString().trim()) { ok, msg, data ->
+        signIn(usernameField.text.toString().trim().lowercase(), pinField.text.toString().trim(), null)
+    }
+
+    private fun signIn(un: String, pin: String, recoveryCode: String?) {
+        setLoading(true)
+        WsClient.login(this, Config.SERVER, un, pin, recoveryCode) { ok, msg, data ->
             setLoading(false)
-            if (ok && data != null) saveAndGo(data) else { statusText.text = msg; statusText.setTextColor(AppTheme.error(this)) }
+            if (ok && data != null && data.optBoolean("pending")) waitForApproval(un, pin, data.optString("requestId"))
+            else if (ok && data != null) saveAndGo(data) else { statusText.text = msg; statusText.setTextColor(AppTheme.error(this)) }
         }
+    }
+
+    /** A new phone: the PIN was right, but a trusted phone must allow it (or the recovery code is used). */
+    private fun waitForApproval(un: String, pin: String, requestId: String) {
+        statusText.text = "Approve this sign-in on your other Rabta phone"; statusText.setTextColor(AppTheme.accent(this))
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        var active = true
+        val dialog = android.app.AlertDialog.Builder(this).setTitle("Waiting for approval")
+            .setMessage("Open Rabta on your trusted phone and tap Allow. Lost that phone? Use your recovery code.")
+            .setCancelable(false)
+            .setNeutralButton("Use recovery code") { _, _ -> active = false; AccountUi.askRecoveryCode(this) { code -> if (!code.isNullOrBlank()) signIn(un, pin, code) } }
+            .setNegativeButton("Cancel") { _, _ -> active = false; statusText.text = "Sign-in cancelled" }.show()
+        fun poll() {
+            if (!active || isFinishing) return
+            WsClient.pollLogin(Config.SERVER, requestId) { ok, msg, data ->
+                if (!active) return@pollLogin
+                when {
+                    ok && data != null && data.has("token") -> { active = false; dialog.dismiss(); saveAndGo(data) }
+                    ok -> handler.postDelayed({ poll() }, 3000)
+                    else -> { active = false; dialog.dismiss(); statusText.text = msg; statusText.setTextColor(AppTheme.error(this)) }
+                }
+            }
+        }
+        handler.postDelayed({ poll() }, 3000)
     }
 
     private fun doRegister() {
@@ -185,7 +215,8 @@ class AuthActivity : ThemedActivity() {
         Session.id = data.optString("id"); Session.username = data.optString("username")
         Session.name = data.optString("name").ifEmpty { data.optString("username") }
         Session.token = data.optString("token"); Session.serverUrl = Config.SERVER
-        goHome()
+        val code = data.optString("recoveryCode")
+        if (code.isNotEmpty()) AccountUi.showRecoveryCode(this, code) { goHome() } else goHome()
     }
 
     private fun goHome() { startActivity(Intent(this, ConversationListActivity::class.java)); finish() }

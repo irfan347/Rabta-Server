@@ -110,6 +110,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
 
     override fun onResume() {
         super.onResume();if(!::connectionTv.isInitialized)return
+        AccountUi.ensureTrustedPhone(this)
         resumed=true;refreshAvatar();MessageService.start(this);RabtaEvents.add(this)
         uiHandler.removeCallbacks(connectionTick);uiHandler.post(connectionTick)
         when(activeTab) { 1->nearbyPanel.resume();3->loadCalls();else->loadConvs() }
