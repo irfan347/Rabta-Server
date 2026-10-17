@@ -1,13 +1,12 @@
-# Rabta 2.0 design system
+# Rabta design system
 
 The app continues to use Kotlin, programmatic Android Views, `ThemedActivity`, platform dialogs and existing AndroidX core. No new UI dependency, backend or database change is required. Mesh, accounts, message protocols, calls and Status retain their existing implementations.
 
 ## Tokens and components
 
-- Graphite canvas `#0B0F19`, dark surface `#151B29`, raised surface `#1D2636`.
-- Light canvas `#F6F7FB`, white surface, restrained `#EEF0F7` raised surface.
-- Brand violet `#8868F7` stays in the logo. Interactive fills use `#6D46D9` for AA white labels; dark-mode foreground accents use `#B5A0FF`.
-- Teal highlights: `#43D7C5` in dark mode, `#096F65` in light mode for readable small text. Meaningful status also uses text, rather than colour alone.
+- Rabta NOVA palette (see RABTA_NOVA.md): navy canvas `#080D14`, surface `#111B27`, raised `#172230`; text `#F3F6F5`, secondary `#94A5B5`.
+- NOVA Lime `#BFFF76` is the dark-mode accent and the primary button fill in both modes, always with dark `#080D14` labels. Light mode uses deep green `#3A6E12` for accent text and white-label fills.
+- Orbit Violet `#A997FF` (light `#5B45C9`) and Signal Teal `#54DDC5` (light `#0A6B5F`) support status; meaning is always also given in text.
 - Native sans-serif with medium headings/actions; sp sizes and the existing app text-size setting multiply the system accessibility font scale.
 - 4/8dp spacing rhythm, 20dp screen gutters, 16dp control corners, 20dp cards, 24dp dialogs and 28dp sheet corners. Controls are at least 48dp; primary buttons are at least 52dp tall.
 - `AppTheme`: saved System/Light/Dark palettes, including foreground, secondary, error and accent colours.
