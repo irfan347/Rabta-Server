@@ -147,7 +147,7 @@ jobs:
       - name: Build and test APK
         env:
           ANDROID_PROJECT_DIR: ${{ steps.project.outputs.directory }}
-        run: gradle --project-dir "$ANDROID_PROJECT_DIR" :app:testDebugUnitTest :app:assembleDebug :app:assembleTesting --no-daemon --stacktrace
+        run: gradle --project-dir "$ANDROID_PROJECT_DIR" :app:testDebugUnitTest :app:assembleDebug :app:assembleDevice --no-daemon --stacktrace
       - name: Record QR regression failure
         if: failure()
         run: |
@@ -200,7 +200,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          apk="$ANDROID_PROJECT_DIR/app/build/outputs/apk/testing/app-testing.apk"
+          apk="$ANDROID_PROJECT_DIR/app/build/outputs/apk/device/app-device.apk"
           test -s "$apk"
           tools="$ANDROID_HOME/build-tools/34.0.0"
           "$tools/apksigner" verify --verbose --print-certs "$apk" > "$apk.signature.txt"
@@ -214,15 +214,15 @@ jobs:
             stat --format='APK bytes: %s' "$apk"
             cat "$apk.signature.txt"
             cat "$apk.badging.txt"
-          } > "$ANDROID_PROJECT_DIR/app/build/outputs/apk/testing/APK-VERIFICATION.txt"
-          cat "$ANDROID_PROJECT_DIR/app/build/outputs/apk/testing/APK-VERIFICATION.txt"
+          } > "$ANDROID_PROJECT_DIR/app/build/outputs/apk/device/APK-VERIFICATION.txt"
+          cat "$ANDROID_PROJECT_DIR/app/build/outputs/apk/device/APK-VERIFICATION.txt"
       - name: Upload isolated device-test APK
         uses: actions/upload-artifact@v4
         with:
           name: Rabta-device-test-apk
           path: |
-            ${{ steps.project.outputs.directory }}/app/build/outputs/apk/testing/*.apk
-            ${{ steps.project.outputs.directory }}/app/build/outputs/apk/testing/APK-VERIFICATION.txt
+            ${{ steps.project.outputs.directory }}/app/build/outputs/apk/device/*.apk
+            ${{ steps.project.outputs.directory }}/app/build/outputs/apk/device/APK-VERIFICATION.txt
           if-no-files-found: error
       - name: Upload test reports
         if: always()
@@ -261,11 +261,11 @@ jobs:
           profile: pixel_2
           disable-animations: true
           script: |
-            gradle --project-dir android :app:assembleDebug :app:assembleTesting --no-daemon
+            gradle --project-dir android :app:assembleDebug :app:assembleDevice --no-daemon
             adb install -r android/app/build/outputs/apk/debug/app-debug.apk
             adb shell run-as com.irfan.rabta mkdir -p files
             adb shell run-as com.irfan.rabta touch files/rabta-ci-preservation-check
-            adb install -r android/app/build/outputs/apk/testing/app-testing.apk
+            adb install -r android/app/build/outputs/apk/device/app-device.apk
             adb shell pm path com.irfan.rabta
             adb shell pm path com.irfan.rabta.testing
             adb shell am start -W -n com.irfan.rabta.testing/com.irfan.rabta.AuthActivity

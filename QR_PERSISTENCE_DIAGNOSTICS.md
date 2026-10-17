@@ -34,11 +34,11 @@ Build, JVM and API 29/34 outcomes and the actual APK artifact are recorded in te
 
 The previous supplied APK certificate SHA-256 was 292dc3560730521d7534b060480ff9aee0eaef325188d6a1a6d7e4e8efc19048. The successful QR-recovery build at 31b6d3900170ace41c581db5cc540d9b25c4e916 has certificate 696b9f932d82bd34aa6cd944847aef8815c5983eaf1fe56e0b159e485bccd769. They differ, so that normal Debug APK cannot update the previous installation in place. The original signing private key is unavailable; it cannot be recovered from an APK.
 
-An additional testing build type uses the same implementation with application ID com.irfan.rabta.testing, label Rabta Test and version-name suffix -test. The original Debug/release application ID and resolved label remain unchanged. Existing debug network resources and dynamic FileProvider authorities are reused.
+An additional device build type uses the same implementation with application ID com.irfan.rabta.testing, label Rabta Test and version-name suffix -test. The original Debug/release application ID and resolved label remain unchanged. Existing debug network resources and dynamic FileProvider authorities are reused.
 
 CI builds/verifies both packages. API 29/34 emulator validation installs both, launches Rabta Test, confirms a synthetic private marker in the original package survives and is absent from the testing package, then runs the existing full original-package instrumentation suite. Only isolated CI fixture files are created/removed.
 
-Recommended artifact: Rabta-device-test-apk; ZIP contains app-testing.apk and APK-VERIFICATION.txt. CI path: android/app/build/outputs/apk/testing/app-testing.apk. Actual artifact/run results are recorded in PR #5. This is Debug-signed test software, not a production release.
+Recommended artifact: Rabta-device-test-apk; ZIP contains app-device.apk and APK-VERIFICATION.txt. CI path: android/app/build/outputs/apk/device/app-device.apk. Actual artifact/run results are recorded in PR #5. This is Debug-signed test software, not a production release.
 
 Install Rabta Test beside the existing Rabta. Do not uninstall or clear the old app. The testing app starts with separate local storage and Keystore; old conversations remain in the original app, rather than being silently copied. Sign in to an existing account if available. The backend supports one active socket per account, so stop the other Rabta app while using that same account in the test app. Test on both phones with this build. Existing pinned mesh keys from the old installation are not overwritten; the separate test installation has a separate device identity. Physical NFC preferred-service selection must target Rabta Test when both are installed.
 

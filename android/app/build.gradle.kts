@@ -15,7 +15,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes {
-        create("testing") {
+        create("device") {
             initWith(getByName("debug"))
             applicationIdSuffix = ".testing"
             versionNameSuffix = "-test"
@@ -24,8 +24,8 @@ android {
         }
     }
     // Reuse the existing debug network configuration for the isolated device-test build.
-    sourceSets.getByName("testing").manifest.srcFile("src/debug/AndroidManifest.xml")
-    sourceSets.getByName("testing").res.srcDir("src/debug/res")
+    sourceSets.getByName("device").manifest.srcFile("src/debug/AndroidManifest.xml")
+    sourceSets.getByName("device").res.srcDir("src/debug/res")
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
