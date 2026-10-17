@@ -125,7 +125,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
     override fun onResume() {
         super.onResume();if(!::connectionTv.isInitialized)return
         AccountUi.ensureTrustedPhone(this)
-        resumed=true;refreshAvatar();MessageService.start(this);RabtaEvents.add(this)
+        resumed=true;refreshAvatar();ProfilePhoto.restore { if(!isDestroyed) refreshAvatar() };MessageService.start(this);RabtaEvents.add(this)
         uiHandler.removeCallbacks(connectionTick);uiHandler.post(connectionTick)
         when(activeTab) { 1->nearbyPanel.resume();3->loadCalls();else->loadConvs() }
         if(activeTab==0) loadMoments(force=true)
@@ -162,9 +162,9 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         }
         setContentView(root)
         val header=LinearLayout(this).apply {
-            gravity=Gravity.CENTER_VERTICAL;setPadding(dp(16),dp(8),dp(8),dp(4))
+            gravity=Gravity.CENTER_VERTICAL;setPadding(dp(18),dp(8),dp(8),dp(4))
         }
-        header.addView(RabtaBrand.wordmark(this,26,24f),LinearLayout.LayoutParams(0,-2,1f))
+        header.addView(RabtaBrand.wordmark(this,26,23f),LinearLayout.LayoutParams(0,-2,1f))
         searchToggle=RabtaUi.iconButton(this,"search","Search chats") { toggleSearch() }.apply { UiIcons.set(this,"search",TXT,22,L.t(this@ConversationListActivity,"Search chats")) }
         header.addView(searchToggle)
         header.addView(RabtaUi.iconButton(this,"qr","QR Connect") { startActivity(Intent(this,InstantConnectActivity::class.java)) }.apply {
@@ -898,6 +898,6 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         uiHandler.postDelayed({ loadConvs() }, 400)
     }
     override fun onHistoryChanged(convId: String) { loadConvs() }
-    override fun onConnected() { updateConnection() }
+    override fun onConnected() { updateConnection();uiHandler.post { ProfilePhoto.restore { if(!isDestroyed) refreshAvatar() } } }
     override fun onDisconnected() { updateConnection() }
 }

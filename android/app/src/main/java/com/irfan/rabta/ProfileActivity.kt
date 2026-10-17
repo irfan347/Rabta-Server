@@ -167,7 +167,7 @@ class ProfileActivity : ThemedActivity() {
 
     private fun divider(parent: LinearLayout) = parent.addView(View(this).apply { setBackgroundColor(AppTheme.line(this@ProfileActivity)) }, LinearLayout.LayoutParams(-1, RabtaUi.dp(this, 1)).apply { marginStart = RabtaUi.dp(this@ProfileActivity, 70) })
 
-    override fun onResume() { super.onResume(); if (::avatar.isInitialized) loadAvatar() }
+    override fun onResume() { super.onResume(); if (::avatar.isInitialized) { loadAvatar(); ProfilePhoto.restore { if (!isDestroyed) loadAvatar() } } }
 
     /** Tapping the photo opens it full screen with Gallery, Camera, Crop and Remove. */
     private fun openPhoto() = startActivity(Intent(this, ProfilePhotoActivity::class.java))

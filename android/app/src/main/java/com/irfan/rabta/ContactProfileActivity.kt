@@ -80,9 +80,9 @@ class ContactProfileActivity : ThemedActivity() {
 
         // Voice · Video · Search, as tiles.
         val actions = LinearLayout(this).apply { gravity = Gravity.CENTER; setPadding(0, dp(12), 0, dp(4)) }
-        actions.addView(tile("phone", "Voice") { act("voice") }, LinearLayout.LayoutParams(0, dp(80), 1f).apply { marginEnd = dp(10) })
-        actions.addView(tile("video", "Video") { act("video") }, LinearLayout.LayoutParams(0, dp(80), 1f).apply { marginEnd = dp(10) })
-        actions.addView(tile("search", "Search") { act("search") }, LinearLayout.LayoutParams(0, dp(80), 1f))
+        actions.addView(tile("phone", "Voice") { act("voice") }, LinearLayout.LayoutParams(0, dp(72), 1f).apply { marginEnd = dp(10) })
+        actions.addView(tile("video", "Video") { act("video") }, LinearLayout.LayoutParams(0, dp(72), 1f).apply { marginEnd = dp(10) })
+        actions.addView(tile("search", "Search") { act("search") }, LinearLayout.LayoutParams(0, dp(72), 1f))
         body.addView(actions, LinearLayout.LayoutParams(-1, -2))
 
         mediaBox = group(); body.addView(mediaBox, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
@@ -109,12 +109,15 @@ class ContactProfileActivity : ThemedActivity() {
     }
     private fun divider(parent: LinearLayout) = parent.addView(View(this).apply { setBackgroundColor(AppTheme.line(this@ContactProfileActivity)) },
         LinearLayout.LayoutParams(-1, dp(1)).apply { marginStart = dp(64) })
+    /** WhatsApp-style action: a light outlined tile, the icon in the theme colour and its name centred underneath. */
     private fun tile(icon: String, label: String, run: () -> Unit) = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; isFocusable = true; contentDescription = label
-        background = RabtaUi.ripple(this@ContactProfileActivity, AppTheme.surface(this@ContactProfileActivity), 18); setOnClickListener { run() }
-        addView(UiIcons.image(this@ContactProfileActivity, icon, AppTheme.accent(this@ContactProfileActivity), 26, label).apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO },
-            LinearLayout.LayoutParams(dp(30), dp(30)).apply { gravity = Gravity.CENTER_HORIZONTAL })
-        addView(RabtaUi.text(this@ContactProfileActivity, label, 13f, true).apply { gravity = Gravity.CENTER; setPadding(0, dp(6), 0, 0); importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO },
+        background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf((AppTheme.accent(this@ContactProfileActivity) and 0x00FFFFFF) or 0x33000000),
+            RabtaUi.shape(this@ContactProfileActivity, Color.TRANSPARENT, 16, AppTheme.line(this@ContactProfileActivity)), RabtaUi.shape(this@ContactProfileActivity, Color.WHITE, 16))
+        setPadding(0, dp(10), 0, dp(10)); setOnClickListener { run() }
+        addView(UiIcons.image(this@ContactProfileActivity, icon, AppTheme.accent(this@ContactProfileActivity), 24, label).apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO },
+            LinearLayout.LayoutParams(dp(28), dp(28)).apply { gravity = Gravity.CENTER_HORIZONTAL })
+        addView(RabtaUi.text(this@ContactProfileActivity, label, 13f, false).apply { gravity = Gravity.CENTER; setPadding(0, dp(4), 0, 0); importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO },
             LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.CENTER_HORIZONTAL })
     }
     private fun row(parent: LinearLayout, icon: String, iconColor: Int, title: String, detail: String?, titleColor: Int = AppTheme.text(this), run: () -> Unit): LinearLayout {

@@ -115,6 +115,8 @@ class EmojiPanel(
         isFocusable = true; background = RabtaUi.ripple(a, Color.TRANSPARENT, 999); setOnClickListener { run() }
     }
 
+    /** 0 Emoji, 1 GIF, 2 Stickers. */
+    fun showTab(index: Int) { stopSearch(); select(index) }
     private fun select(index: Int) {
         tab = index
         for (i in 0 until tabs.childCount) tabs.getChildAt(i).let { v ->

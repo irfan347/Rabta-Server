@@ -32,8 +32,7 @@ import java.util.concurrent.Executors
  * It only picks; StatusActivity still chooses the audience and uploads. Returns "kind" (text, image, video) and a Uri.
  */
 class AddStatusActivity : ThemedActivity() {
-    private data class Media(val uri: Uri, val video: Boolean, val durationMs: Long)
-    private val media = mutableListOf<Media>()
+    private val media = mutableListOf<RecentMedia.Item>()
     private val thumbs = LruCache<Uri, Bitmap>(120)
     private val loader = Executors.newFixedThreadPool(2)
     private lateinit var grid: GridView
@@ -78,7 +77,7 @@ class AddStatusActivity : ThemedActivity() {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(dp(24), dp(24), dp(24), dp(24)); visibility = View.GONE
             addView(RabtaUi.text(this@AddStatusActivity, "Show your recent photos and videos here", 15f, true).apply { gravity = Gravity.CENTER })
             addView(RabtaUi.text(this@AddStatusActivity, "Rabta reads them only to show this list. Nothing is shared until you pick one and choose who sees it.", 13f, color = AppTheme.sub(this@AddStatusActivity)).apply { gravity = Gravity.CENTER; setPadding(0, dp(6), 0, dp(14)) })
-            addView(RabtaUi.button(this@AddStatusActivity, "Allow access", true) { requestPermissions(mediaPermissions(), PERMISSION) }.apply { gravity = Gravity.CENTER })
+            addView(RabtaUi.button(this@AddStatusActivity, "Allow access", true) { requestPermissions(RecentMedia.permissions(), PERMISSION) }.apply { gravity = Gravity.CENTER })
         }
         body.addView(access, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
         root.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -104,32 +103,11 @@ class AddStatusActivity : ThemedActivity() {
         })
     }
 
-    private fun mediaPermissions() = when {
-        Build.VERSION.SDK_INT >= 34 -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
-        Build.VERSION.SDK_INT >= 33 -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
-        else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
-    }
-    /** Full access, or (Android 14) the photos the user selected. */
-    private fun hasMediaAccess() = mediaPermissions().any { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
-
     private fun loadMedia() {
-        if (!hasMediaAccess()) { access.visibility = View.VISIBLE; return }
+        if (!RecentMedia.hasAccess(this)) { access.visibility = View.VISIBLE; return }
         access.visibility = View.GONE
         loader.execute {
-            val found = mutableListOf<Media>()
-            runCatching {
-                val files = MediaStore.Files.getContentUri("external")
-                val type = MediaStore.Files.FileColumns.MEDIA_TYPE
-                contentResolver.query(files, arrayOf(MediaStore.Files.FileColumns._ID, type, "duration"),
-                    "$type=? OR $type=?", arrayOf(MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE.toString(), MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO.toString()),
-                    "${MediaStore.Files.FileColumns.DATE_ADDED} DESC")?.use { c ->
-                    while (c.moveToNext() && found.size < 300) {
-                        val video = c.getInt(1) == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO
-                        val base = if (video) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-                        found += Media(ContentUris.withAppendedId(base, c.getLong(0)), video, if (c.isNull(2)) 0 else c.getLong(2))
-                    }
-                }
-            }
+            val found = RecentMedia.query(this)
             runOnUiThread {
                 if (isDestroyed) return@runOnUiThread
                 media.clear(); media += found; (grid.adapter as BaseAdapter).notifyDataSetChanged()
@@ -163,26 +141,19 @@ class AddStatusActivity : ThemedActivity() {
             }
             val item = media[position - 1]
             cell.setBackgroundColor(AppTheme.raised(this@AddStatusActivity)); label.visibility = View.GONE
-            cell.contentDescription = if (item.video) "Video ${duration(item.durationMs)}" else "Photo"
-            badge.text = if (item.video) "▶ ${duration(item.durationMs)}" else ""
+            cell.contentDescription = if (item.video) "Video ${RecentMedia.duration(item.durationMs)}" else "Photo"
+            badge.text = if (item.video) "▶ ${RecentMedia.duration(item.durationMs)}" else ""
             image.tag = item.uri
             val cached = thumbs.get(item.uri)
             image.setImageBitmap(cached)
             if (cached == null) loader.execute {
-                val bmp = runCatching { thumbnail(item) }.getOrNull() ?: return@execute
+                val bmp = RecentMedia.thumbnail(this@AddStatusActivity, item) ?: return@execute
                 thumbs.put(item.uri, bmp)
                 runOnUiThread { if (image.tag == item.uri) image.setImageBitmap(bmp) }
             }
             return cell
         }
     }
-
-    @Suppress("DEPRECATION")
-    private fun thumbnail(item: Media): Bitmap? = if (Build.VERSION.SDK_INT >= 29) contentResolver.loadThumbnail(item.uri, android.util.Size(256, 256), null)
-        else if (item.video) MediaStore.Video.Thumbnails.getThumbnail(contentResolver, ContentUris.parseId(item.uri), MediaStore.Video.Thumbnails.MINI_KIND, null)
-        else MediaStore.Images.Thumbnails.getThumbnail(contentResolver, ContentUris.parseId(item.uri), MediaStore.Images.Thumbnails.MINI_KIND, null)
-
-    private fun duration(ms: Long): String { val s = ms / 1000; return "${s / 60}:${(s % 60).toString().padStart(2, '0')}" }
 
     private fun camera() {
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) { requestPermissions(arrayOf(Manifest.permission.CAMERA), CAMERA_PERMISSION); return }

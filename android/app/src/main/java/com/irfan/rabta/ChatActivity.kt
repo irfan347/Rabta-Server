@@ -690,7 +690,11 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
                 else runCatching { iv.setImageURI(android.net.Uri.fromFile(Attachments.file(this,m.body))) }
                 bubble.addView(iv,LinearLayout.LayoutParams(dp(150),dp(150)))
             }
-            else -> { bubble.addView(InlineMetaLayout(this,textLine(m.body),msgFooter(m)));timeInline=true }
+            else -> {
+                val card=if(m.msgType=="text") contactCard.matchEntire(m.body) else null
+                if(card!=null) bubble.addView(contactView(card.groupValues[1],card.groupValues[2]),LinearLayout.LayoutParams(dp(250),-2))
+                else { bubble.addView(InlineMetaLayout(this,textLine(m.body),msgFooter(m)));timeInline=true }
+            }
         }
         if(!timeInline) bubble.addView(msgFooter(m),LinearLayout.LayoutParams(-2,-2).apply { gravity=Gravity.END;topMargin=dp(4) })
         val reactions=runCatching { org.json.JSONObject(meta.second) }.getOrDefault(org.json.JSONObject())
@@ -766,8 +770,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         return true
     }
 
-    // Preview the compressed image that will actually be sent.
-    private fun pickImage() { startActivityForResult(Intent(Intent.ACTION_GET_CONTENT).apply { type="image/*"; addCategory(Intent.CATEGORY_OPENABLE) },101) }
+    // Results from the pickers, camera and Contact info.
     override fun onActivityResult(req:Int,res:Int,data:Intent?) {
         super.onActivityResult(req,res,data)
         if(res!=RESULT_OK) return
@@ -776,12 +779,11 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             when(data?.getStringExtra("action")) { "voice"->startCall(true);"video"->startVideoCall();"search"->openSearch() }
             return
         }
-        if(req==102) {
+        if(req==102) { data?.data?.let { sendVideoFrom(it) };return }
+        if(req==106) {
+            // Gallery: photos and videos from the system picker.
             val uri=data?.data ?: return
-            VideoCompressor.prepareWithDialog(this,uri,null) { body ->
-                android.app.AlertDialog.Builder(this).setTitle("Send ${Attachments.name(body)}?").setMessage("${Attachments.details(body)} · $peerName").setOnCancelListener { Attachments.discard(this,body) }
-                    .setNegativeButton("Cancel") { _,_ -> Attachments.discard(this,body) }.setPositiveButton("Send") { _,_ -> sendContent(body,"video") }.show()
-            }
+            if(contentResolver.getType(uri)?.startsWith("video/")==true) sendVideoFrom(uri) else sendPhotoFrom(uri)
             return
         }
         if(req in 102..104) {
@@ -799,6 +801,16 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         }
         if(req!=101&&req!=105) return
         val uri=(if(req==105) captureUri else data?.data) ?: return
+        sendPhotoFrom(uri)
+    }
+    private fun sendVideoFrom(uri:android.net.Uri) {
+        VideoCompressor.prepareWithDialog(this,uri,null) { body ->
+            android.app.AlertDialog.Builder(this).setTitle("Send ${Attachments.name(body)}?").setMessage("${Attachments.details(body)} · $peerName").setOnCancelListener { Attachments.discard(this,body) }
+                .setNegativeButton("Cancel") { _,_ -> Attachments.discard(this,body) }.setPositiveButton("Send") { _,_ -> sendContent(body,"video") }.show()
+        }
+    }
+    /** Shows the compressed photo that will actually be sent, then sends it. */
+    private fun sendPhotoFrom(uri:android.net.Uri) {
         toast("Photo load ho rahi hai…")
         Thread {
             val body=MediaHelper.imageToBase64(this,uri)
@@ -816,14 +828,46 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     private fun pickAttachment(mime:String,request:Int) {
         startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply { type=mime; addCategory(Intent.CATEGORY_OPENABLE) },request)
     }
+    private var attachSheet:AttachSheet?=null
+    /** WhatsApp-style sheet: Gallery, Camera, Contact, Document, Stickers (Location, Poll, Event marked Soon) and recent media. */
     private fun showAttachments() {
-        RabtaUi.sheet(this,"Share with $peerName",listOf(
-            RabtaUi.SheetAction("Photo") { pickImage() },
-            RabtaUi.SheetAction("Video","Large videos are compressed on this phone") { pickAttachment("video/*",102) },
-            RabtaUi.SheetAction("Document / file","Up to 8 MB") { pickAttachment("*/*",103) },
-            RabtaUi.SheetAction("Stickers") { Stickers.picker(this,{sendContent(it,"sticker")},{pickAttachment("image/*",104)}) },
-            RabtaUi.SheetAction("Offline security") { MeshSecurity.showContact(this,peerId) }
-        ))
+        attachSheet=AttachSheet(this,"Share with $peerName",
+            gallery={ startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*").putExtra(Intent.EXTRA_MIME_TYPES,arrayOf("image/*","video/*")),106) },
+            camera={ takePhoto() },
+            document={ pickAttachment("*/*",103) },
+            contact={ shareContact() },
+            stickers={ showPanel();emojiPanel?.showTab(2) },
+            pick={ item -> if(item.video) sendVideoFrom(item.uri) else sendPhotoFrom(item.uri) },
+            requestAccess={ ActivityCompat.requestPermissions(this,RecentMedia.permissions(),96) }
+        ).also { it.show() }
+    }
+    /** Sends a Rabta contact as a readable message; Rabta shows it as a card with a Message button. */
+    private fun shareContact() {
+        val contacts=db.conversations().filter { !it.isGroup&&it.peerId!=peerId&&!Privacy.blocked(this,it.peerId)&&Regex("[0-9A-F]{12}").matches(it.peerId) }
+        if(contacts.isEmpty()) { toast("No other contacts to share yet");return }
+        android.app.AlertDialog.Builder(this).setTitle("Share a contact").setItems(contacts.map { it.peerName }.toTypedArray()) { _,i ->
+            val c=contacts[i]
+            sendContent("👤 ${c.peerName.replace('\n',' ').take(60)}\nRabta ID: ${c.peerId}","text")
+        }.setNegativeButton("Cancel",null).show()
+    }
+    private val contactCard=Regex("^👤 (.{1,60})\nRabta ID: ([0-9A-F]{12})$")
+    private fun contactView(name:String,id:String)=LinearLayout(this).apply {
+        orientation=LinearLayout.VERTICAL;contentDescription="Contact $name, Rabta ID $id"
+        val top=LinearLayout(this@ChatActivity).apply { gravity=Gravity.CENTER_VERTICAL;setPadding(0,dp(2),0,dp(8)) }
+        top.addView(StatusPost.avatar(this@ChatActivity,id,name,44),LinearLayout.LayoutParams(dp(44),dp(44)).apply { marginEnd=dp(12) })
+        val texts=LinearLayout(this@ChatActivity).apply { orientation=LinearLayout.VERTICAL }
+        texts.addView(RabtaUi.text(this@ChatActivity,name,16f,true).apply { maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END })
+        texts.addView(RabtaUi.text(this@ChatActivity,"Rabta ID · $id",12f,color=SUB))
+        top.addView(texts,LinearLayout.LayoutParams(0,-2,1f))
+        addView(top)
+        addView(View(this@ChatActivity).apply { setBackgroundColor(AppTheme.line(this@ChatActivity)) },LinearLayout.LayoutParams(-1,dp(1)))
+        addView(RabtaUi.text(this@ChatActivity,"Message",15f,true,GREEN).apply {
+            gravity=Gravity.CENTER;minHeight=dp(44);isFocusable=true;background=RabtaUi.ripple(this@ChatActivity,Color.TRANSPARENT,12)
+            setOnClickListener {
+                if(id==Session.id) toast("This is your own Rabta ID")
+                else startActivity(Intent(this@ChatActivity,ChatActivity::class.java).putExtra("peerId",id).putExtra("peerName",name))
+            }
+        },LinearLayout.LayoutParams(-1,-2))
     }
 
     private fun startVoiceRecord() {
@@ -943,7 +987,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
 
     override fun onRequestPermissionsResult(r:Int, p:Array<out String>, g:IntArray) {
         val ok = g.isNotEmpty()&&g[0]==PackageManager.PERMISSION_GRANTED
-        when(r) { 99->if(ok) startCall(pendingInitiate) else toast("Mic permission chahiye"); 98->if(ok) toast("Ab mic button hold karein"); 97->if(ok) takePhoto() else toast("Camera permission is needed to take a photo") }
+        when(r) { 99->if(ok) startCall(pendingInitiate) else toast("Mic permission chahiye"); 98->if(ok) toast("Ab mic button hold karein"); 97->if(ok) takePhoto() else toast("Camera permission is needed to take a photo"); 96->attachSheet?.reload() }
     }
 
     // ── RabtaEvents ──

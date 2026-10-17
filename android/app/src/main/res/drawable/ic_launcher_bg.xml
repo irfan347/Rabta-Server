@@ -1,13 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- NOVA navy with a quiet lime orbit arc and the violet orbit dot, all inside the visible area. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt"
-    android:width="108dp" android:height="108dp" android:viewportWidth="512" android:viewportHeight="512">
-    <path android:pathData="M0,0 H512 V512 H0 Z">
-        <aapt:attr name="android:fillColor">
-            <gradient android:type="radial" android:centerX="194.6" android:centerY="112.6" android:gradientRadius="486.4">
-                <item android:offset="0" android:color="#FF182E2C" />
-                <item android:offset="0.5" android:color="#FF0B1821" />
-                <item android:offset="1" android:color="#FF080D14" />
-            </gradient>
-        </aapt:attr>
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <path android:pathData="M0,0 H108 V108 H0 Z">
+        <aapt:attr name="android:fillColor"><gradient android:type="radial" android:centerX="41" android:centerY="24" android:gradientRadius="100"><item android:offset="0" android:color="#FF182E2C"/><item android:offset="0.5" android:color="#FF0B1821"/><item android:offset="1" android:color="#FF080D14"/></gradient></aapt:attr>
     </path>
+    <path android:pathData="M24.87,43.40 A31,31 0 0 1 44.42,24.52" android:strokeColor="#52BFFF76" android:strokeWidth="1.1" android:strokeLineCap="round" />
+    <path android:pathData="M74.94,33.26 A2.1,2.1 0 1 1 79.14,33.26 A2.1,2.1 0 1 1 74.94,33.26 Z" android:fillColor="#FFA997FF" />
 </vector>

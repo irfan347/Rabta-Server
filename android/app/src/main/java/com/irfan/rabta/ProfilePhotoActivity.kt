@@ -28,6 +28,24 @@ object ProfilePhoto {
 
     fun current(): Bitmap? = Session.profilePic.takeIf { it.isNotEmpty() }?.let { MediaHelper.base64ToBitmap(it) }
 
+    private var lastRestore = 0L
+    /**
+     * Signing out clears this phone's copy of your photo, but the server keeps it. When the phone has none,
+     * fetch it back (at most every 20 s, so a sleeping server is retried without hammering it). Main thread.
+     */
+    fun restore(done: () -> Unit) {
+        if (!Session.loggedIn || Session.profilePic.isNotEmpty()) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastRestore < 20_000) return
+        lastRestore = now
+        val owner = Session.id
+        WsClient.fetchPhoto(Session.serverUrl, Session.token, owner) { b64 ->
+            if (b64.isNullOrEmpty() || Session.id != owner || Session.profilePic.isNotEmpty()) return@fetchPhoto
+            val bitmap = MediaHelper.base64ToBitmap(b64) ?: return@fetchPhoto
+            Session.profilePic = b64; ProfileHelper.set(owner, bitmap); done()
+        }
+    }
+
     /** Opens the picked photo in the circle crop, then saves the result. */
     fun cropAndSave(a: Activity, uri: Uri, decoded: () -> Unit = {}, done: () -> Unit) {
         Thread {
@@ -125,6 +143,7 @@ class ProfilePhotoActivity : ThemedActivity() {
     }
 
     private fun show() {
+        if (own) ProfilePhoto.restore { if (!isDestroyed) show() }
         val bitmap = if (own) ProfilePhoto.current() else ProfileHelper.get(peerId)
         photo.setImageBitmap(bitmap)
         empty.visibility = if (bitmap == null) View.VISIBLE else View.GONE
