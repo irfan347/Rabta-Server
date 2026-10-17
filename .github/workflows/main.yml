@@ -147,7 +147,7 @@ jobs:
       - name: Build and test APK
         env:
           ANDROID_PROJECT_DIR: ${{ steps.project.outputs.directory }}
-        run: gradle --project-dir "$ANDROID_PROJECT_DIR" :app:testDebugUnitTest :app:assembleDebug --no-daemon --stacktrace
+        run: gradle --project-dir "$ANDROID_PROJECT_DIR" :app:testDebugUnitTest :app:assembleDebug :app:assembleTesting --no-daemon --stacktrace
       - name: Record QR regression failure
         if: failure()
         run: |
@@ -194,6 +194,36 @@ jobs:
             ${{ steps.project.outputs.directory }}/app/build/outputs/apk/debug/*.apk
             ${{ steps.project.outputs.directory }}/app/build/outputs/apk/debug/APK-VERIFICATION.txt
           if-no-files-found: error
+      - name: Verify isolated device-test APK
+        env:
+          ANDROID_PROJECT_DIR: ${{ steps.project.outputs.directory }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="$ANDROID_PROJECT_DIR/app/build/outputs/apk/testing/app-testing.apk"
+          test -s "$apk"
+          tools="$ANDROID_HOME/build-tools/34.0.0"
+          "$tools/apksigner" verify --verbose --print-certs "$apk" > "$apk.signature.txt"
+          "$tools/aapt" dump badging "$apk" > "$apk.badging.txt"
+          grep -q "package: name='com.irfan.rabta.testing'" "$apk.badging.txt"
+          grep -q "application-label:'Rabta Test'" "$apk.badging.txt"
+          grep -q "application-debuggable" "$apk.badging.txt"
+          {
+            echo "Source commit: ${{ github.sha }}"
+            sha256sum "$apk"
+            stat --format='APK bytes: %s' "$apk"
+            cat "$apk.signature.txt"
+            cat "$apk.badging.txt"
+          } > "$ANDROID_PROJECT_DIR/app/build/outputs/apk/testing/APK-VERIFICATION.txt"
+          cat "$ANDROID_PROJECT_DIR/app/build/outputs/apk/testing/APK-VERIFICATION.txt"
+      - name: Upload isolated device-test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rabta-device-test-apk
+          path: |
+            ${{ steps.project.outputs.directory }}/app/build/outputs/apk/testing/*.apk
+            ${{ steps.project.outputs.directory }}/app/build/outputs/apk/testing/APK-VERIFICATION.txt
+          if-no-files-found: error
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -231,6 +261,19 @@ jobs:
           profile: pixel_2
           disable-animations: true
           script: |
+            gradle --project-dir android :app:assembleDebug :app:assembleTesting --no-daemon
+            adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+            adb shell run-as com.irfan.rabta mkdir -p files
+            adb shell run-as com.irfan.rabta touch files/rabta-ci-preservation-check
+            adb install -r android/app/build/outputs/apk/testing/app-testing.apk
+            adb shell pm path com.irfan.rabta
+            adb shell pm path com.irfan.rabta.testing
+            adb shell am start -W -n com.irfan.rabta.testing/com.irfan.rabta.AuthActivity
+            adb shell pidof com.irfan.rabta.testing
+            adb shell am force-stop com.irfan.rabta.testing
+            adb shell run-as com.irfan.rabta ls files/rabta-ci-preservation-check
+            bash -c 'if adb shell run-as com.irfan.rabta.testing ls files/rabta-ci-preservation-check >/dev/null 2>&1; then echo "Test package unexpectedly sees original private fixture"; exit 1; fi'
+            adb shell run-as com.irfan.rabta rm files/rabta-ci-preservation-check
             bash -c 'result=0; gradle --project-dir android :app:connectedDebugAndroidTest --no-daemon || result=$?; adb pull /sdcard/Download/rabta-interface interface-screenshots || true; exit "$result"'
       - name: Upload interface screenshots
         if: always()

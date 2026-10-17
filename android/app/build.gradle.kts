@@ -11,8 +11,21 @@ android {
         targetSdk = 34
         versionCode = 33
         versionName = "1.9.1"
+        manifestPlaceholders["appLabel"] = "Rabta"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
+    buildTypes {
+        create("testing") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".testing"
+            versionNameSuffix = "-test"
+            manifestPlaceholders["appLabel"] = "Rabta Test"
+            matchingFallbacks += listOf("debug")
+        }
+    }
+    // Reuse the existing debug network configuration for the isolated device-test build.
+    sourceSets.getByName("testing").manifest.srcFile("src/debug/AndroidManifest.xml")
+    sourceSets.getByName("testing").res.srcDir("src/debug/res")
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
