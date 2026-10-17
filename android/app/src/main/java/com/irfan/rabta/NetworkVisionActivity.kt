@@ -29,6 +29,9 @@ class NetworkVisionActivity:ThemedActivity() {
     private lateinit var next:TextView
     private lateinit var pageNumber:TextView
     private lateinit var graphTools:LinearLayout
+    private lateinit var zoomIn:TextView
+    private lateinit var zoomOut:TextView
+    private lateinit var reset:TextView
     private lateinit var peersHeading:TextView
     private lateinit var eventsHeading:TextView
     private var current=VisionState()
@@ -61,9 +64,9 @@ class NetworkVisionActivity:ThemedActivity() {
         body.addView(graph,LinearLayout.LayoutParams(-1,dp(300)).apply {topMargin=dp(16)})
         graphTools=LinearLayout(this).apply {gravity=Gravity.CENTER_VERTICAL}
         graphTools.addView(text("Network view",13f,color=AppTheme.sub(this@NetworkVisionActivity)),LinearLayout.LayoutParams(0,-2,1f))
-        graphTools.addView(RabtaUi.iconButton(this,"zoom_out","Zoom out") {graph.zoomBy(0.8f)})
-        graphTools.addView(RabtaUi.iconButton(this,"zoom_in","Zoom in") {graph.zoomBy(1.25f)})
-        graphTools.addView(RabtaUi.iconButton(this,"restore","Reset network view") {graph.resetViewport()})
+        zoomOut=RabtaUi.iconButton(this,"zoom_out","Zoom out") {graph.zoomBy(0.8f)};graphTools.addView(zoomOut)
+        zoomIn=RabtaUi.iconButton(this,"zoom_in","Zoom in") {graph.zoomBy(1.25f)};graphTools.addView(zoomIn)
+        reset=RabtaUi.iconButton(this,"restore","Reset network view") {graph.resetViewport()};graphTools.addView(reset)
         body.addView(graphTools)
         paging=LinearLayout(this).apply {gravity=Gravity.CENTER_VERTICAL}
         previous=RabtaUi.iconButton(this,"back","Previous peers") {graph.changePage(-1)}
@@ -129,6 +132,7 @@ class NetworkVisionActivity:ThemedActivity() {
     }
     private fun updatePaging() {
         if(!::paging.isInitialized)return
+        listOf(zoomIn to graph.canZoomIn(),zoomOut to graph.canZoomOut(),reset to graph.canResetViewport()).forEach {(view,enabled)->view.isEnabled=enabled;view.alpha=if(enabled)1f else 0.4f}
         paging.visibility=if(graph.pageCount()>1)View.VISIBLE else View.GONE
         pageNumber.text="Page ${graph.pageNumber()} of ${graph.pageCount().coerceAtLeast(1)}"
         previous.isEnabled=graph.pageNumber()>1;next.isEnabled=graph.pageNumber()<graph.pageCount()

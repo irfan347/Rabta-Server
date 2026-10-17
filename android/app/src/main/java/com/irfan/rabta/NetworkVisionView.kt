@@ -69,6 +69,9 @@ class NetworkVisionView(c:Context):View(c) {
         }
         schedule()
     }
+    fun canZoomIn()=zoom<3f
+    fun canZoomOut()=zoom>1f
+    fun canResetViewport()=zoom!=1f||panX!=0f||panY!=0f
     fun pageCount()=(state.peers.size+11)/12
     fun pageNumber()=page+1
     fun changePage(delta:Int) {

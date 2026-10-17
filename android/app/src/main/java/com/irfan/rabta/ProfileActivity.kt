@@ -106,7 +106,7 @@ class ProfileActivity : ThemedActivity() {
         val size = RabtaUi.dp(this, 104)
         return android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888).also { bitmap ->
             val canvas = android.graphics.Canvas(bitmap); val paint = android.graphics.Paint(3)
-            paint.color = AppTheme.accent(this); paint.textSize = size * .42f; paint.typeface = android.graphics.Typeface.create("sans-serif-medium", 0)
+            paint.color = AppTheme.accent(this); paint.textSize = size * .42f; paint.typeface = android.graphics.Typeface.create("sans-serif-medium",android.graphics.Typeface.NORMAL)
             val initial = Session.name.trim().split(Regex("\\s+")).mapNotNull { it.firstOrNull() }.take(2).joinToString("").ifBlank { "R" }.uppercase()
             val bounds = android.graphics.Rect(); paint.getTextBounds(initial, 0, initial.length, bounds)
             canvas.drawText(initial, (size - paint.measureText(initial)) / 2, (size - bounds.height()) / 2f - bounds.top, paint)

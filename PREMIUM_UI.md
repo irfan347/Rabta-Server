@@ -23,6 +23,8 @@ Local checks: 17 Python database/project tests passed; backend test files passed
 
 New tests exercise Nearby filtering against observed fixture peers, clear/back behavior, copyable profile identity and circular clipping, authenticated image previews, private status creation, cached-media denial after audience revocation, retry/expiry, and graph paging/keyboard selection. Existing call, conversation, authentication, QR/NFC, mesh and accessibility tests are retained. Fixtures and local test servers are isolated from production. Captures are actual emulator renders, labeled test data; they are not product mockups.
 
+Initial validation found existing lint errors in raw Toast/font constants, sticker tab IDs, a reserved notification importance, and implicit debug loopback domain matching. These receive focused fixes: named constants/resource IDs, supported HIGH call-channel importance with the existing channel ID, and explicit `includeSubdomains="false"`. No notification channel is deleted or recreated. Lint now fails CI on errors; findings are printed and reports uploaded.
+
 ## Existing blockers and device verification
 
 - The current server has no display-name/username edit API or profile-photo sync API. Name/username are shown as read-only with an explanation; changing the photo is explicitly local. Implementing server-wide editing would need a separate backend rollout and persistence check.

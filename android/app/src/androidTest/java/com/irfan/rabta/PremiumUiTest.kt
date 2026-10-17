@@ -79,7 +79,7 @@ class PremiumUiTest {
     }
     private fun capture(name:String) {
         inst.waitForIdleSync()
-        val dir=File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),"rabta-interface").apply {mkdirs()}
+        val dir=File(ctx.getExternalFilesDir(null),"premium-captures").apply {mkdirs()}
         val shot=inst.uiAutomation.takeScreenshot()?:return
         val scaled=Bitmap.createScaledBitmap(shot,360,(shot.height*360f/shot.width).toInt(),true)
         File(dir,"premium-$name.jpg").outputStream().use {scaled.compress(Bitmap.CompressFormat.JPEG,78,it)}
@@ -97,6 +97,9 @@ class PremiumUiTest {
             File(dir,"premium-review.jpg").writeBytes(bytes)
             File(dir,"premium-review.b64").writeText(android.util.Base64.encodeToString(bytes,android.util.Base64.NO_WRAP))
         }
+        // Use the instrumentation shell for export; production requests no broad storage permission.
+        val commands=listOf("mkdir -p /sdcard/Download/rabta-interface")+dir.listFiles().orEmpty().map {"cp ${it.absolutePath} /sdcard/Download/rabta-interface/${it.name}"}
+        commands.forEach {command->android.os.ParcelFileDescriptor.AutoCloseInputStream(inst.uiAutomation.executeShellCommand(command)).use {it.readBytes()}}
     }
     private fun fixture(run:(Db,String)->Unit) {
         val account=java.util.UUID.randomUUID().toString().replace("-","").take(12).uppercase()

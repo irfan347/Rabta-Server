@@ -226,7 +226,6 @@ jobs:
           if-no-files-found: error
       - name: Android lint
         id: lint
-        continue-on-error: true
         run: gradle --project-dir android :app:lintDebug --no-daemon --stacktrace
       - name: Summarize Android validation reports
         if: always()

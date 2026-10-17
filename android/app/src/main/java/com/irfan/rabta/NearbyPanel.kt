@@ -52,7 +52,7 @@ class NearbyPanel(private val activity:Activity) {
             contentDescription="Radar discoverability"
             setOnCheckedChangeListener { _,enabled ->
                 if(syncingDiscoverability)return@setOnCheckedChangeListener
-                if(!Session.loggedIn){isChecked=false;Toast.makeText(activity,"Sign in to use Radar",0).show();return@setOnCheckedChangeListener}
+                if(!Session.loggedIn){isChecked=false;Toast.makeText(activity,"Sign in to use Radar",Toast.LENGTH_SHORT).show();return@setOnCheckedChangeListener}
                 MeshBridge.setDiscoverable(activity,enabled);pendingOpen=null;rendered="";refresh()
                 if(enabled&&NearbySetup.problem(activity)!=null)guidance()
             }
@@ -89,7 +89,7 @@ class NearbyPanel(private val activity:Activity) {
         return false
     }
     private fun retry() {
-        if(!RadarPrefs.enabled(activity))Toast.makeText(activity,"Enable discoverability first",0).show()
+        if(!RadarPrefs.enabled(activity))Toast.makeText(activity,"Enable discoverability first",Toast.LENGTH_SHORT).show()
         else if(NearbySetup.problem(activity)!=null)guidance()
         else {MessageService.restartNearby(activity);rendered="";refresh()}
     }
@@ -170,7 +170,7 @@ class NearbyPanel(private val activity:Activity) {
                 card.addView(RabtaUi.button(activity,if(keyMatched)"Open private chat" else "Waiting for security verification",keyMatched) { if(keyMatched)openChat(peer) }.apply { isEnabled=keyMatched;alpha=if(keyMatched)1f else 0.55f })
             }
             else -> card.addView(RabtaUi.button(activity,if(now<peer.retryAt)"Request cooldown · try again shortly" else "Request connection",now>=peer.retryAt) {
-                if(MeshBridge.requestConnection(peer.endpoint))pendingOpen=peer.id else Toast.makeText(activity,"Request unavailable. Refresh Radar or wait for the cooldown.",0).show()
+                if(MeshBridge.requestConnection(peer.endpoint))pendingOpen=peer.id else Toast.makeText(activity,"Request unavailable. Refresh Radar or wait for the cooldown.",Toast.LENGTH_SHORT).show()
                 refresh()
             }.apply { isEnabled=now>=peer.retryAt;alpha=if(isEnabled)1f else 0.55f })
         }
@@ -216,7 +216,7 @@ class NearbyPanel(private val activity:Activity) {
             RabtaUi.SheetAction("Check Google Play services") {
                 com.google.android.gms.common.GoogleApiAvailability.getInstance().makeGooglePlayServicesAvailable(activity)
                     .addOnSuccessListener { MessageService.restartNearby(activity) }
-                    .addOnFailureListener { Toast.makeText(activity,"Update or enable Google Play services on this phone",1).show() }
+                    .addOnFailureListener { Toast.makeText(activity,"Update or enable Google Play services on this phone",Toast.LENGTH_LONG).show() }
             },
             RabtaUi.SheetAction("Retry connection") { WsClient.retry();retry() },
             RabtaUi.SheetAction("Connectivity diagnostics") {activity.startActivity(Intent(activity,ConnectivityDiagnosticsActivity::class.java))}
@@ -239,10 +239,10 @@ class NearbyPanel(private val activity:Activity) {
                 .setNegativeButton("Cancel",null).setPositiveButton("Add contact") { _,_ ->
                     if(MeshSecurity(activity,Session.id).pin(contact.first,contact.third)) {
                         Db.get(activity).upsertConversation(contact.first,contact.second,"",System.currentTimeMillis(),false)
-                        Toast.makeText(activity,"Contact added",0).show()
-                    } else Toast.makeText(activity,"Key differs from saved contact. Verify with the person; key was not replaced.",1).show()
+                        Toast.makeText(activity,"Contact added",Toast.LENGTH_SHORT).show()
+                    } else Toast.makeText(activity,"Key differs from saved contact. Verify with the person; key was not replaced.",Toast.LENGTH_LONG).show()
                 }.show()
-        }.onFailure { Toast.makeText(activity,"Invalid Rabta contact QR",1).show() }
+        }.onFailure { Toast.makeText(activity,"Invalid Rabta contact QR",Toast.LENGTH_LONG).show() }
         return true
     }
 }
