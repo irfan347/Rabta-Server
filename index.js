@@ -46,7 +46,7 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_rum_to ON ru_messages (to_id, delivered_at);
     CREATE TABLE IF NOT EXISTS rg_groups(id TEXT PRIMARY KEY, name TEXT, creator TEXT, members TEXT, created_at BIGINT);
   `);
-  const rows = (await pool.query('SELECT id,username,pass_hash,name FROM ru_users LIMIT 10000')).rows;
+  const rows = (await pool.query('SELECT id,username,pass_hash,name FROM ru_users')).rows;
   for (const r of rows) memUsers.set(r.id, r);
   for (const g of (await pool.query('SELECT * FROM rg_groups')).rows) groups.set(g.id, { ...g, members: new Set(g.members.split(',')) });
 }
@@ -88,9 +88,18 @@ app.post('/api/register', async (req, res) => {
   if (existing) return res.status(409).json({ error: 'Username already taken' });
   const id = crypto.randomBytes(6).toString('hex').toUpperCase();
   const user = { id, username, pass_hash: hashPin(pin), name, created_at: Date.now(), last_seen: Date.now() };
-  memUsers.set(id, user);
-  if (pool) await pool.query('INSERT INTO ru_users(id,username,pass_hash,name,created_at,last_seen) VALUES($1,$2,$3,$4,$5,$6)',
-    [id, username, user.pass_hash, name, user.created_at, user.last_seen]).catch(() => {});
+  memUsers.set(id, user); // reserves the username while the insert is in flight
+  if (pool) {
+    try {
+      await pool.query('INSERT INTO ru_users(id,username,pass_hash,name,created_at,last_seen) VALUES($1,$2,$3,$4,$5,$6)',
+        [id, username, user.pass_hash, name, user.created_at, user.last_seen]);
+    } catch (e) {
+      memUsers.delete(id);
+      if (e.code === '23505') return res.status(409).json({ error: 'Username already taken' });
+      console.error('Account storage failed:', e.message);
+      return res.status(503).json({ error: 'Account could not be saved, please try again' });
+    }
+  }
   res.json({ id, username, name, token: makeToken(id) });
 });
 
@@ -131,6 +140,14 @@ const voiceCalls = new Map();
 const groups = new Map();  // groupId -> {id,name,creator,members:Set}
 
 function sendTo(id, payload) { const socket=online.get(id); if(socket?.readyState===1) socket.send(JSON.stringify(payload)); }
+// Resolves true once the frame is written to the socket, false if the socket is gone or the write failed.
+// This is a transport write, not a recipient receipt; clients ignore duplicate message IDs on redelivery.
+function sendFrame(socket, payload) {
+  return new Promise(resolve => {
+    if (socket?.readyState !== 1) return resolve(false);
+    try { socket.send(JSON.stringify(payload), err => resolve(!err)); } catch (_) { resolve(false); }
+  });
+}
 function callState(call,state) { sendTo(call.from,{type:'call_state',from:call.to,callId:call.id,state}); }
 function endCall(call) {
   clearTimeout(call.timer);
@@ -157,19 +174,25 @@ function participantCall(msg,userId) {
   return call && ((call.from===userId&&call.to===msg.to)||(call.to===userId&&call.from===msg.to)) ? call : null;
 }
 
+const PENDING_BATCH = 200;
+// Drains the whole backlog in batches; a row is marked delivered only after its frame was written,
+// so a dropped connection leaves the rest pending for the next connection.
 async function deliverPending(userId, ws) {
-  let msgs;
-  if (pool) {
-    const r = await pool.query('SELECT * FROM ru_messages WHERE to_id=$1 AND delivered_at IS NULL ORDER BY sent_at ASC LIMIT 200', [userId]);
-    msgs = r.rows;
-    if (msgs.length) await pool.query('UPDATE ru_messages SET delivered_at=$1 WHERE id=ANY($2::int[])', [Date.now(), msgs.map(m => m.id)]);
-  } else {
-    msgs = memMessages.filter(m => m.to_id === userId && !m.delivered_at);
-    msgs.forEach(m => { m.delivered_at = Date.now(); });
-  }
-  for (const m of msgs) {
-    if(features.blocked(m.from_id,userId)) continue;
-    ws.send(JSON.stringify({ type: m.group_id ? 'group_msg' : 'msg', groupId: m.group_id || '', groupName: m.group_name || '', id: m.msg_id, from: m.from_id, fromName: m.from_name, body: m.body, msgType: m.type || 'text', t: Number(m.sent_at), offline: true }));
+  let after = 0;
+  for (;;) {
+    const msgs = pool
+      ? (await pool.query('SELECT * FROM ru_messages WHERE to_id=$1 AND delivered_at IS NULL AND id>$2 ORDER BY id ASC LIMIT ' + PENDING_BATCH, [userId, after])).rows
+      : memMessages.filter(m => m.to_id === userId && !m.delivered_at && m.id > after).slice(0, PENDING_BATCH);
+    if (!msgs.length) return;
+    after = msgs[msgs.length - 1].id;
+    const written = await Promise.all(msgs.map(m => features.blocked(m.from_id, userId) ? true : // blocked senders are dropped, as before
+      sendFrame(ws, { type: m.group_id ? 'group_msg' : 'msg', groupId: m.group_id || '', groupName: m.group_name || '', id: m.msg_id, from: m.from_id, fromName: m.from_name, body: m.body, msgType: m.type || 'text', t: Number(m.sent_at), offline: true })));
+    const done = msgs.filter((_, i) => written[i]);
+    if (done.length) {
+      if (pool) await pool.query('UPDATE ru_messages SET delivered_at=$1 WHERE id=ANY($2::int[])', [Date.now(), done.map(m => m.id)]);
+      else done.forEach(m => { m.delivered_at = Date.now(); });
+    }
+    if (done.length < msgs.length || msgs.length < PENDING_BATCH) return;
   }
 }
 
@@ -201,7 +224,7 @@ wss.on('connection', (ws, req) => {
   updateLastSeen(userId);
 
   ws.send(JSON.stringify({ type: 'ready', id: userId, name: user.name, protocol: 2 }));
-  deliverPending(userId, ws).catch(() => {});
+  deliverPending(userId, ws).catch(e => console.error('Offline delivery failed:', e.message));
   for(const call of [...voiceCalls.values(),...videoCalls.values()]) if(call.to===userId) deliverCall(call);
 
   ws.on('message', async (raw) => {
@@ -223,9 +246,7 @@ wss.on('connection', (ws, req) => {
       if(features.blocked(userId,to)){ws.send(JSON.stringify({type:"ack",id:msgId,status:"error"}));return;}
       try { await features.grant(body,userId,to); } catch(_) { ws.send(JSON.stringify({type:"ack",id:msgId,status:"error"}));return; }
       const sentAt = Number(t) || Date.now();
-      const recipient = online.get(to);
-      if (recipient && recipient.readyState === 1) {
-        recipient.send(JSON.stringify({ type: 'msg', id: msgId, from: userId, fromName: user.name, body, msgType, t: sentAt }));
+      if (await sendFrame(online.get(to), { type: 'msg', id: msgId, from: userId, fromName: user.name, body, msgType, t: sentAt })) {
         ws.send(JSON.stringify({ type: 'ack', id: msgId, status: 'delivered' }));
       } else {
         try { await storeMessage(userId, user.name, to, msgId, body, msgType, sentAt); } catch (_) { ws.send(JSON.stringify({type:'ack',id:msgId,status:'error'})); return; }
@@ -270,9 +291,7 @@ wss.on('connection', (ws, req) => {
       for (const mid of g.members) {
         if (mid===userId || features.blocked(userId,mid)) continue;
         try { await features.grant(msg.body,userId,mid); } catch(_) { ws.send(JSON.stringify({type:"ack",id:msg.id,status:"error"}));return; }
-        const r = online.get(mid);
-        if (r && r.readyState===1) r.send(JSON.stringify(out));
-        else { try { await storeMessage(userId, user.name, mid, msg.id, msg.body, msg.msgType||'text', now, g.id, g.name); } catch (_) { ws.send(JSON.stringify({type:'ack',id:msg.id,status:'error'})); return; } }
+        if (!(await sendFrame(online.get(mid), out))) { try { await storeMessage(userId, user.name, mid, msg.id, msg.body, msg.msgType||'text', now, g.id, g.name); } catch (_) { ws.send(JSON.stringify({type:'ack',id:msg.id,status:'error'})); return; } }
       }
       ws.send(JSON.stringify({ type:'ack', id:msg.id, status:'sent' }));
     } else if (msg.type === 'ping') {
@@ -292,9 +311,17 @@ app.post('/api/groups', async (req, res) => {
   const raw = Array.isArray(req.body?.members) ? req.body.members : [];
   const members = new Set([creator, ...raw.filter(m => memUsers.has(m)).slice(0,49)]);
   const id = require('crypto').randomBytes(6).toString('hex').toUpperCase();
-  groups.set(id, { id, name, creator, members, created_at: Date.now() });
-  if (pool) await pool.query('INSERT INTO rg_groups(id,name,creator,members,created_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT(id) DO NOTHING',
-    [id, name, creator, [...members].join(','), Date.now()]).catch(()=>{});
+  const created_at = Date.now();
+  if (pool) {
+    try {
+      await pool.query('INSERT INTO rg_groups(id,name,creator,members,created_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT(id) DO NOTHING',
+        [id, name, creator, [...members].join(','), created_at]);
+    } catch (e) {
+      console.error('Group storage failed:', e.message);
+      return res.status(503).json({ error: 'Group could not be saved, please try again' });
+    }
+  }
+  groups.set(id, { id, name, creator, members, created_at });
   const payload = JSON.stringify({ type:'group_created', group:{ id, name, members:[...members] } });
   for (const mid of members) { const w = online.get(mid); if (w && w.readyState===1) w.send(payload); }
   res.json({ id, name, members:[...members] });

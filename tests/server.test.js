@@ -10,13 +10,14 @@ async function fixture(database=false) {
   const app={use(){},post(p,f){routes.set('POST '+p,f)},get(p,f){routes.set('GET '+p,f)},delete(p,f){routes.set('DELETE '+p,f)}};
   const express=()=>app; express.json=()=>()=>{};
   class WebSocketServer { on(event,cb){if(event==='connection')connect=cb;} }
-  class Pool { async query(sql,args){ queries.push([sql,args]); return {rows:[]}; } }
+  let failing=null,responder=null; // SQL that should throw / custom rows, for storage tests
+  class Pool { async query(sql,args){ queries.push([sql,args]); if(failing?.test(sql)) throw new Error('db unavailable'); return {rows:responder?.(sql,args)||[]}; } }
   const context=vm.createContext({require(name){if(name==='./features')return require('../features');if(name==='express')return express;if(name==='ws')return {WebSocketServer};if(name==='http')return {createServer(){return {listen(){}}}};if(name==='pg')return {Pool};return require(name)},setTimeout,clearTimeout,process:{env:database?{DATABASE_URL:'test'}:{}},console,Buffer,URL});
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../index.js'),'utf8'),context);
   const register=async name=>{let value;await routes.get('POST /api/register')({body:{username:name,pin:'123456',name}},{json(v){value=v},status(){return this}});return value;};
   const alice=await register('alice'),bob=await register('bob'),eve=await register('eve');
-  function socket(user){const handlers={},messages=[];const ws={readyState:1,send(s){messages.push(JSON.parse(s))},close(){this.readyState=3;handlers.close?.()},on(e,f){handlers[e]=f}};connect(ws,{headers:{authorization:'Bearer '+user.token},url:'/ws'});return {messages,send:async m=>handlers.message(Buffer.from(JSON.stringify(m))),ws};}
-  return {socket,alice,bob,eve,queries,routes,expire:()=>{for(const t of [...timers])t.fn();}};
+  function socket(user,{broken=false}={}){const handlers={},messages=[];const ws={readyState:1,send(s,cb){if(broken)return cb?.(new Error('socket write failed'));messages.push(JSON.parse(s));cb?.()},close(){this.readyState=3;handlers.close?.()},on(e,f){handlers[e]=f}};connect(ws,{headers:{authorization:'Bearer '+user.token},url:'/ws'});return {messages,send:async m=>handlers.message(Buffer.from(JSON.stringify(m))),ws};}
+  return {socket,alice,bob,eve,queries,routes,register,failSql:re=>{failing=re},onSql:fn=>{responder=fn},expire:()=>{for(const t of [...timers])t.fn();}};
 }
 test('large offline attachment survives intact and retries do not duplicate',async()=>{
   const f=await fixture();const a=f.socket(f.alice);const body='x'.repeat(500000);
@@ -88,4 +89,55 @@ test('offline video offer and ICE wait for receiver and answer',async()=>{
   await b.send({type:'call_ringing',callId:id,to:f.alice.id});assert.equal(a.messages.at(-1).state,'ringing');
   await b.send({type:'video_answer',callId:id,to:f.alice.id,sdp:'answer'});
   assert.equal(b.messages.at(-1).type,'ice_candidate');
+});
+
+const settle=()=>new Promise(r=>setImmediate(r));
+const hexId=n=>n.toString(16).toUpperCase().padStart(12,'0');
+test('offline messages stay pending when the socket write fails',async()=>{
+  const f=await fixture();const a=f.socket(f.alice);
+  await a.send({type:'msg',id:'ABCDEF123456',to:f.bob.id,body:'hello'});
+  const lost=f.socket(f.bob,{broken:true});await settle();lost.ws.close();
+  const b=f.socket(f.bob);await settle();
+  assert.deepEqual(b.messages.filter(m=>m.type==='msg').map(m=>m.body),['hello']);
+  const again=f.socket(f.bob);await settle();
+  assert.equal(again.messages.filter(m=>m.type==='msg').length,0);
+});
+test('a failed live write is stored for later instead of acknowledged as delivered',async()=>{
+  const f=await fixture();const lost=f.socket(f.bob,{broken:true});const a=f.socket(f.alice);
+  await a.send({type:'msg',id:'ABCDEF123456',to:f.bob.id,body:'hello'});
+  assert.equal(a.messages.at(-1).status,'stored');
+  lost.ws.close();const b=f.socket(f.bob);await settle();
+  assert.equal(b.messages.filter(m=>m.type==='msg').length,1);
+});
+test('offline backlog larger than one batch is fully delivered in order',async()=>{
+  const f=await fixture();const a=f.socket(f.alice);
+  for(let i=1;i<=450;i++) await a.send({type:'msg',id:hexId(i),to:f.bob.id,body:'m'+i});
+  const b=f.socket(f.bob);await settle();
+  const bodies=b.messages.filter(m=>m.type==='msg').map(m=>m.body);
+  assert.equal(bodies.length,450);assert.equal(bodies[0],'m1');assert.equal(bodies.at(-1),'m450');
+});
+test('registration fails visibly and keeps nothing when the database insert fails',async()=>{
+  const f=await fixture(true);f.failSql(/INSERT INTO ru_users/);
+  let status=200,body;const res={status(n){status=n;return this},json(v){body=v}};
+  await f.routes.get('POST /api/register')({body:{username:'zara',pin:'123456',name:'Zara'}},res);
+  assert.equal(status,503);assert.ok(!body.token);
+  f.failSql(null);const retry=await f.register('zara');assert.ok(retry.token);
+});
+test('group creation fails visibly when the database insert fails',async()=>{
+  const f=await fixture(true);f.failSql(/INSERT INTO rg_groups/);const b=f.socket(f.bob);
+  let status=200,body;const res={status(n){status=n;return this},json(v){body=v}};
+  await f.routes.get('POST /api/groups')({headers:{authorization:'Bearer '+f.alice.token},body:{name:'Family',members:[f.bob.id]}},res);
+  assert.equal(status,503);assert.ok(!body.id);
+  assert.equal(b.messages.filter(m=>m.type==='group_created').length,0);
+});
+test('database backlog larger than one batch is fully delivered and marked',async()=>{
+  const f=await fixture(true);const rows=[];
+  for(let i=1;i<=450;i++) rows.push({id:i,msg_id:hexId(i),from_id:f.alice.id,from_name:'alice',to_id:f.bob.id,body:'m'+i,type:'text',sent_at:i,delivered_at:null});
+  f.onSql((sql,args)=>{
+    if(sql.startsWith('SELECT * FROM ru_messages')){const limit=Number(/LIMIT (\d+)/.exec(sql)[1]);return rows.filter(r=>r.to_id===args[0]&&!r.delivered_at&&r.id>(args[1]||0)).slice(0,limit);}
+    if(sql.startsWith('UPDATE ru_messages SET delivered_at')) rows.filter(r=>args[1].includes(r.id)).forEach(r=>{r.delivered_at=args[0]});
+  });
+  const b=f.socket(f.bob);for(let i=0;i<5;i++) await settle();
+  assert.equal(b.messages.filter(m=>m.type==='msg').length,450);
+  assert.equal(rows.filter(r=>!r.delivered_at).length,0);
 });
