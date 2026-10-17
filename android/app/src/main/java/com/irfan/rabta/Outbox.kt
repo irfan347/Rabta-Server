@@ -7,21 +7,26 @@ import java.util.concurrent.TimeUnit
 
 /** Persists before transmission and handles receipts even when no chat is open. */
 object Outbox : RabtaEvents.Listener {
-    private var db: Db? = null
     private lateinit var context: Context
+    private var prepared: Db? = null
+    /** Follows the signed-in account; each account's interrupted sends are marked failed once, when first used. */
+    @Synchronized private fun currentDb(): Db? {
+        if (!::context.isInitialized) return null
+        val d = Db.get(context)
+        if (d !== prepared) { prepared = d; if (d.account != null) worker.execute { d.failInterruptedSends() } }
+        return d
+    }
     private val worker = Executors.newSingleThreadScheduledExecutor()
     private val attempts = mutableMapOf<String, Long>()
     private var attemptSequence=0L
     @Synchronized fun init(context: Context) {
-        if (db != null) return
+        if (::context.isInitialized) return
         this.context=context.applicationContext
-        val database = Db.get(context.applicationContext)
-        db = database
-        worker.execute { database.failInterruptedSends() }
+        currentDb()
         RabtaEvents.add(this)
     }
     fun send(peerId: String, peerName: String, group: Boolean, body: String, type: String) {
-        val d = db ?: return
+        val d = currentDb() ?: return
         val id = ByteArray(6).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02X".format(it) }
         val time = System.currentTimeMillis()
         worker.execute {
@@ -33,7 +38,7 @@ object Outbox : RabtaEvents.Listener {
         }
     }
     fun retry(message: Db.Message, group: Boolean) {
-        val d = db ?: return
+        val d = currentDb() ?: return
         worker.execute {
             if (d.status(message.id) == "expired") { send(message.convId,message.convId,group,message.body,message.msgType); return@execute }
             if (d.status(message.id) !in setOf("failed","paused","canceled")) return@execute
@@ -60,9 +65,9 @@ object Outbox : RabtaEvents.Listener {
             if(attempts[id]==attempt) attempts.remove(id)
         }, 30, TimeUnit.SECONDS)
     }
-    override fun onConnected() { val d=db?:return; worker.execute { Privacy.sync(context);d.pausedMessages().forEach { retry(it,d.group(it.convId)!=null) } } }
+    override fun onConnected() { val d=currentDb()?:return; worker.execute { Privacy.sync(context);d.pausedMessages().forEach { retry(it,d.group(it.convId)!=null) } } }
     override fun onAck(msgId: String, status: String) {
-        val d = db ?: return
+        val d = currentDb() ?: return
         val normalized=MessageDelivery.normalizeReceipt(status) ?: return
         worker.execute {
             d.updateStatus(msgId, normalized)
@@ -70,7 +75,7 @@ object Outbox : RabtaEvents.Listener {
         }
     }
     override fun onRead(msgId: String, byId: String) {
-        val d = db ?: return
+        val d = currentDb() ?: return
         worker.execute {
             d.applyReadReceipt(msgId, byId)
             RabtaEvents.postHistoryChanged(byId)

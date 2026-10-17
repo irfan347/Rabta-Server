@@ -5,7 +5,8 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
-class Db(ctx: Context) : SQLiteOpenHelper(ctx, "rabta.db", null, 5) {
+/** [account] is set only by [get]; a Db constructed directly (isolated test fixtures) keeps the legacy file name. */
+class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(ctx, fileFor(account), null, 5) {
 
     data class Conversation(val peerId: String, val peerName: String, val lastMsg: String, val lastTime: Long, val unread: Int, val isGroup: Boolean = false)
     data class Message(val id: String, val convId: String, val fromId: String, val fromName: String, val body: String, val sentAt: Long, val mine: Boolean, val status: String, val msgType: String)
@@ -34,8 +35,42 @@ class Db(ctx: Context) : SQLiteOpenHelper(ctx, "rabta.db", null, 5) {
     }
 
     companion object {
+        private const val LEGACY = "rabta.db"
         @Volatile private var INST: Db? = null
-        fun get(ctx: Context) = INST ?: synchronized(this) { INST ?: Db(ctx.applicationContext).also { INST = it } }
+
+        /** Each account has its own history file; signed out, nothing is written to disk. */
+        private fun fileFor(account: String?) = when { account == null -> LEGACY; account.isEmpty() -> null; else -> "rabta_$account.db" }
+        private fun current(db: Db?, account: String) = db?.takeIf { it.account == null || it.account == account }
+
+        fun get(ctx: Context): Db {
+            val account = runCatching { Session.id }.getOrDefault("")
+            current(INST, account)?.let { return it }
+            return synchronized(this) {
+                current(INST, account) ?: run {
+                    val app = ctx.applicationContext
+                    if (account.isNotEmpty()) adoptLegacy(app, account)
+                    Db(app, account).also { INST = it }
+                }
+            }
+        }
+
+        /**
+         * Before per-account files, every account on the phone shared rabta.db. Hand that history to the first
+         * account that opens it after the update (normally the account that was signed in when the app updated);
+         * it is moved, never copied or deleted. Other accounts start with their own empty history.
+         */
+        private fun adoptLegacy(app: Context, account: String) {
+            val prefs = app.getSharedPreferences("rabta_storage", Context.MODE_PRIVATE)
+            if (prefs.contains("legacy_owner")) return
+            val legacy = app.getDatabasePath(LEGACY)
+            val target = app.getDatabasePath(fileFor(account)!!)
+            if (!legacy.exists() || target.exists()) return
+            val moved = listOf("", "-journal", "-wal", "-shm").all { suffix ->
+                val from = java.io.File(legacy.path + suffix)
+                !from.exists() || from.renameTo(java.io.File(target.path + suffix))
+            }
+            if (moved) prefs.edit().putString("legacy_owner", account).commit()
+        }
     }
 
     fun upsertConversation(peerId: String, peerName: String, lastMsg: String, time: Long, incUnread: Boolean, isGroup: Boolean = false) {
