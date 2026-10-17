@@ -24,7 +24,7 @@ object Inbox {
                 val localBody=Attachments.receive(context,body,msgType)
                 val isNew = d.saveIfNew(msgId, convId, fromId, fromName, localBody, sentAt, false, "received", msgType)
                 if (isNew) {
-                    val preview = when (msgType) { "image" -> "📷 Photo"; "voice" -> "🎤 Voice note"; "file" -> "File"; "video" -> "Video"; "sticker" -> "Sticker"; "rich" -> runCatching { org.json.JSONObject(body).getString("text") }.getOrDefault("Message"); else -> body }
+                    val preview = when (msgType) { "image" -> "📷 Photo"; "voice" -> VoiceAudio.label(context, localBody).let { if (it.isEmpty()) "🎤 Voice message" else "🎤 Voice message · $it" }; "file" -> "File"; "video" -> "Video"; "sticker" -> "Sticker"; "rich" -> runCatching { org.json.JSONObject(body).getString("text") }.getOrDefault("Message"); else -> body }
                     val showBadge = ChatActivity.openPeer != convId
                     d.upsertConversation(convId, convName, preview, sentAt, showBadge, isGroup)
                     RabtaEvents.postMessage(fromId, fromName, msgId, localBody, sentAt, msgType, if (isGroup) convId else "")

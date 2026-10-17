@@ -431,7 +431,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         addView(RabtaUi.text(this@ConversationListActivity,label,12f,color=if(add) SUB else TXT).apply {
             gravity=Gravity.CENTER;maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END;setPadding(0,dp(4),0,0)
             importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        },LinearLayout.LayoutParams(dp(68),-2))
+        },LinearLayout.LayoutParams(dp(78),-2))
     }
 
     private fun updateChatFilters() {
@@ -529,7 +529,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         if (c.lastTime > 0) top.addView(TextView(this).apply { text = fmtTime(c.lastTime); textSize = 12f; setTextColor(if (c.unread > 0) AppTheme.accent(this@ConversationListActivity) else SUB) })
         mid.addView(top)
         val bot = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0,dp(2),0,0) }
-        bot.addView(TextView(this).apply { text = c.lastMsg.ifEmpty { "No messages yet" }; textSize = 14f; setTextColor(SUB); maxLines = 1;ellipsize=android.text.TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        bot.addView(TextView(this).apply { text = preview(c.lastMsg); textSize = 14f; setTextColor(SUB); maxLines = 1;ellipsize=android.text.TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         if (c.unread > 0) bot.addView(TextView(this).apply {
             text = if (c.unread > 99) "99+" else c.unread.toString()
             textSize = 12f; typeface = Typeface.DEFAULT_BOLD; setTextColor(AppTheme.onPrimary(this@ConversationListActivity)); gravity = Gravity.CENTER
@@ -539,6 +539,16 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         mid.addView(bot)
         row.addView(mid, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         return row
+    }
+
+    /** Voice notes get a lime mic icon, as in WhatsApp; older rows saved before durations were added read "Voice message". */
+    private fun preview(last:String):CharSequence {
+        if(last.isEmpty()) return "No messages yet"
+        val voice=last=="Voice note"||last.startsWith("🎤 ")
+        if(!voice) return last
+        val label=last.removePrefix("🎤 ").let { if(it=="Voice note") "Voice message" else it }
+        val icon=TextView(this).also { UiIcons.set(it,"mic",AppTheme.accent(this),16,"Voice") }.text
+        return android.text.SpannableStringBuilder(icon).append(" ").append(label)
     }
 
     private fun divider() = View(this).apply { setBackgroundColor(DIV) }.also {
@@ -782,7 +792,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         val yesterday=java.util.Calendar.getInstance().apply { add(java.util.Calendar.DAY_OF_YEAR,-1) }
         val wasYesterday=yesterday.get(java.util.Calendar.YEAR)==then.get(java.util.Calendar.YEAR)&&yesterday.get(java.util.Calendar.DAY_OF_YEAR)==then.get(java.util.Calendar.DAY_OF_YEAR)
         return when {
-            today -> java.text.SimpleDateFormat("HH:mm",locale).format(java.util.Date(t))
+            today -> android.text.format.DateFormat.getTimeFormat(this).format(java.util.Date(t)) // same 12/24 h as inside the chat
             wasYesterday -> L.t(this,"Yesterday")
             else -> java.text.SimpleDateFormat("dd/MM",locale).format(java.util.Date(t))
         }

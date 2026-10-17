@@ -365,7 +365,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         lockedPanel.addView(lockedActions)
         composerBar.addView(lockedPanel,LinearLayout.LayoutParams(-1,-2))
 
-        barRow=LinearLayout(this).apply { gravity=Gravity.BOTTOM;setPadding(dp(8),dp(6),dp(8),dp(8));clipChildren=false;clipToPadding=false }
+        barRow=LinearLayout(this).apply { gravity=Gravity.BOTTOM;setPadding(dp(10),dp(6),dp(12),dp(12));clipChildren=false;clipToPadding=false }
         val pill=LinearLayout(this).apply {
             gravity=Gravity.BOTTOM;minimumHeight=dp(52);setPadding(dp(4),0,dp(4),0)
             background=RabtaUi.shape(this@ChatActivity,RECV,26)
@@ -617,7 +617,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
                 else bubble.addView(textLine("Photo unavailable"))
             }
             "voice" -> {
-                val voice=VoiceMessageView(this,m.body)
+                val voice=VoiceMessageView(this,m.body,if(m.mine) Session.name else m.fromName.ifBlank { peerName })
                 voiceViews.add(voice);bubble.addView(voice,LinearLayout.LayoutParams(dp(240),-2))
             }
             "file","video" -> {
