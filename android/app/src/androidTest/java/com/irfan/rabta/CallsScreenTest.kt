@@ -37,6 +37,14 @@ class CallsScreenTest {
         fail("Calls UI did not reach expected state")
     }
     private fun fixture(run:(Db)->Unit) {
+        // Complete permission setup before launch, so Android's permission Activity
+        // cannot outlive a finished call and intercept subsequent home launches.
+        val permissions=mutableListOf("ACCESS_COARSE_LOCATION","ACCESS_FINE_LOCATION","RECORD_AUDIO")
+        if(android.os.Build.VERSION.SDK_INT>=31)permissions+=listOf("BLUETOOTH_SCAN","BLUETOOTH_ADVERTISE","BLUETOOTH_CONNECT")
+        if(android.os.Build.VERSION.SDK_INT>=33)permissions+=listOf("NEARBY_WIFI_DEVICES","POST_NOTIFICATIONS")
+        permissions.forEach { permission ->
+            android.os.ParcelFileDescriptor.AutoCloseInputStream(inst.uiAutomation.executeShellCommand("pm grant ${ctx.packageName} android.permission.$permission")).use { it.readBytes() }
+        }
         val name="calls-ui-${java.util.UUID.randomUUID()}.db"
         val isolated=object:ContextWrapper(ctx) {
             override fun getApplicationContext():Context=this
@@ -56,7 +64,7 @@ class CallsScreenTest {
         ctx.getSharedPreferences("appearance",0).edit().putString("mode","Dark").putString("language","en").putFloat("scale",1f).commit()
         try { run(db) } finally {
             ui { WsClient.disconnect();MessageService.stop(ctx);field.set(null,previous) }
-            db.close();ctx.deleteDatabase(name)
+            inst.waitForIdleSync();db.close();ctx.deleteDatabase(name)
         }
     }
     private fun launch()=inst.startActivitySync(Intent(ctx,ConversationListActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ConversationListActivity
@@ -83,10 +91,12 @@ class CallsScreenTest {
     }
 
     @Test fun searchFiltersRealHistoryIncludingOlderRecordsAndSurvivesNavigation()=fixture { db ->
-        db.logCallStart("+923001234567","Old ÁlIce","incoming")
+        val old=db.logCallStart("+923001234567","Old ÁlIce","incoming")
+        db.writableDatabase.execSQL("UPDATE calls SET started_at=1 WHERE id=?",arrayOf(old))
         repeat(105) { db.logCallStart("bulk-$it","Other contact $it","outgoing") }
         db.logCallStart("CA1100000003","Video contact","outgoing video")
         db.logCallStart("CA1100000004","Missed contact","missed")
+        assertFalse(db.calls().any { it.id==old })
         val a=launch()
         try {
             ui { nav(a,"Calls").performClick() }

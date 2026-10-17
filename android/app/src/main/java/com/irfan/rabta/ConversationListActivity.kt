@@ -232,7 +232,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         fun listColumn()=LinearLayout(this).apply {
             orientation=LinearLayout.VERTICAL;setPadding(dp(20),dp(8),dp(20),dp(100))
         }
-        convList=listColumn();callsList=listColumn();spacesList=listColumn()
+        convList=listColumn();callsList=listColumn().apply { setPadding(dp(20),0,dp(20),dp(24)) };spacesList=listColumn()
         chatsScroll=ScrollView(this).apply { addView(convList);isVerticalScrollBarEnabled=false }
         callsScroll=ScrollView(this).apply { addView(callsList);isVerticalScrollBarEnabled=false }
         spacesScroll=ScrollView(this).apply { addView(spacesList);isVerticalScrollBarEnabled=false }
@@ -293,7 +293,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         val searchable=destination==0||destination==2
         pageTitle.textSize=if(destination==3) 24f else 28f
         pageTitle.text=L.t(this,listOf("Chats","Nearby","Spaces","Calls")[destination])
-        conversationSearchRow.visibility=if(searchable) View.VISIBLE else View.GONE
+        conversationSearchRow.visibility=if(destination==3) View.GONE else View.VISIBLE
         callSearchRow.visibility=if(destination==3 && callRecords.isNotEmpty()) View.VISIBLE else View.GONE
         searchField.visibility=if(searchable) View.VISIBLE else View.GONE
         chatFilters.visibility=if(destination==0) View.VISIBLE else View.GONE
