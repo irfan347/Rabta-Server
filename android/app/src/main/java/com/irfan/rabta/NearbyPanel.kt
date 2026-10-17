@@ -36,20 +36,28 @@ class NearbyPanel(private val activity:Activity) {
         override fun run() { refresh();if(active)handler.postDelayed(this,1000) }
     }
     init {
-        val card=RabtaUi.card(activity)
+        val card=RabtaUi.card(activity).apply { setPadding(RabtaUi.dp(activity,16),RabtaUi.dp(activity,12),RabtaUi.dp(activity,8),RabtaUi.dp(activity,12)) }
         val header=LinearLayout(activity).apply {gravity=Gravity.CENTER_VERTICAL}
         val title=LinearLayout(activity).apply {orientation=LinearLayout.VERTICAL}
-        title.addView(RabtaUi.text(activity,"Discover nearby",20f,true))
-        title.addView(RabtaUi.text(activity,"Connect on your terms",13f,color=AppTheme.sub(activity)))
+        title.addView(RabtaUi.text(activity,"Signal Orbit",20f,true).apply { androidx.core.view.ViewCompat.setAccessibilityHeading(this,true) })
+        info=RabtaUi.text(activity,"Radar is off",13f,color=AppTheme.sub(activity)).apply {
+            accessibilityLiveRegion=android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE
+            maxLines=2;ellipsize=android.text.TextUtils.TruncateAt.END
+        }
+        title.addView(info)
         header.addView(title,LinearLayout.LayoutParams(0,-2,1f))
         header.addView(RabtaUi.iconButton(activity,"more","Nearby options") { options() })
         card.addView(header)
         radar=RadarView(activity)
-        card.addView(radar,LinearLayout.LayoutParams(-1,RabtaUi.dp(activity,128)))
+        card.addView(radar,LinearLayout.LayoutParams(-1,RabtaUi.dp(activity,220)))
+        card.addView(RabtaUi.text(activity,"Rings show connection stage: connected, waiting, discovered. Not distance or direction.",11f,color=AppTheme.sub(activity)).apply {
+            gravity=Gravity.CENTER;setPadding(RabtaUi.dp(activity,8),0,RabtaUi.dp(activity,16),RabtaUi.dp(activity,8))
+        })
         discoverable=Switch(activity).apply {
-            text="Discoverability";textSize=15f;setTextColor(AppTheme.text(activity))
+            text="Discoverable";textSize=15f;setTextColor(AppTheme.text(activity))
+            typeface=android.graphics.Typeface.create("sans-serif-medium",android.graphics.Typeface.NORMAL)
             minHeight=RabtaUi.dp(activity,48);isChecked=RadarPrefs.enabled(activity)
-            contentDescription="Radar discoverability"
+            contentDescription="Radar discoverability";setPadding(0,0,RabtaUi.dp(activity,8),0)
             setOnCheckedChangeListener { _,enabled ->
                 if(syncingDiscoverability)return@setOnCheckedChangeListener
                 if(!Session.loggedIn){isChecked=false;Toast.makeText(activity,"Sign in to use Radar",Toast.LENGTH_SHORT).show();return@setOnCheckedChangeListener}
@@ -58,25 +66,48 @@ class NearbyPanel(private val activity:Activity) {
             }
         }
         card.addView(discoverable)
-        info=RabtaUi.text(activity,"Radar is off",13f,color=AppTheme.sub(activity)).apply {
-            accessibilityLiveRegion=android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE
-            setPadding(0,RabtaUi.dp(activity,4),0,0)
-        }
-        card.addView(info)
-        card.addView(RabtaUi.text(activity,"Share your display name and Rabta ID only while discoverable. Connections always need approval.",12f,color=AppTheme.sub(activity)).apply {setPadding(0,RabtaUi.dp(activity,8),0,0)})
+        card.addView(RabtaUi.text(activity,"Share your display name and Rabta ID only while discoverable. Connections always need approval.",12f,color=AppTheme.sub(activity)).apply {setPadding(0,RabtaUi.dp(activity,4),RabtaUi.dp(activity,8),0)})
         view.addView(card)
+
+        // Quick tools: each opens a real, existing feature.
+        view.addView(RabtaUi.text(activity,"Quick tools",15f,true).apply { setPadding(RabtaUi.dp(activity,4),RabtaUi.dp(activity,12),0,RabtaUi.dp(activity,8)) })
+        fun tiles(vararg items:android.view.View)=LinearLayout(activity).apply {
+            items.forEachIndexed { i,v -> addView(v,LinearLayout.LayoutParams(0,-1,1f).apply { if(i==0) marginEnd=RabtaUi.dp(activity,8) }) }
+        }
+        view.addView(tiles(
+            tile("drop","Quick Drop","Files to a verified contact") { activity.startActivity(Intent(activity,DropActivity::class.java)) },
+            tile("qr","QR Connect","Temporary pairing invite") { activity.startActivity(Intent(activity,InstantConnectActivity::class.java)) }
+        ),LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=RabtaUi.dp(activity,8) })
+        val nfc=android.nfc.NfcAdapter.getDefaultAdapter(activity)
+        view.addView(tiles(
+            tile("vision","Network Vision","Your live connection map") { activity.startActivity(Intent(activity,NetworkVisionActivity::class.java)) },
+            tile("nfc","NFC Pair",if(nfc==null) "Not on this phone" else "Tap phones to pair") {
+                if(nfc==null) Toast.makeText(activity,"This phone has no NFC. Use QR Connect instead.",Toast.LENGTH_LONG).show()
+                else activity.startActivity(Intent(activity,InstantConnectActivity::class.java))
+            }
+        ))
+
         search=CompactSearchView(activity,"Search nearby users") { value ->query=value;rendered="";refresh() }
-        view.addView(search,LinearLayout.LayoutParams(-1,-2).apply {topMargin=RabtaUi.dp(activity,8);bottomMargin=RabtaUi.dp(activity,8)})
+        view.addView(search,LinearLayout.LayoutParams(-1,-2).apply {topMargin=RabtaUi.dp(activity,16);bottomMargin=RabtaUi.dp(activity,8)})
         val nearbyHeading=LinearLayout(activity).apply {gravity=Gravity.CENTER_VERTICAL}
         count=RabtaUi.text(activity,"Nearby users",15f,true)
         nearbyHeading.addView(count,LinearLayout.LayoutParams(0,-2,1f))
         nearbyHeading.addView(RabtaUi.iconButton(activity,"restore","Retry discovery") { retry() })
         view.addView(nearbyHeading);view.addView(users)
         view.addView(RabtaUi.text(activity,"No phone numbers are shared. Radar shows activity, not distance or location.",12f,color=AppTheme.sub(activity)).apply {setPadding(0,RabtaUi.dp(activity,8),0,RabtaUi.dp(activity,16))})
-        view.addView(RabtaUi.row(activity,"Instant Connect","Pair with a temporary QR invitation","privacy") { activity.startActivity(Intent(activity,InstantConnectActivity::class.java)) })
-        view.addView(RabtaUi.row(activity,"Rabta Drop","Send photos, videos and documents to a verified contact nearby","backup") { activity.startActivity(Intent(activity,DropActivity::class.java)) })
-        view.addView(RabtaUi.row(activity,"Network Vision","Explore your live nearby connections","nearby") { activity.startActivity(Intent(activity,NetworkVisionActivity::class.java)) })
         view.addView(RabtaUi.row(activity,"Connection help","Permissions, radios and discovery","connection") { guidance() })
+    }
+    private fun tile(icon:String,title:String,detail:String,action:()->Unit)=LinearLayout(activity).apply {
+        orientation=LinearLayout.VERTICAL;isFocusable=true;minimumHeight=RabtaUi.dp(activity,96)
+        setPadding(RabtaUi.dp(activity,14),RabtaUi.dp(activity,14),RabtaUi.dp(activity,12),RabtaUi.dp(activity,12))
+        background=RabtaUi.ripple(activity,AppTheme.surface(activity),20);contentDescription="$title. $detail"
+        setOnClickListener { action() }
+        addView(TextView(activity).apply {
+            UiIcons.set(this,icon,AppTheme.accent(activity),20,title);gravity=Gravity.CENTER
+            background=RabtaUi.shape(activity,AppTheme.raised(activity),12);importantForAccessibility=android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        },LinearLayout.LayoutParams(RabtaUi.dp(activity,36),RabtaUi.dp(activity,36)))
+        addView(RabtaUi.text(activity,title,15f,true).apply { setPadding(0,RabtaUi.dp(activity,10),0,0);importantForAccessibility=android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO })
+        addView(RabtaUi.text(activity,detail,12f,color=AppTheme.sub(activity)).apply { setPadding(0,RabtaUi.dp(activity,2),0,0);importantForAccessibility=android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO })
     }
     fun saveState(state:android.os.Bundle) {state.putString("nearbyQuery",query)}
     fun restoreState(state:android.os.Bundle?) {search.field.setText(state?.getString("nearbyQuery").orEmpty())}
@@ -113,6 +144,11 @@ class NearbyPanel(private val activity:Activity) {
         info.text=if(!enabled)"Off · you are not discoverable" else problem?:MeshBridge.status
         info.setTextColor(if(problem!=null)AppTheme.error(activity)else AppTheme.sub(activity))
         val peers=if(enabled)MeshBridge.radarPeers()else emptyList()
+        radar.peers(peers.map { RadarView.Dot(it.id,it.name,when(it.stage) {
+            RadarStage.CONNECTED -> RadarView.Orbit.CONNECTED
+            RadarStage.OUTGOING,RadarStage.INCOMING,RadarStage.APPROVED -> RadarView.Orbit.PENDING
+            else -> RadarView.Orbit.DISCOVERED
+        } })
         val matches=NearbySearch.filter(peers,query)
         count.text=if(query.isBlank())"Nearby users · ${peers.size}" else "${matches.size} of ${peers.size} users"
         val now=SystemClock.elapsedRealtime()
@@ -136,7 +172,7 @@ class NearbyPanel(private val activity:Activity) {
         val card=RabtaUi.card(activity)
         val head=LinearLayout(activity).apply { gravity=Gravity.CENTER_VERTICAL }
         head.addView(RabtaUi.text(activity,peer.name.take(1).uppercase().ifBlank { "R" },18f,true,AppTheme.accent(activity)).apply {
-            gravity=Gravity.CENTER;background=RabtaUi.shape(activity,AppTheme.sent(activity),28)
+            gravity=Gravity.CENTER;background=RabtaUi.shape(activity,AppTheme.raised(activity),28,AppTheme.accent(activity))
             contentDescription="${peer.name} avatar"
         },LinearLayout.LayoutParams(RabtaUi.dp(activity,44),RabtaUi.dp(activity,44)))
         val identity=LinearLayout(activity).apply { orientation=LinearLayout.VERTICAL;setPadding(RabtaUi.dp(activity,12),0,0,0) }

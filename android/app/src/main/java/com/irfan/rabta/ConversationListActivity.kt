@@ -440,6 +440,10 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
                                 if(spaces||filter==2) "New group" else "New chat") { if(spaces||filter==2) showCreateGroup() else showNewChat() }
                         })
                     } else list.forEach { target.addView(convRow(it)) }
+                    // Spaces: temporary nearby rooms need networking Rabta does not have yet.
+                    if(destination==2&&query.isBlank()) target.addView(RabtaUi.comingSoon(this,"AirSpace","Temporary rooms with people nearby","nearby").apply {
+                        (layoutParams as LinearLayout.LayoutParams).topMargin=dp(16)
+                    })
                 }
             }
         }.start()
@@ -567,9 +571,10 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         if(activeTab!=3)return
         callSearchRow.visibility=if(callRecords.isEmpty()) View.GONE else View.VISIBLE
         callsList.removeAllViews()
+        callsList.addView(callStarter())
         if(callRecords.isEmpty()) {
             if(callSearch.hasFocus())hideKeyboard()
-            callsList.addView(callState("phone","No calls yet","Your call history will appear here.","Start a call") { showCallContacts() })
+            callsList.addView(callState("phone","No calls yet","Your call history will appear here."))
             return
         }
         val query=callQuery.trim()
@@ -580,7 +585,42 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         }
         matches.take(visibleCalls).forEach { callsList.addView(callRow(it)) }
         if(matches.size>visibleCalls)callsList.addView(textBtn("Show more calls",AppTheme.accent(this)) { visibleCalls+=100;renderCalls() })
-        callsList.addView(textBtn("Start a call",AppTheme.accent(this)) { showCallContacts() })
+    }
+
+    /** One clear start-call action, with the call kinds Rabta really supports; Walkie-Talkie is not built yet. */
+    private fun callStarter():View = LinearLayout(this).apply {
+        orientation=LinearLayout.VERTICAL;background=RabtaUi.shape(this@ConversationListActivity,WHITE,24)
+        setPadding(dp(16),dp(16),dp(16),dp(12))
+        layoutParams=LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(4);bottomMargin=dp(12) }
+        val head=LinearLayout(this@ConversationListActivity).apply { gravity=Gravity.CENTER_VERTICAL }
+        head.addView(TextView(this@ConversationListActivity).apply {
+            UiIcons.set(this,"phone",AppTheme.onPrimary(this@ConversationListActivity),24,"Start a call");gravity=Gravity.CENTER;isFocusable=true
+            background=RabtaUi.ripple(this@ConversationListActivity,AppTheme.primary(this@ConversationListActivity),999);elevation=dp(2).toFloat()
+            setOnClickListener { showCallContacts() }
+        },LinearLayout.LayoutParams(dp(56),dp(56)))
+        val labels=LinearLayout(this@ConversationListActivity).apply { orientation=LinearLayout.VERTICAL;setPadding(dp(14),0,0,0) }
+        labels.addView(RabtaUi.text(this@ConversationListActivity,"Start a call",17f,true).apply { isClickable=true;setOnClickListener { showCallContacts() } })
+        labels.addView(RabtaUi.text(this@ConversationListActivity,"Online voice and video calls with your contacts",12f,color=SUB))
+        head.addView(labels,LinearLayout.LayoutParams(0,-2,1f))
+        addView(head)
+        val kinds=LinearLayout(this@ConversationListActivity).apply { gravity=Gravity.CENTER_VERTICAL;setPadding(0,dp(12),0,0) }
+        fun kind(icon:String,label:String,run:()->Unit)=LinearLayout(this@ConversationListActivity).apply {
+            gravity=Gravity.CENTER;minimumHeight=dp(48);isFocusable=true;setPadding(dp(8),0,dp(8),0)
+            background=RabtaUi.ripple(this@ConversationListActivity,AppTheme.raised(this@ConversationListActivity),16)
+            contentDescription="$label call"
+            setOnClickListener { run() }
+            addView(TextView(this@ConversationListActivity).apply { UiIcons.set(this,icon,AppTheme.accent(this@ConversationListActivity),18,label);importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO })
+            addView(RabtaUi.text(this@ConversationListActivity,label,13f,true,TXT).apply {
+                setPadding(dp(6),0,0,0);maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END;importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            })
+        }
+        kinds.addView(kind("phone","Voice") { showCallContacts() },LinearLayout.LayoutParams(0,-2,1f).apply { marginEnd=dp(8) })
+        kinds.addView(kind("video","Video") { showCallContacts(video=true) },LinearLayout.LayoutParams(0,-2,1f))
+        addView(kinds)
+        addView(RabtaUi.comingSoon(this@ConversationListActivity,"Walkie-Talkie","Push-to-talk with nearby contacts","walkie").apply {
+            background=RabtaUi.ripple(this@ConversationListActivity,AppTheme.raised(this@ConversationListActivity),16)
+            (layoutParams as LinearLayout.LayoutParams).apply { topMargin=dp(8);bottomMargin=0 }
+        })
     }
 
     private fun callRow(c: Db.CallRecord): View {
@@ -627,7 +667,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
             .putExtra("requestedCallKind",if(video) "video" else "voice"))
     }
 
-    private fun showCallContacts() {
+    private fun showCallContacts(video:Boolean=false) {
         hideKeyboard()
         Thread {
             val result=runCatching {
@@ -639,8 +679,8 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
             uiHandler.post {
                 if(isDestroyed||isFinishing)return@post
                 result.onSuccess { contacts ->
-                    RabtaUi.sheet(this,"Start a call",contacts.map { (id,name) ->
-                        RabtaUi.SheetAction(name.ifBlank { id },"Voice call · $id") { callContact(id,name) }
+                    RabtaUi.sheet(this,if(video) "Start a video call" else "Start a call",contacts.map { (id,name) ->
+                        RabtaUi.SheetAction(name.ifBlank { id },"${if(video) "Video" else "Voice"} call · $id") { callContact(id,name,video) }
                     }+RabtaUi.SheetAction("Find by username or Rabta ID") { showNewChat(forCall=true) })
                 }.onFailure { android.widget.Toast.makeText(this,"Could not load contacts. Try again.",android.widget.Toast.LENGTH_SHORT).show() }
             }
