@@ -14,33 +14,38 @@ import java.util.Date
 class StatusActivity : ThemedActivity() {
     private lateinit var feed: LinearLayout
     private var posting = false
+    private val handler=android.os.Handler(android.os.Looper.getMainLooper())
+    private lateinit var stories:LinearLayout
+    private var generation=0
+    private var foreground=false
+    private var owner=""
+    private var limit=30
+    private val expiry=Runnable {refresh()}
+
 
     override fun onCreate(state: Bundle?) {
-        super.onCreate(state)
-        val col = FeatureUi.page(this, "Status")
-        val intro = RabtaUi.card(this)
-        intro.addView(RabtaUi.text(this, "Share a moment", 20f, true))
-        intro.addView(RabtaUi.text(this, "Updates expire after 24 hours. Choose exactly which contacts can view each one.", 14f, color = AppTheme.sub(this)))
-        col.addView(intro)
-
-        col.addView(RabtaUi.text(this, "CREATE UPDATE", 12f, true, AppTheme.accent(this)).apply {
-            setPadding(RabtaUi.dp(this@StatusActivity, 4), RabtaUi.dp(this@StatusActivity, 12), 0, RabtaUi.dp(this@StatusActivity, 8))
-            androidx.core.view.ViewCompat.setAccessibilityHeading(this, true)
-        })
-        val actions = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        actions.addView(RabtaUi.button(this, "Text status", true) { composeText() })
-        actions.addView(RabtaUi.button(this, "Share a photo") { pick("image/*", 31) })
-        actions.addView(RabtaUi.button(this, "Share a video") { pick("video/*", 32) })
-        col.addView(actions)
-
-        val heading = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, RabtaUi.dp(this@StatusActivity, 16), 0, RabtaUi.dp(this@StatusActivity, 8)) }
-        heading.addView(RabtaUi.text(this, "RECENT UPDATES", 12f, true, AppTheme.accent(this)).apply { setPadding(0, 0, 0, 0); androidx.core.view.ViewCompat.setAccessibilityHeading(this, true) }, LinearLayout.LayoutParams(0, -2, 1f))
-        heading.addView(RabtaUi.iconButton(this, "connection", "Refresh status updates") { refresh() })
-        col.addView(heading)
-        feed = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        col.addView(feed)
-        refresh()
+        super.onCreate(state);owner=Session.id
+        val col=FeatureUi.page(this,"Status")
+        val intro=LinearLayout(this).apply {orientation=LinearLayout.VERTICAL;setPadding(0,0,0,RabtaUi.dp(this@StatusActivity,16))}
+        intro.addView(RabtaUi.text(this,"Share a moment",18f,true))
+        intro.addView(RabtaUi.text(this,"24 hours. Only the people you choose.",13f,color=AppTheme.sub(this)))
+        val actions=LinearLayout(this).apply {gravity=Gravity.CENTER_VERTICAL;setPadding(0,RabtaUi.dp(this@StatusActivity,16),0,0)}
+        listOf(Triple("Text status","text",{composeText()}),Triple("Photo","image",{pick("image/*",31)}),Triple("Video","video",{pick("video/*",32)})).forEachIndexed {index,item ->
+            actions.addView(RabtaUi.button(this,item.first,index==0,item.third).apply {
+                textSize=14f;gravity=Gravity.CENTER;setPadding(RabtaUi.dp(this@StatusActivity,4),RabtaUi.dp(this@StatusActivity,12),RabtaUi.dp(this@StatusActivity,4),RabtaUi.dp(this@StatusActivity,12))
+            },LinearLayout.LayoutParams(0,-2,1f).apply {if(index<2)marginEnd=RabtaUi.dp(this@StatusActivity,8)})
+        }
+        intro.addView(actions);col.addView(intro)
+        stories=LinearLayout(this).apply {gravity=Gravity.CENTER_VERTICAL}
+        col.addView(HorizontalScrollView(this).apply {addView(stories);isHorizontalScrollBarEnabled=false})
+        val heading=LinearLayout(this).apply {gravity=Gravity.CENTER_VERTICAL}
+        heading.addView(RabtaUi.section(this,"Recent updates"),LinearLayout.LayoutParams(0,-2,1f))
+        heading.addView(RabtaUi.iconButton(this,"restore","Refresh status updates") {refresh()});col.addView(heading)
+        feed=LinearLayout(this).apply {orientation=LinearLayout.VERTICAL};col.addView(feed)
     }
+    override fun onResume() {super.onResume();foreground=true;if(Session.id!=owner){finish();return};refresh()}
+    override fun onPause() {foreground=false;generation++;handler.removeCallbacksAndMessages(null);super.onPause()}
+    override fun onDestroy() {generation++;handler.removeCallbacksAndMessages(null);super.onDestroy()}
 
     private fun composeText() {
         val input = EditText(this).apply {
@@ -80,7 +85,6 @@ class StatusActivity : ThemedActivity() {
         if (contacts.isEmpty()) { themedMessage("No available contacts", "Add a contact before sharing a status. Blocked contacts cannot be selected."); return }
         val selected = BooleanArray(contacts.size)
         AlertDialog.Builder(this).setTitle("Choose viewers")
-            .setMessage("Only selected contacts can see this update.")
             .setMultiChoiceItems(contacts.map { it.peerName }.toTypedArray(), selected) { _, index, checked -> selected[index] = checked }
             .setNegativeButton("Cancel", null).setPositiveButton("Share") { _, _ ->
                 if (posting) return@setPositiveButton
@@ -104,65 +108,71 @@ class StatusActivity : ThemedActivity() {
     }
 
     private fun refresh() {
-        feed.removeAllViews(); feed.addView(RabtaUi.loading(this, "Loading updates…"))
+        if(!foreground||isDestroyed||isFinishing)return
+        val request=++generation;handler.removeCallbacks(expiry)
+        feed.removeAllViews();stories.removeAllViews();feed.addView(RabtaUi.loading(this,"Loading updates…"))
         Thread {
-            val result = runCatching { FeatureApi.request("/api/status").getJSONArray("statuses") }
+            val result=runCatching {FeatureApi.request("/api/status").getJSONArray("statuses")}
             runOnUiThread {
-                if (isDestroyed || isFinishing) return@runOnUiThread
+                if(!foreground||isDestroyed||isFinishing||request!=generation||owner!=Session.id)return@runOnUiThread
                 result.onSuccess(::render).onFailure {
                     feed.removeAllViews()
-                    feed.addView(RabtaUi.empty(this, "status", "Could not load updates", "Check your connection and try again.", "Retry") { refresh() })
+                    feed.addView(RabtaUi.empty(this,"status","Could not load updates",it.message?:"Check your connection and try again.","Retry") {refresh()})
                 }
             }
         }.start()
     }
-
-    private fun render(items: JSONArray) {
-        feed.removeAllViews()
-        if (items.length() == 0) {
-            feed.addView(RabtaUi.empty(this, "status", "No updates yet", "Your contacts’ updates and your own posts will appear here."))
-            return
+    private fun render(items:JSONArray) {
+        feed.removeAllViews();stories.removeAllViews()
+        val now=System.currentTimeMillis()
+        val updates=(0 until items.length()).map {items.getJSONObject(it)}.filter {it.optLong("expires")>now}
+        if(updates.isEmpty()) {
+            feed.addView(RabtaUi.empty(this,"status","No updates yet","Share your first moment, or come back for updates from your contacts."));return
         }
-        for (index in 0 until items.length()) {
-            val status = items.getJSONObject(index)
-            val own = status.optString("owner") == Session.id
-            val name = status.optString("name").ifBlank { "Rabta contact" }
-            val kind = status.optString("kind").replaceFirstChar { it.uppercase() }
-            val expires = status.optLong("expires")
-            val remaining = ((expires - System.currentTimeMillis()) / 60000).coerceAtLeast(0)
-            val created = status.optLong("created")
-            val card = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL; background = RabtaUi.shape(this@StatusActivity, AppTheme.surface(this@StatusActivity), 20, AppTheme.line(this@StatusActivity))
-                setPadding(RabtaUi.dp(this@StatusActivity, 16), RabtaUi.dp(this@StatusActivity, 14), RabtaUi.dp(this@StatusActivity, 16), RabtaUi.dp(this@StatusActivity, 12))
-                layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = RabtaUi.dp(this@StatusActivity, 10) }
+        updates.distinctBy {it.optString("owner")}.take(20).forEach {status ->
+            val own=status.optString("owner")==owner
+            val name=if(own)"Your status" else  status.optString("name").ifBlank {"Rabta contact"}
+            val item=LinearLayout(this).apply {
+                orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER;minimumHeight=RabtaUi.dp(this@StatusActivity,88)
+                setPadding(RabtaUi.dp(this@StatusActivity,4),RabtaUi.dp(this@StatusActivity,4),RabtaUi.dp(this@StatusActivity,4),RabtaUi.dp(this@StatusActivity,4))
+                isFocusable=true;contentDescription="View $name";setOnClickListener {view(status)}
             }
-            val top = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-            val badge = TextView(this).apply {
-                text = name.take(1).uppercase(); gravity = Gravity.CENTER; setTextColor(android.graphics.Color.WHITE)
-                textSize = 16f; typeface = android.graphics.Typeface.create("sans-serif-medium", 0)
-                background = RabtaUi.shape(this@StatusActivity, if (own) AppTheme.ACCENT else AppTheme.teal(this@StatusActivity), 999)
-            }
-            top.addView(badge, LinearLayout.LayoutParams(RabtaUi.dp(this, 44), RabtaUi.dp(this, 44)))
-            val labels = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(RabtaUi.dp(this@StatusActivity, 12), 0, 0, 0) }
-            labels.addView(RabtaUi.text(this, if (own) "Your status" else name, 16f, true).apply { setPadding(0, 0, 0, 2) })
-            labels.addView(RabtaUi.text(this, "$kind · ${if (created > 0) DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(created)) else "Recently shared"}", 12f, color = AppTheme.sub(this)).apply { setPadding(0, 0, 0, 0) })
-            top.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
-            top.addView(RabtaUi.text(this, "${remaining / 60}h ${remaining % 60}m", 12f, color = AppTheme.sub(this)).apply { contentDescription = "Expires in ${remaining / 60} hours and ${remaining % 60} minutes" })
-            card.addView(top)
-            card.addView(RabtaUi.text(this, if (status.optString("kind") == "text") status.optString("body") else "Tap to view ${kind.lowercase()}", 14f, color = AppTheme.text(this)).apply {
-                maxLines = 3; setPadding(RabtaUi.dp(this@StatusActivity, 56), RabtaUi.dp(this@StatusActivity, 10), 0, RabtaUi.dp(this@StatusActivity, 4))
-            })
-            card.isClickable = true; card.isFocusable = true; card.background = RabtaUi.ripple(this, AppTheme.surface(this), 20)
-            card.contentDescription = "$name, $kind status. Expires in ${remaining / 60} hours. Open status."
-            card.setOnClickListener { view(status) }
+            item.addView(RabtaUi.text(this,name.take(1).uppercase(),18f,true,AppTheme.accent(this)).apply {
+                gravity=Gravity.CENTER;background=RabtaUi.shape(this@StatusActivity,AppTheme.surface(this@StatusActivity),999,AppTheme.accent(this@StatusActivity))
+                importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            },LinearLayout.LayoutParams(RabtaUi.dp(this,48),RabtaUi.dp(this,48)))
+            item.addView(RabtaUi.text(this,name,12f,color=AppTheme.sub(this)).apply {gravity=Gravity.CENTER;maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END;setPadding(0,RabtaUi.dp(this@StatusActivity,8),0,0)})
+            stories.addView(item,LinearLayout.LayoutParams(RabtaUi.dp(this,80),-2))
+        }
+        updates.take(limit).forEach {status ->
+            val own=status.optString("owner")==owner
+            val name=if(own)"Your status" else  status.optString("name").ifBlank {"Rabta contact"}
+            val kind=status.optString("kind")
+            val card=RabtaUi.card(this)
+            card.tag="status:${status.optString("id")}";card.isFocusable=true;card.setOnClickListener {view(status)}
+            card.background=RabtaUi.ripple(this,AppTheme.surface(this),20)
+            val head=LinearLayout(this).apply {gravity=Gravity.CENTER_VERTICAL}
+            head.addView(RabtaUi.text(this,name.take(1).uppercase(),16f,true,AppTheme.accent(this)).apply {
+                gravity=Gravity.CENTER;background=RabtaUi.shape(this@StatusActivity,AppTheme.sent(this@StatusActivity),999)
+                importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            },LinearLayout.LayoutParams(RabtaUi.dp(this,40),RabtaUi.dp(this,40)))
+            val labels=LinearLayout(this).apply {orientation=LinearLayout.VERTICAL;setPadding(RabtaUi.dp(this@StatusActivity,12),0,0,0)}
+            labels.addView(RabtaUi.text(this,name,15f,true))
+            val created=status.optLong("created")
+            labels.addView(RabtaUi.text(this,android.text.format.DateUtils.getRelativeTimeSpanString(created,now,60000).toString(),12f,color=AppTheme.sub(this)))
+            head.addView(labels,LinearLayout.LayoutParams(0,-2,1f))
+            if(own)head.addView(RabtaUi.iconButton(this,"more","Manage your status") {manage(status,status.optJSONArray("viewers")?:JSONArray())})
+            card.addView(head)
+            if(kind=="text")card.addView(RabtaUi.text(this,status.optString("body"),18f,true).apply {
+                maxLines=4;ellipsize=android.text.TextUtils.TruncateAt.END;setPadding(0,RabtaUi.dp(this@StatusActivity,16),0,RabtaUi.dp(this@StatusActivity,8))
+            })else card.addView(StatusMediaPreview(this,status.getString("body"),kind,status.getLong("expires")){view(status)},LinearLayout.LayoutParams(-1,RabtaUi.dp(this,160)).apply {topMargin=RabtaUi.dp(this@StatusActivity,16)})
+            val remaining=((status.optLong("expires")-now)/60000).coerceAtLeast(1)
+            card.addView(RabtaUi.text(this,"${if(own)(status.optJSONArray("viewers")?.length()?:0).toString()+" views · " else ""}Expires in ${if(remaining>=60)"${remaining/60}h ${remaining%60}m" else  "${remaining}m"}",12f,color=AppTheme.sub(this)).apply {setPadding(0,RabtaUi.dp(this@StatusActivity,8),0,0)})
             feed.addView(card)
-            if (own) {
-                val viewers = status.optJSONArray("viewers") ?: JSONArray()
-                feed.addView(RabtaUi.button(this, "${viewers.length()} views · Manage") {
-                    manage(status, viewers)
-                }.apply { setPadding(RabtaUi.dp(this@StatusActivity, 16), RabtaUi.dp(this@StatusActivity, 6), RabtaUi.dp(this@StatusActivity, 16), RabtaUi.dp(this@StatusActivity, 6)) })
-            }
         }
+        if(updates.size>limit)feed.addView(RabtaUi.button(this,"Show more updates") {limit+=30;render(items)})
+        handler.removeCallbacks(expiry)
+        handler.postDelayed(expiry,(updates.minOf {it.optLong("expires")}-System.currentTimeMillis()).coerceAtLeast(1))
     }
 
     private fun manage(status: JSONObject, viewers: JSONArray) {
@@ -183,15 +193,9 @@ class StatusActivity : ThemedActivity() {
             }
     }
 
-    private fun view(status: JSONObject) {
-        if (status.optLong("expires") <= System.currentTimeMillis()) { refresh(); return }
-        FeatureApi.run(this, { FeatureApi.request("/api/status/${status.getString("id")}/view", "POST") }) {
-            if (status.optString("kind") == "text") {
-                AlertDialog.Builder(this).setTitle(status.optString("name", "Status update"))
-                    .setMessage(status.optString("body"))
-                    .setPositiveButton("Close", null).show()
-            } else Attachments.open(this, status.getString("body"))
-        }
+    private fun view(status:JSONObject) {
+        if(status.optLong("expires")<=System.currentTimeMillis()){refresh();return}
+        startActivity(Intent(this,StatusViewerActivity::class.java).putExtra("statusId",status.getString("id")))
     }
 
     private fun themedMessage(title: String, message: String) =

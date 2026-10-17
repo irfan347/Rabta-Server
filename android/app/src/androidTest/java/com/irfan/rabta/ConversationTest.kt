@@ -65,8 +65,8 @@ class ConversationTest {
             fun incoming()=views().first { it.tag=="bubble:convo-incoming" }
             waitUi { views().any { it.tag=="bubble:convo-incoming" } }
             ui {
-                assertTrue(views().filterIsInstance<TextView>().any { it.text.contains("Waiting for contact key") })
-                assertTrue(views().filterIsInstance<TextView>().any { it.text.contains("Sent") })
+                assertTrue("Stored Nearby states read as Queued",views().filterIsInstance<TextView>().any { it.text.contains("Queued") })
+                assertTrue("Stored server acceptance reads as Relayed, not Delivered",views().filterIsInstance<TextView>().any { it.text.contains("Relayed") })
                 assertTrue(views().filterIsInstance<TextView>().any { it.text=="Yesterday" })
                 for(v in views().filter { it.tag?.toString()?.startsWith("bubble:")==true })assertTrue(v.width<=(v.parent as View).width)
                 incoming().performLongClick()
@@ -87,7 +87,7 @@ class ConversationTest {
         } finally { ui { a.finish();WsClient.disconnect() };MessageService.stop(ctx) }
     }
     @Test fun retryRetainsIdAndDeliveryReceiptUpdatesTheBubble() {
-        prepare();val server=MockWebServer();val sent=CountDownLatch(1);var wireId=""
+        prepare();val server=MockWebServer();val sent=CountDownLatch(1);var wireId="";var socket:WebSocket?=null
         server.dispatcher=object:Dispatcher() {
             override fun dispatch(request:RecordedRequest):MockResponse {
                 if(request.path!="/ws")return MockResponse().setResponseCode(404)
@@ -95,7 +95,7 @@ class ConversationTest {
                     override fun onOpen(ws:WebSocket,response:Response) { ws.send("{\"type\":\"ready\",\"id\":\"AAAABBBBCCCC\",\"protocol\":2}") }
                     override fun onMessage(ws:WebSocket,text:String) {
                         val o=JSONObject(text)
-                        if(o.optString("type")=="msg") { wireId=o.getString("id");ws.send(JSONObject().put("type","ack").put("id",wireId).put("status","delivered").toString());sent.countDown() }
+                        if(o.optString("type")=="msg") { wireId=o.getString("id");socket=ws;ws.send(JSONObject().put("type","ack").put("id",wireId).put("status","delivered").toString());sent.countDown() }
                     }
                 })
             }
@@ -112,6 +112,10 @@ class ConversationTest {
             ui { all(a.window.decorView).first { it.tag=="retry:convo-failed" }.performClick() }
             assertTrue("Retry went through the existing websocket",sent.await(8,TimeUnit.SECONDS))
             assertEquals("convo-failed",wireId)
+            // The server's ack only proves it relayed the message; the recipient's receipt proves delivery.
+            waitUi { all(a.window.decorView).filterIsInstance<TextView>().any { it.text.contains("Relayed") } }
+            assertEquals("relayed",db.status("convo-failed"))
+            socket!!.send(JSONObject().put("type","receipt").put("id",wireId).put("by",peer).toString())
             waitUi { all(a.window.decorView).filterIsInstance<TextView>().any { it.text.contains("Delivered") } }
             assertEquals(1,db.messages(peer).count { it.id=="convo-failed" })
             assertEquals("Retry this exact payload",db.messages(peer).first { it.id=="convo-failed" }.body)

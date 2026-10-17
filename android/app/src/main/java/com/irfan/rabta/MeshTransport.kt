@@ -19,6 +19,11 @@ interface MeshTransport {
     fun disconnectUser(id:String) {}
     fun sendEnvelopeToAll(json:String,exceptEndpoint:String?=null)
     fun sendEnvelopeTo(endpointId:String,json:String)
+    /** Rabta Drop control message to one directly connected endpoint. */
+    fun sendDrop(endpointId:String,message:String):Boolean = false
+    /** Rabta Drop file data as one Nearby STREAM payload; returns its payload id. */
+    fun sendStream(endpointId:String,data:java.io.InputStream):Long? = null
+    fun cancelPayload(payloadId:Long) {}
 }
 
 data class MeshPeer(val id:String,val name:String,val keyMatched:Boolean)

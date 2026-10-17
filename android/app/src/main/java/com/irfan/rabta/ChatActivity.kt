@@ -38,15 +38,15 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     companion object { @Volatile var openPeer: String? = null }
 
     private val GREEN get() = AppTheme.accent(this)
-    private val GREEN2 get() = AppTheme.ACCENT
+    private val GREEN2 get() = AppTheme.primary(this)
     private val BEIGE get() = AppTheme.bg(this@ChatActivity)
     private val SENT get() = AppTheme.sent(this@ChatActivity)
     private val RECV get() = AppTheme.surface(this@ChatActivity)
     private val TXT get() = AppTheme.text(this@ChatActivity)
     private val SUB get() = AppTheme.sub(this@ChatActivity)
-    private val DARK    = 0xFF0C1317.toInt()
-    private val DARK2   = 0xFF1F2C34.toInt()
-    private val GRAY_BTN= 0xFF2A3942.toInt()
+    private val DARK    = 0xFF080D14.toInt()
+    private val DARK2   = 0xFF111B27.toInt()
+    private val GRAY_BTN= 0xFF223040.toInt()
     private val RED     = 0xFFD32F2F.toInt()
 
     private lateinit var peerId: String
@@ -189,7 +189,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     private fun fmtTime(t: Long) = android.text.format.DateFormat.getTimeFormat(this).format(Date(t))
 
     private fun avatar(name: String, sz: Int): TextView {
-        val cols = listOf(0xFF6248A5,0xFF325E71,0xFF3D577E,0xFF286F68)
+        val cols = listOf(0xFF4B3F8F,0xFF325E71,0xFF3D6B2A,0xFF286F68)
         return TextView(this).apply {
             text = name.filter { it.isLetterOrDigit() }.take(1).uppercase().ifEmpty { "?" }
             setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, sz*0.38f); includeFontPadding=false; typeface = Typeface.DEFAULT_BOLD; setTextColor(Color.WHITE); gravity = Gravity.CENTER
@@ -239,7 +239,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         updateStatus()
 
         // ── Call overlay ──
-        callOverlay = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; background=GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,intArrayOf(0xFF26213F.toInt(),DARK)); visibility=View.GONE }
+        callOverlay = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; background=GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,intArrayOf(0xFF182E2C.toInt(),DARK)); visibility=View.GONE }
         // Top: name + status
         val callTop = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; gravity=Gravity.CENTER; setPadding(0,dp(32),0,0) }
         callNameTv = TextView(this).apply { text=peerName; textSize=28f; typeface=Typeface.DEFAULT_BOLD; setTextColor(Color.WHITE); gravity=Gravity.CENTER }
@@ -313,7 +313,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         bar.addView(RabtaUi.iconButton(this,"sticker","Stickers") { Stickers.picker(this@ChatActivity,{sendContent(it,"sticker")},{pickAttachment("image/*",104)}) })
         input = EditText(this).apply {
             hint=L.t(this@ChatActivity,"Message"); minHeight=dp(48);textSize=16f; setTextColor(TXT); setHintTextColor(SUB); maxLines=5
-            background = RabtaUi.shape(this@ChatActivity,BEIGE,20,AppTheme.line(this@ChatActivity))
+            background = RabtaUi.shape(this@ChatActivity,BEIGE,20)
             setPadding(dp(14),dp(10),dp(14),dp(10))
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
             addTextChangedListener(object:TextWatcher{
@@ -330,12 +330,12 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         }
         bar.addView(input, LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f).apply { marginStart=dp(4); marginEnd=dp(4) })
         sendBtn = TextView(this).apply {
-            UiIcons.set(this,"send",label="Send message"); textSize=20f; setTextColor(Color.WHITE); gravity=Gravity.CENTER
+            UiIcons.set(this,"send",AppTheme.onPrimary(this@ChatActivity),label="Send message"); textSize=20f; setTextColor(Color.WHITE); gravity=Gravity.CENTER
             background=RabtaUi.ripple(this@ChatActivity,GREEN2,24); isFocusable=true;isClickable=true; setOnClickListener{sendMsg()}; visibility=View.GONE
         }
         bar.addView(sendBtn, LinearLayout.LayoutParams(dp(48),dp(48)))
         micBtn = TextView(this).apply {
-            UiIcons.set(this,"mic",label="Hold to record; release to send"); textSize=20f; gravity=Gravity.CENTER; background=RabtaUi.ripple(this@ChatActivity,GREEN2,24);isFocusable=true
+            UiIcons.set(this,"mic",AppTheme.onPrimary(this@ChatActivity),label="Hold to record; release to send"); textSize=20f; gravity=Gravity.CENTER; background=RabtaUi.ripple(this@ChatActivity,GREEN2,24);isFocusable=true
             setOnClickListener { if(recording) stopVoiceRecord(true) else checkAudioPermission { startVoiceRecord() } }
             setOnTouchListener { _,ev -> when(ev.action){ MotionEvent.ACTION_DOWN->{ checkAudioPermission{startVoiceRecord()}; true }; MotionEvent.ACTION_MOVE->{ if(ev.x < -dp(48)) stopVoiceRecord(false); true }; MotionEvent.ACTION_UP->{ stopVoiceRecord(true); true }; MotionEvent.ACTION_CANCEL->{ stopVoiceRecord(false); true }; else->false } }
         }
@@ -445,7 +445,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         }
     }.apply {
         orientation=LinearLayout.VERTICAL
-        background=RabtaUi.shape(this@ChatActivity,if(mine) SENT else RECV,20,if(mine) null else AppTheme.line(this@ChatActivity)).apply {
+        background=RabtaUi.shape(this@ChatActivity,if(mine) SENT else RECV,20,null).apply {
             val r=dp(20).toFloat();val corner=dp(6).toFloat()
             cornerRadii=if(mine) floatArrayOf(r,r,r,r,corner,corner,r,r) else floatArrayOf(r,r,r,r,r,r,corner,corner)
         }
@@ -526,7 +526,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             val value=text.toString();val offset=value.indexOf("  ·  ")+5
             text=android.text.SpannableString(value).apply {
                 setSpan(android.text.style.ForegroundColorSpan(when(m.status) {
-                    "read","delivered"->AppTheme.teal(this@ChatActivity)
+                    "read","delivered","direct_delivered"->AppTheme.teal(this@ChatActivity)
                     "failed","expired","canceled"->AppTheme.error(this@ChatActivity)
                     else->SUB
                 }),offset,length,android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)

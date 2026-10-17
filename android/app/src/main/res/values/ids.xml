@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="stickers_bundled" type="id" />
+    <item name="stickers_recent" type="id" />
+    <item name="stickers_favorites" type="id" />
+</resources>

@@ -20,6 +20,7 @@ let pool = null;
 const memUsers = new Map();      // id -> {id,username,pass_hash,name,created_at}
 const memMessages = [];          // pending offline messages
 let memMsgId = 1;
+const memReceipts = [];          // recipient receipts waiting for an offline sender
 
 if (process.env.DATABASE_URL) {
   const { Pool } = require('pg');
@@ -45,9 +46,11 @@ async function initDb() {
     ALTER TABLE ru_messages ADD COLUMN IF NOT EXISTS group_name TEXT;
     CREATE INDEX IF NOT EXISTS idx_rum_to ON ru_messages (to_id, delivered_at);
     CREATE TABLE IF NOT EXISTS rg_groups(id TEXT PRIMARY KEY, name TEXT, creator TEXT, members TEXT, created_at BIGINT);
+    CREATE TABLE IF NOT EXISTS ru_receipts(msg_id TEXT NOT NULL, by_id TEXT NOT NULL, to_id TEXT NOT NULL, at BIGINT, PRIMARY KEY(msg_id, by_id, to_id));
   `);
-  const rows = (await pool.query('SELECT id,username,pass_hash,name FROM ru_users LIMIT 10000')).rows;
+  const rows = (await pool.query('SELECT id,username,pass_hash,name FROM ru_users')).rows;
   for (const r of rows) memUsers.set(r.id, r);
+  await account.init();
   for (const g of (await pool.query('SELECT * FROM rg_groups')).rows) groups.set(g.id, { ...g, members: new Set(g.members.split(',')) });
 }
 
@@ -62,41 +65,59 @@ function checkPin(pin, stored) {
   if (!s || !h) return false;
   return safeEq(crypto.scryptSync(pin, s, 32).toString('hex'), h);
 }
-function makeToken(id) {
-  const payload = id + '.' + (Date.now() + 30 * 24 * 3600 * 1000);
+// Tokens name the trusted device they were issued to ("id.expiry.device.sig"); older "id.expiry.sig" tokens
+// stay valid only while the account has no trusted device.
+function makeToken(id, device = null) {
+  const payload = id + '.' + (Date.now() + 30 * 24 * 3600 * 1000) + (device ? '.' + device : '');
   return payload + '.' + crypto.createHmac('sha256', TOKEN_SECRET).update(payload).digest('hex');
 }
-function readToken(tok) {
+function readTokenFull(tok) {
   const p = String(tok || '').split('.');
-  if (p.length !== 3) return null;
-  const payload = p[0] + '.' + p[1];
+  if (p.length !== 3 && p.length !== 4) return null;
+  const payload = p.slice(0, -1).join('.');
   const sig = crypto.createHmac('sha256', TOKEN_SECRET).update(payload).digest('hex');
-  if (!safeEq(sig, p[2]) || Number(p[1]) < Date.now()) return null;
-  return p[0];
+  if (!safeEq(sig, p[p.length - 1]) || Number(p[1]) < Date.now()) return null;
+  const device = p.length === 4 ? p[2] : null;
+  return account.tokenAllowed(p[0], device) ? { id: p[0], device } : null;
 }
-function authId(req) { return readToken(String(req.headers.authorization || '').replace(/^Bearer\s+/i, '')); }
+const readToken = tok => readTokenFull(tok)?.id || null;
+const bearer = req => String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+function authId(req) { return readToken(bearer(req)); }
+
+const account = require('./account')({ app, users: memUsers, getPool: () => pool, authToken: req => readTokenFull(bearer(req)), makeToken, checkPin, sendTo,
+  closeDevice: (userId, device) => { const w = online.get(userId); if (w && w.rabtaDevice === device) try { w.close(1008, 'auth'); } catch (_) {} } });
 
 // ---------- register ----------
 const regFails = new Map();
 app.post('/api/register', async (req, res) => {
   const username = String(req.body?.username || '').trim().toLowerCase();
   const pin = String(req.body?.pin || '');
-  const name = String(req.body?.name || username).trim().slice(0, 40);
+  const name = account.cleanName(req.body?.name || username) || username;
   if (!UN_RE.test(username)) return res.status(400).json({ error: 'Username 3-20 letters/numbers only' });
   if (!/^\d{4,8}$/.test(pin)) return res.status(400).json({ error: 'PIN must be 4-8 digits' });
-  const existing = [...memUsers.values()].find(u => u.username === username);
-  if (existing) return res.status(409).json({ error: 'Username already taken' });
+  const status = account.usernameStatus(username);
+  if (!status.available) return res.status(409).json({ error: status.error });
   const id = crypto.randomBytes(6).toString('hex').toUpperCase();
   const user = { id, username, pass_hash: hashPin(pin), name, created_at: Date.now(), last_seen: Date.now() };
-  memUsers.set(id, user);
-  if (pool) await pool.query('INSERT INTO ru_users(id,username,pass_hash,name,created_at,last_seen) VALUES($1,$2,$3,$4,$5,$6)',
-    [id, username, user.pass_hash, name, user.created_at, user.last_seen]).catch(() => {});
-  res.json({ id, username, name, token: makeToken(id) });
+  memUsers.set(id, user); // reserves the username while the insert is in flight
+  if (pool) {
+    try {
+      await pool.query('INSERT INTO ru_users(id,username,pass_hash,name,created_at,last_seen) VALUES($1,$2,$3,$4,$5,$6)',
+        [id, username, user.pass_hash, name, user.created_at, user.last_seen]);
+    } catch (e) {
+      memUsers.delete(id);
+      if (e.code === '23505') return res.status(409).json({ error: 'Username already used' });
+      console.error('Account storage failed:', e.message);
+      return res.status(503).json({ error: 'Account could not be saved, please try again' });
+    }
+  }
+  try { res.json(await account.registered(user, req.body?.device)); }
+  catch (e) { console.error('Device registration failed:', e.message); res.json({ id, username, name, token: makeToken(id) }); }
 });
 
 // ---------- login ----------
 const loginFails = new Map();
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const username = String(req.body?.username || '').trim().toLowerCase();
   const pin = String(req.body?.pin || '');
   const f = loginFails.get(username);
@@ -107,8 +128,12 @@ app.post('/api/login', (req, res) => {
     cur.count++; loginFails.set(username, cur);
     return res.status(401).json({ error: 'Wrong username or PIN' });
   }
-  loginFails.delete(username);
-  res.json({ id: user.id, username: user.username, name: user.name, token: makeToken(user.id) });
+  try {
+    const [status, body, failed] = await account.signIn(user, req.body);
+    if (failed) { const cur = (f && f.until > Date.now()) ? f : { count: 0, until: Date.now() + 15 * 60 * 1000 }; cur.count++; loginFails.set(username, cur); }
+    else if (status === 200) loginFails.delete(username);
+    res.status(status).json(body);
+  } catch (e) { console.error('Sign-in failed:', e.message); res.status(503).json({ error: 'Sign-in could not be completed, please try again' }); }
 });
 
 // ---------- user lookup ----------
@@ -131,6 +156,14 @@ const voiceCalls = new Map();
 const groups = new Map();  // groupId -> {id,name,creator,members:Set}
 
 function sendTo(id, payload) { const socket=online.get(id); if(socket?.readyState===1) socket.send(JSON.stringify(payload)); }
+// Resolves true once the frame is written to the socket, false if the socket is gone or the write failed.
+// This is a transport write, not a recipient receipt; clients ignore duplicate message IDs on redelivery.
+function sendFrame(socket, payload) {
+  return new Promise(resolve => {
+    if (socket?.readyState !== 1) return resolve(false);
+    try { socket.send(JSON.stringify(payload), err => resolve(!err)); } catch (_) { resolve(false); }
+  });
+}
 function callState(call,state) { sendTo(call.from,{type:'call_state',from:call.to,callId:call.id,state}); }
 function endCall(call) {
   clearTimeout(call.timer);
@@ -157,19 +190,25 @@ function participantCall(msg,userId) {
   return call && ((call.from===userId&&call.to===msg.to)||(call.to===userId&&call.from===msg.to)) ? call : null;
 }
 
+const PENDING_BATCH = 200;
+// Drains the whole backlog in batches; a row is marked delivered only after its frame was written,
+// so a dropped connection leaves the rest pending for the next connection.
 async function deliverPending(userId, ws) {
-  let msgs;
-  if (pool) {
-    const r = await pool.query('SELECT * FROM ru_messages WHERE to_id=$1 AND delivered_at IS NULL ORDER BY sent_at ASC LIMIT 200', [userId]);
-    msgs = r.rows;
-    if (msgs.length) await pool.query('UPDATE ru_messages SET delivered_at=$1 WHERE id=ANY($2::int[])', [Date.now(), msgs.map(m => m.id)]);
-  } else {
-    msgs = memMessages.filter(m => m.to_id === userId && !m.delivered_at);
-    msgs.forEach(m => { m.delivered_at = Date.now(); });
-  }
-  for (const m of msgs) {
-    if(features.blocked(m.from_id,userId)) continue;
-    ws.send(JSON.stringify({ type: m.group_id ? 'group_msg' : 'msg', groupId: m.group_id || '', groupName: m.group_name || '', id: m.msg_id, from: m.from_id, fromName: m.from_name, body: m.body, msgType: m.type || 'text', t: Number(m.sent_at), offline: true }));
+  let after = 0;
+  for (;;) {
+    const msgs = pool
+      ? (await pool.query('SELECT * FROM ru_messages WHERE to_id=$1 AND delivered_at IS NULL AND id>$2 ORDER BY id ASC LIMIT ' + PENDING_BATCH, [userId, after])).rows
+      : memMessages.filter(m => m.to_id === userId && !m.delivered_at && m.id > after).slice(0, PENDING_BATCH);
+    if (!msgs.length) return;
+    after = msgs[msgs.length - 1].id;
+    const written = await Promise.all(msgs.map(m => features.blocked(m.from_id, userId) ? true : // blocked senders are dropped, as before
+      sendFrame(ws, { type: m.group_id ? 'group_msg' : 'msg', groupId: m.group_id || '', groupName: m.group_name || '', id: m.msg_id, from: m.from_id, fromName: m.from_name, body: m.body, msgType: m.type || 'text', t: Number(m.sent_at), offline: true })));
+    const done = msgs.filter((_, i) => written[i]);
+    if (done.length) {
+      if (pool) await pool.query('UPDATE ru_messages SET delivered_at=$1 WHERE id=ANY($2::int[])', [Date.now(), done.map(m => m.id)]);
+      else done.forEach(m => { m.delivered_at = Date.now(); });
+    }
+    if (done.length < msgs.length || msgs.length < PENDING_BATCH) return;
   }
 }
 
@@ -186,6 +225,33 @@ async function storeMessage(fromId, fromName, toId, msgId, body, type, sentAt, g
   }
 }
 
+// A receipt is sent by the recipient's app after it has stored a message; it is the only signal that
+// means "delivered". Server acks ('delivered' = written to the recipient's socket, 'stored') stay unchanged
+// for existing apps. Receipts for an offline sender wait in ru_receipts until it reconnects.
+async function relayReceipt(byId, toId, msgId) {
+  if (await sendFrame(online.get(toId), { type: 'receipt', id: msgId, by: byId })) return;
+  if (pool) await pool.query('INSERT INTO ru_receipts(msg_id,by_id,to_id,at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING', [msgId, byId, toId, Date.now()]);
+  else if (!memReceipts.some(r => r.msg_id === msgId && r.by_id === byId && r.to_id === toId)) {
+    memReceipts.push({ msg_id: msgId, by_id: byId, to_id: toId, at: Date.now() });
+    if (memReceipts.length > 5000) memReceipts.shift();
+  }
+}
+
+async function deliverReceipts(userId, ws) {
+  for (;;) {
+    const rows = pool
+      ? (await pool.query('SELECT msg_id,by_id FROM ru_receipts WHERE to_id=$1 ORDER BY at ASC LIMIT ' + PENDING_BATCH, [userId])).rows
+      : memReceipts.filter(r => r.to_id === userId).slice(0, PENDING_BATCH);
+    if (!rows.length) return;
+    const written = await Promise.all(rows.map(r => sendFrame(ws, { type: 'receipt', id: r.msg_id, by: r.by_id })));
+    const done = rows.filter((_, i) => written[i]);
+    if (!pool) for (const r of done) memReceipts.splice(memReceipts.indexOf(r), 1);
+    else if (done.length) await pool.query('DELETE FROM ru_receipts r USING unnest($2::text[],$3::text[]) AS d(m,b) WHERE r.to_id=$1 AND r.msg_id=d.m AND r.by_id=d.b',
+      [userId, done.map(r => r.msg_id), done.map(r => r.by_id)]);
+    if (done.length < rows.length || rows.length < PENDING_BATCH) return;
+  }
+}
+
 function updateLastSeen(userId) {
   const u = memUsers.get(userId); if (u) u.last_seen = Date.now();
   if (pool) pool.query('UPDATE ru_users SET last_seen=$1 WHERE id=$2', [Date.now(), userId]).catch(() => {});
@@ -193,15 +259,17 @@ function updateLastSeen(userId) {
 
 wss.on('connection', (ws, req) => {
   const token = req.headers['authorization']?.replace(/^Bearer\s+/i, '') || new URL(req.url, 'http://x').searchParams.get('token');
-  const userId = readToken(token);
+  const auth = readTokenFull(token), userId = auth?.id;
   if (!userId || !memUsers.has(userId)) { ws.close(1008, 'auth'); return; }
+  ws.rabtaDevice = auth.device;
   const user = memUsers.get(userId);
   if (online.has(userId)) try { online.get(userId).close(); } catch (_) {}
   online.set(userId, ws);
   updateLastSeen(userId);
 
-  ws.send(JSON.stringify({ type: 'ready', id: userId, name: user.name, protocol: 2 }));
-  deliverPending(userId, ws).catch(() => {});
+  ws.send(JSON.stringify({ type: 'ready', id: userId, name: user.name, protocol: 2, receipts: true }));
+  for (const frame of account.pendingFor(userId)) ws.send(JSON.stringify(frame));
+  deliverPending(userId, ws).then(() => deliverReceipts(userId, ws)).catch(e => console.error('Offline delivery failed:', e.message));
   for(const call of [...voiceCalls.values(),...videoCalls.values()]) if(call.to===userId) deliverCall(call);
 
   ws.on('message', async (raw) => {
@@ -223,9 +291,7 @@ wss.on('connection', (ws, req) => {
       if(features.blocked(userId,to)){ws.send(JSON.stringify({type:"ack",id:msgId,status:"error"}));return;}
       try { await features.grant(body,userId,to); } catch(_) { ws.send(JSON.stringify({type:"ack",id:msgId,status:"error"}));return; }
       const sentAt = Number(t) || Date.now();
-      const recipient = online.get(to);
-      if (recipient && recipient.readyState === 1) {
-        recipient.send(JSON.stringify({ type: 'msg', id: msgId, from: userId, fromName: user.name, body, msgType, t: sentAt }));
+      if (await sendFrame(online.get(to), { type: 'msg', id: msgId, from: userId, fromName: user.name, body, msgType, t: sentAt })) {
         ws.send(JSON.stringify({ type: 'ack', id: msgId, status: 'delivered' }));
       } else {
         try { await storeMessage(userId, user.name, to, msgId, body, msgType, sentAt); } catch (_) { ws.send(JSON.stringify({type:'ack',id:msgId,status:'error'})); return; }
@@ -270,11 +336,13 @@ wss.on('connection', (ws, req) => {
       for (const mid of g.members) {
         if (mid===userId || features.blocked(userId,mid)) continue;
         try { await features.grant(msg.body,userId,mid); } catch(_) { ws.send(JSON.stringify({type:"ack",id:msg.id,status:"error"}));return; }
-        const r = online.get(mid);
-        if (r && r.readyState===1) r.send(JSON.stringify(out));
-        else { try { await storeMessage(userId, user.name, mid, msg.id, msg.body, msg.msgType||'text', now, g.id, g.name); } catch (_) { ws.send(JSON.stringify({type:'ack',id:msg.id,status:'error'})); return; } }
+        if (!(await sendFrame(online.get(mid), out))) { try { await storeMessage(userId, user.name, mid, msg.id, msg.body, msg.msgType||'text', now, g.id, g.name); } catch (_) { ws.send(JSON.stringify({type:'ack',id:msg.id,status:'error'})); return; } }
       }
       ws.send(JSON.stringify({ type:'ack', id:msg.id, status:'sent' }));
+    } else if (msg.type === 'receipt') {
+      const id = String(msg.id || ''), to = String(msg.to || '');
+      if (/^[0-9A-F]{12}$/.test(id) && to !== userId && memUsers.has(to) && !features.blocked(userId, to))
+        await relayReceipt(userId, to, id).catch(e => console.error('Receipt storage failed:', e.message));
     } else if (msg.type === 'ping') {
       ws.send(JSON.stringify({ type: 'pong' }));
     }
@@ -292,9 +360,17 @@ app.post('/api/groups', async (req, res) => {
   const raw = Array.isArray(req.body?.members) ? req.body.members : [];
   const members = new Set([creator, ...raw.filter(m => memUsers.has(m)).slice(0,49)]);
   const id = require('crypto').randomBytes(6).toString('hex').toUpperCase();
-  groups.set(id, { id, name, creator, members, created_at: Date.now() });
-  if (pool) await pool.query('INSERT INTO rg_groups(id,name,creator,members,created_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT(id) DO NOTHING',
-    [id, name, creator, [...members].join(','), Date.now()]).catch(()=>{});
+  const created_at = Date.now();
+  if (pool) {
+    try {
+      await pool.query('INSERT INTO rg_groups(id,name,creator,members,created_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT(id) DO NOTHING',
+        [id, name, creator, [...members].join(','), created_at]);
+    } catch (e) {
+      console.error('Group storage failed:', e.message);
+      return res.status(503).json({ error: 'Group could not be saved, please try again' });
+    }
+  }
+  groups.set(id, { id, name, creator, members, created_at });
   const payload = JSON.stringify({ type:'group_created', group:{ id, name, members:[...members] } });
   for (const mid of members) { const w = online.get(mid); if (w && w.readyState===1) w.send(payload); }
   res.json({ id, name, members:[...members] });

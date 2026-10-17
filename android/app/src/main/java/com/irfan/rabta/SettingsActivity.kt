@@ -73,7 +73,7 @@ class SettingsActivity : ThemedActivity() {
         }
 
         section("CONNECTIONS") {
-            row("Nearby mesh", "${MeshBridge.peersConnected} connected · ${MeshBridge.status}", "nearby") {
+            row("Nearby mesh", "${MeshBridge.peersConnected} connected · ${if(RadarPrefs.enabled(this@SettingsActivity)) "Discoverable" else "Private"}", "nearby") {
                 startActivity(Intent(this@SettingsActivity, NearbyActivity::class.java))
             }
             row("Connection details", "Internet and Nearby diagnostics", "connection") { ConnectionHelp.show(this@SettingsActivity) }
@@ -84,6 +84,7 @@ class SettingsActivity : ThemedActivity() {
             }
         }
         section("HELP") {
+            row("Connectivity diagnostics", "Technical connection information", "connection") {startActivity(Intent(this@SettingsActivity,ConnectivityDiagnosticsActivity::class.java))}
             row("About Rabta", "Version ${packageManager.getPackageInfo(packageName, 0).versionName}", "info") {
                 themedInfo("About Rabta", "Rabta keeps your account identity and local chat history on this phone. Nearby messaging requires compatible devices, Google Play services, radios and permissions.")
             }
@@ -97,7 +98,7 @@ class SettingsActivity : ThemedActivity() {
         })
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = RabtaUi.shape(this@SettingsActivity, AppTheme.surface(this@SettingsActivity), 20, AppTheme.line(this@SettingsActivity))
+            background = RabtaUi.shape(this@SettingsActivity, AppTheme.surface(this@SettingsActivity), 20)
             clipToOutline = true
         }
         card.build()
@@ -107,7 +108,7 @@ class SettingsActivity : ThemedActivity() {
     private fun LinearLayout.row(title: String, detail: String, icon: String? = null, action: () -> Unit) {
         val row = LinearLayout(this@SettingsActivity).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = RabtaUi.dp(this@SettingsActivity, 68)
+            minimumHeight = RabtaUi.dp(this@SettingsActivity, 64)
             setPadding(RabtaUi.dp(this@SettingsActivity, 16), RabtaUi.dp(this@SettingsActivity, 10), RabtaUi.dp(this@SettingsActivity, 16), RabtaUi.dp(this@SettingsActivity, 10))
             background = RabtaUi.ripple(this@SettingsActivity, AppTheme.surface(this@SettingsActivity), 0)
             isFocusable = true; isClickable = true; setOnClickListener { action() }
@@ -128,7 +129,7 @@ class SettingsActivity : ThemedActivity() {
     private fun LinearLayout.toggle(title: String, detail: String, checked: Boolean, changed: (Boolean) -> Unit) {
         val row = LinearLayout(this@SettingsActivity).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = RabtaUi.dp(this@SettingsActivity, 68)
+            minimumHeight = RabtaUi.dp(this@SettingsActivity, 64)
             setPadding(RabtaUi.dp(this@SettingsActivity, 16), RabtaUi.dp(this@SettingsActivity, 8), RabtaUi.dp(this@SettingsActivity, 12), RabtaUi.dp(this@SettingsActivity, 8))
         }
         val labels = LinearLayout(this@SettingsActivity).apply { orientation = LinearLayout.VERTICAL }

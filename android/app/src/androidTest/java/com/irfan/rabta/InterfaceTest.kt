@@ -65,7 +65,18 @@ class InterfaceTest {
         val settings=launch(SettingsActivity::class.java); screenshot("08-settings-dark");inst.runOnMainSync { settings.finish() }
         val nearby=launch(NearbyActivity::class.java); screenshot("09-nearby-dark")
         val monitor=inst.addMonitor(ConnectivityDiagnosticsActivity::class.java.name,null,false)
-        inst.runOnMainSync { views(nearby.window.decorView).filterIsInstance<TextView>().first { it.text=="Connectivity diagnostics" }.performClick() }
+        inst.runOnMainSync { views(nearby.window.decorView).first {it.contentDescription=="Nearby options"}.performClick() }
+        inst.waitForIdleSync()
+        fun clickDialog(value:String) {
+            val until=System.currentTimeMillis()+5000
+            do {
+                val node=inst.uiAutomation.rootInActiveWindow?.findAccessibilityNodeInfosByText(value)?.firstOrNull {it.text?.toString()==value}
+                if(node!=null&&node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK))return
+                Thread.sleep(75)
+            }while(System.currentTimeMillis()<until)
+            error("Dialog action not available: $value")
+        }
+        clickDialog("Connection tools");inst.waitForIdleSync();clickDialog("Connectivity diagnostics")
         val diagnostics=inst.waitForMonitorWithTimeout(monitor,5000)
         assertNotNull("Nearby opens connectivity diagnostics",diagnostics)
         screenshot("09b-connectivity-diagnostics-dark")

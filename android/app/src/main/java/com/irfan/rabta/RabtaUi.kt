@@ -39,7 +39,7 @@ object RabtaUi {
     }
 
     fun ripple(c: Context, color: Int, radius: Int = 16) = RippleDrawable(
-        ColorStateList.valueOf(if(AppTheme.dark(c)) 0x33B5A0FF else 0x226D46D9),
+        ColorStateList.valueOf(if(AppTheme.dark(c)) 0x33BFFF76 else 0x223A6E12),
         shape(c,color,radius), shape(c,Color.WHITE,radius))
 
     fun text(c: Context, value: String, size: Float = 15f, strong: Boolean = false, color: Int = AppTheme.text(c)) = TextView(c).apply {
@@ -50,18 +50,18 @@ object RabtaUi {
 
     fun card(c: Context) = LinearLayout(c).apply {
         orientation = LinearLayout.VERTICAL
-        background = shape(c,AppTheme.surface(c),CORNER,AppTheme.line(c))
-        setPadding(dp(c,20),dp(c,20),dp(c,20),dp(c,20))
-        layoutParams = LinearLayout.LayoutParams(-1,-2).apply { bottomMargin = dp(c,12) }
+        background = shape(c,AppTheme.surface(c),CORNER)
+        setPadding(dp(c,16),dp(c,16),dp(c,16),dp(c,16))
+        layoutParams = LinearLayout.LayoutParams(-1,-2).apply { bottomMargin = dp(c,8) }
     }
 
     fun button(c: Context, label: String, primary: Boolean = false, action: () -> Unit) = text(c,label,15f,true,
-        if(primary) Color.WHITE else AppTheme.text(c)).apply {
+        if(primary) AppTheme.onPrimary(c) else AppTheme.text(c)).apply {
         gravity = Gravity.CENTER_VERTICAL
-        minHeight = dp(c,52); minimumWidth = dp(c,TOUCH)
-        setPadding(dp(c,18),dp(c,14),dp(c,18),dp(c,14))
-        background = ripple(c,if(primary) AppTheme.ACCENT else AppTheme.surface(c),16)
-        layoutParams = LinearLayout.LayoutParams(-1,-2).apply { bottomMargin = dp(c,10) }
+        minHeight = dp(c,48); minimumWidth = dp(c,TOUCH)
+        setPadding(dp(c,16),dp(c,12),dp(c,16),dp(c,12))
+        background = ripple(c,if(primary) AppTheme.primary(c) else AppTheme.surface(c),16)
+        layoutParams = LinearLayout.LayoutParams(-1,-2).apply { bottomMargin = dp(c,8) }
         isFocusable = true
         accessibilityDelegate = object : View.AccessibilityDelegate() {
             override fun onInitializeAccessibilityNodeInfo(host: View, info: AccessibilityNodeInfo) {
@@ -81,15 +81,15 @@ object RabtaUi {
 
     fun empty(c: Context, icon: String, title: String, body: String, actionLabel: String? = null, action: (() -> Unit)? = null) = LinearLayout(c).apply {
         orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
-        setPadding(dp(c,28),dp(c,40),dp(c,28),dp(c,32))
+        setPadding(dp(c,16),dp(c,24),dp(c,16),dp(c,24))
         addView(TextView(c).apply {
-            UiIcons.set(this,icon,AppTheme.accent(c),30,title)
+            UiIcons.set(this,icon,AppTheme.accent(c),24,title)
             gravity = Gravity.CENTER; importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            background = shape(c,AppTheme.sent(c),24)
-        },LinearLayout.LayoutParams(dp(c,72),dp(c,72)).apply { bottomMargin=dp(c,20) })
-        addView(text(c,title,21f,true).apply { gravity=Gravity.CENTER })
+            background = shape(c,AppTheme.sent(c),16)
+        },LinearLayout.LayoutParams(dp(c,48),dp(c,48)).apply { bottomMargin=dp(c,16) })
+        addView(text(c,title,18f,true).apply { gravity=Gravity.CENTER })
         addView(text(c,body,14f,color=AppTheme.sub(c)).apply {
-            gravity=Gravity.CENTER; setPadding(0,dp(c,8),0,dp(c,24))
+            gravity=Gravity.CENTER; setPadding(0,dp(c,8),0,dp(c,16))
         })
         if(actionLabel != null && action != null) addView(button(c,actionLabel,true,action).apply { gravity=Gravity.CENTER })
     }
@@ -124,11 +124,19 @@ object RabtaUi {
         }
         root.addView(View(a).apply { background=shape(a,AppTheme.line(a),2) },
             LinearLayout.LayoutParams(dp(a,36),dp(a,4)).apply { gravity=Gravity.CENTER_HORIZONTAL;bottomMargin=dp(a,20) })
-        root.addView(text(a,title,23f,true).apply { setPadding(0,0,0,dp(a,20));isAccessibilityHeadingCompat() })
+        root.addView(text(a,title,20f,true).apply { setPadding(0,0,0,dp(a,20));isAccessibilityHeadingCompat() })
         val items=LinearLayout(a).apply { orientation=LinearLayout.VERTICAL }
         actions.forEach { item ->
             val row=button(a,item.label) { dialog.dismiss();item.run() }
-            item.detail?.let { row.text="${L.t(a,item.label)}\n${L.t(a,it)}" }
+            item.detail?.let { detail ->
+                val heading=L.t(a,item.label)
+                row.text=android.text.SpannableString(heading+"\n"+L.t(a,detail)).apply {
+                    val start=heading.length+1
+                    setSpan(android.text.style.ForegroundColorSpan(AppTheme.sub(a)),start,length,android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    setSpan(android.text.style.AbsoluteSizeSpan(12,true),start,length,android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    setSpan(android.text.style.TypefaceSpan("sans-serif"),start,length,android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+            }
             items.addView(row)
         }
         val scroll=ScrollView(a).apply { isFillViewport=false;addView(items);isVerticalScrollBarEnabled=false }
@@ -173,7 +181,7 @@ object RabtaUi {
         root.addView(View(a).apply { background=shape(a,AppTheme.line(a),2) },LinearLayout.LayoutParams(dp(a,36),dp(a,4)).apply {
             gravity=Gravity.CENTER_HORIZONTAL;bottomMargin=dp(a,20)
         })
-        root.addView(text(a,title,23f,true).apply { setPadding(0,0,0,dp(a,8));isAccessibilityHeadingCompat() })
+        root.addView(text(a,title,20f,true).apply { setPadding(0,0,0,dp(a,8));isAccessibilityHeadingCompat() })
         root.addView(text(a,"Find people by their username or Rabta ID.",14f,color=AppTheme.sub(a)).apply { setPadding(0,0,0,dp(a,16)) })
         val field=EditText(a).apply {
             this.hint=hint;textSize=16f;setTextColor(AppTheme.text(a));setHintTextColor(AppTheme.sub(a));setSingleLine(true)
@@ -185,9 +193,9 @@ object RabtaUi {
         val status=text(a,"",14f,color=AppTheme.sub(a)).apply { minHeight=dp(a,32);gravity=Gravity.CENTER_VERTICAL;accessibilityLiveRegion=View.ACCESSIBILITY_LIVE_REGION_POLITE }
         root.addView(status)
         val actions=LinearLayout(a).apply { orientation=LinearLayout.HORIZONTAL;gravity=Gravity.END or Gravity.CENTER_VERTICAL }
-        fun action(label:String,primary:Boolean,run:()->Unit)=text(a,label,15f,true,if(primary) Color.WHITE else AppTheme.text(a)).apply {
+        fun action(label:String,primary:Boolean,run:()->Unit)=text(a,label,15f,true,if(primary) AppTheme.onPrimary(a) else AppTheme.text(a)).apply {
             gravity=Gravity.CENTER;minHeight=dp(a,48);minWidth=dp(a,TOUCH);setPadding(dp(a,16),dp(a,10),dp(a,16),dp(a,10))
-            background=ripple(a,if(primary) AppTheme.ACCENT else Color.TRANSPARENT,16);isFocusable=true;setOnClickListener { run() }
+            background=ripple(a,if(primary) AppTheme.primary(a) else Color.TRANSPARENT,16);isFocusable=true;setOnClickListener { run() }
         }
         actions.addView(action("Cancel",false) { dialog.dismiss() })
         actions.addView(action(submitLabel,true) { onSubmit(field.text.toString().trim(),status,dialog) })
@@ -235,6 +243,41 @@ object RabtaUi {
             wi
         }
         ViewCompat.requestApplyInsets(root)
+    }
+
+    fun section(c:Context, title:String) = text(c,title,13f,true,AppTheme.sub(c)).apply {
+        setPadding(0,dp(c,16),0,dp(c,8));ViewCompat.setAccessibilityHeading(this,true)
+    }
+
+    /** Compact real actions, with a separately styled supporting line and one 48dp touch target. */
+    fun row(c:Context,title:String,detail:String?=null,icon:String?=null,action:()->Unit):LinearLayout = LinearLayout(c).apply {
+        gravity=Gravity.CENTER_VERTICAL;minimumHeight=dp(c,56)
+        setPadding(dp(c,16),dp(c,12),dp(c,12),dp(c,12))
+        background=ripple(c,AppTheme.surface(c),16);isFocusable=true
+        setOnClickListener { action() }
+        if(icon!=null)addView(TextView(c).apply {
+            UiIcons.set(this,icon,AppTheme.accent(c),20,title);gravity=Gravity.CENTER
+            importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        },LinearLayout.LayoutParams(dp(c,24),dp(c,24)).apply {marginEnd=dp(c,12)})
+        val labels=LinearLayout(c).apply {orientation=LinearLayout.VERTICAL}
+        labels.addView(text(c,title,15f,true).apply {setOnClickListener {action()}})
+        if(!detail.isNullOrBlank())labels.addView(text(c,detail,12f,color=AppTheme.sub(c)).apply {setPadding(0,dp(c,4),0,0)})
+        addView(labels,LinearLayout.LayoutParams(0,-2,1f))
+        addView(text(c,"›",20f,color=AppTheme.sub(c)).apply {importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO})
+        layoutParams=LinearLayout.LayoutParams(-1,-2).apply {bottomMargin=dp(c,8)}
+    }
+
+    /** A visible, honest placeholder for a feature Rabta does not have yet. */
+    fun comingSoon(c:Context,title:String,detail:String,icon:String):LinearLayout = row(c,title,detail,icon) {
+        android.widget.Toast.makeText(c,"${L.t(c,title)}: ${L.t(c,"coming soon")}",android.widget.Toast.LENGTH_SHORT).show()
+    }.apply {
+        removeViewAt(childCount-1)
+        addView(badge(c,"Coming soon"))
+        contentDescription="$title. ${L.t(c,"Coming soon")}"
+    }
+    fun badge(c:Context,label:String) = text(c,label,11f,true,AppTheme.violet(c)).apply {
+        background=shape(c,AppTheme.raised(c),999);setPadding(dp(c,10),dp(c,4),dp(c,10),dp(c,4))
+        importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
     }
 
     private fun TextView.isAccessibilityHeadingCompat() { ViewCompat.setAccessibilityHeading(this,true) }

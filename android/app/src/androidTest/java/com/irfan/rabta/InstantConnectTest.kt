@@ -108,9 +108,10 @@ class InstantConnectTest {
         val monitor=inst.addMonitor(ChatActivity::class.java.name,null,false)
         try {
             val offer=a.create("A");val reply=b.respond(offer.raw,"B");val complete=a.approve(reply.raw)
+            inst.runOnMainSync { MessageService.stop(ctx);Session.id=bid;Session.name="B";Session.username="qr_fixture";Session.token="unchanged-fixture-token";Session.serverUrl="https://127.0.0.1:8443" }
+            // History belongs to the signed-in account B, which keeps it after pairing.
             val db=Db.get(ctx);db.upsertConversation(aid,"Saved contact","Keep history",System.currentTimeMillis(),false)
             db.saveMessage(message,aid,aid,"Keep history",System.currentTimeMillis(),false,"received")
-            inst.runOnMainSync { MessageService.stop(ctx);Session.id=bid;Session.name="B";Session.username="qr_fixture";Session.token="unchanged-fixture-token";Session.serverUrl="https://127.0.0.1:8443" }
             screen=inst.startActivitySync(Intent(ctx,InstantConnectActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("pairing_code",complete.raw)) as InstantConnectActivity
             val end=System.currentTimeMillis()+5000;var ready=false
             while(!ready&&System.currentTimeMillis()<end) { inst.runOnMainSync { ready=views(screen!!.window.decorView).filterIsInstance<TextView>().any { it.text=="Confirm identity & open chat" } };Thread.sleep(30) }
@@ -123,7 +124,7 @@ class InstantConnectTest {
         }finally {
             inst.removeMonitor(monitor)
             inst.runOnMainSync { chat?.finish();screen?.finish();MessageService.stop(ctx);Session.id=old[0];Session.name=old[1];Session.username=old[2];Session.token=old[3];Session.serverUrl=old[4] }
-            Db.get(ctx).writableDatabase.delete("messages","id=?",arrayOf(message));Db.get(ctx).writableDatabase.delete("conversations","peer_id=?",arrayOf(aid))
+            ctx.deleteDatabase("rabta_$bid.db")
             clean(aid);clean(bid);ctx.deleteDatabase("mesh_v2_$bid.db");ctx.getSharedPreferences("radar_$bid",0).edit().clear().commit()
         }
     }

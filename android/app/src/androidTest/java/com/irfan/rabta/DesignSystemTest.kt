@@ -98,7 +98,7 @@ class DesignSystemTest {
                 }
                 capture("21-spaces-${mode.lowercase()}")
                 ui { nav("Nearby").performClick() }
-                waitUntil { all(a.window.decorView).filterIsInstance<TextView>().any { it.isShown && it.text=="My contact QR" } }
+                waitUntil { all(a.window.decorView).filterIsInstance<TextView>().any { it.isShown && it.contentDescription=="Search nearby users" } }
                 capture("22-nearby-${mode.lowercase()}")
                 ui { nav("Calls").performClick() }
                 waitUntil { nav("Calls").isSelected }
@@ -129,12 +129,13 @@ class DesignSystemTest {
         try {
             for(mode in listOf("Dark","Light")) {
                 prefs.edit().putString("mode",mode).commit()
-                for(bg in listOf(AppTheme.bg(ctx),AppTheme.surface(ctx))) {
+                for(bg in listOf(AppTheme.bg(ctx),AppTheme.surface(ctx),AppTheme.raised(ctx),AppTheme.sent(ctx))) {
                     for(fg in listOf(AppTheme.text(ctx),AppTheme.sub(ctx),AppTheme.accent(ctx),AppTheme.teal(ctx),AppTheme.error(ctx))) {
                         assertTrue("AA text contrast in $mode",ColorUtils.calculateContrast(fg,bg)>=4.5)
                     }
                 }
                 assertTrue(ColorUtils.calculateContrast(Color.WHITE,AppTheme.ACCENT)>=4.5)
+                assertTrue(ColorUtils.calculateContrast(AppTheme.onPrimary(ctx),AppTheme.primary(ctx))>=4.5)
             }
             prefs.edit().putFloat("scale",1.15f).commit()
             val context=ctx.createConfigurationContext(Configuration(ctx.resources.configuration).apply { fontScale=1.4f })

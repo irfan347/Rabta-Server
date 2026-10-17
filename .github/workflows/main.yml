@@ -144,6 +144,19 @@ jobs:
         run: python3 "$ANDROID_PROJECT_DIR/scripts/check_live_server.py"
       - name: Inspect existing QR dependency
         run: gradle --project-dir android :app:dependencyInsight --dependency com.google.zxing:core --configuration debugRuntimeClasspath --no-daemon
+      - name: Restore stable test signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.RABTA_TEST_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.RABTA_TEST_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "No test signing secrets: this runner's temporary debug key is used, so the APK cannot update an earlier install."
+            exit 0
+          fi
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/rabta-test.jks"
+          echo "RABTA_TEST_KEYSTORE=$RUNNER_TEMP/rabta-test.jks" >> "$GITHUB_ENV"
+          echo "RABTA_TEST_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "Stable test signing key restored."
       - name: Build and test APK
         env:
           ANDROID_PROJECT_DIR: ${{ steps.project.outputs.directory }}
@@ -224,6 +237,37 @@ jobs:
             ${{ steps.project.outputs.directory }}/app/build/outputs/apk/device/*.apk
             ${{ steps.project.outputs.directory }}/app/build/outputs/apk/device/APK-VERIFICATION.txt
           if-no-files-found: error
+      - name: Android lint
+        id: lint
+        run: gradle --project-dir android :app:lintDebug --no-daemon --stacktrace
+      - name: Summarize Android validation reports
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          import collections
+          import xml.etree.ElementTree as ET
+          reports=Path('android/app/build/test-results/testDebugUnitTest')
+          suites=[ET.parse(p).getroot() for p in reports.glob('TEST-*.xml')]
+          print('JVM test totals:',{key:sum(int(s.get(key,0)) for s in suites) for key in ('tests','failures','errors','skipped')})
+          report=Path('android/app/build/reports/lint-results-debug.xml')
+          if report.exists():
+              issues=ET.parse(report).getroot().findall('issue')
+              print('Lint totals:',dict(collections.Counter(i.get('severity') for i in issues)))
+              for issue in issues:
+                  if issue.get('severity') in ('Error','Fatal'):
+                      print(issue.get('id'),issue.get('message'))
+                      for location in issue.findall('location'):
+                          print(location.attrib)
+          PYTHON
+      - name: Upload lint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rabta-lint-reports
+          path: android/app/build/reports/lint-results-debug.*
+          if-no-files-found: ignore
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -275,6 +319,33 @@ jobs:
             bash -c 'if adb shell run-as com.irfan.rabta.testing ls files/rabta-ci-preservation-check >/dev/null 2>&1; then echo "Test package unexpectedly sees original private fixture"; exit 1; fi'
             adb shell run-as com.irfan.rabta rm files/rabta-ci-preservation-check
             bash -c 'result=0; gradle --project-dir android :app:connectedDebugAndroidTest --no-daemon || result=$?; adb pull /sdcard/Download/rabta-interface interface-screenshots || true; exit "$result"'
+      - name: Summarize instrumented test results
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          cases=[]
+          for path in Path('android/app/build/outputs/androidTest-results').rglob('TEST-*.xml'):
+              cases.extend(ET.parse(path).getroot().iter('testcase'))
+          print('Device test totals:',{'tests':len(cases),'failed':sum(c.find('failure') is not None or c.find('error') is not None for c in cases),'skipped':sum(c.find('skipped') is not None for c in cases)})
+          for case in cases:
+              for tag in ('failure','error'):
+                  failure=case.find(tag)
+                  if failure is not None:
+                      print(case.get('classname'),case.get('name'),(failure.text or '')[:6000])
+          PYTHON
+      - name: Review rendered premium screens
+        if: always() && matrix.api == 34
+        shell: bash
+        run: |
+          if [ -f interface-screenshots/premium-review.b64 ]; then
+            echo 'RABTA_PREVIEW_BEGIN'
+            cat interface-screenshots/premium-review.b64
+            echo
+            echo 'RABTA_PREVIEW_END'
+          fi
       - name: Upload interface screenshots
         if: always()
         uses: actions/upload-artifact@v4

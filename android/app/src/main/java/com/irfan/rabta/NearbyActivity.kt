@@ -9,8 +9,13 @@ class NearbyActivity : ThemedActivity() {
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         panel = NearbyPanel(this)
+        panel.restoreState(state)
+        onBackPressedDispatcher.addCallback(this,object:androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {if(!panel.handleBack())finish()}
+        })
         FeatureUi.page(this,"Rabta Radar").addView(panel.view)
     }
+    override fun onSaveInstanceState(state:Bundle) {panel.saveState(state);super.onSaveInstanceState(state)}
     override fun onResume() { super.onResume(); panel.resume() }
     override fun onPause() { panel.pause(); super.onPause() }
     override fun onRequestPermissionsResult(r: Int,p: Array<out String>,g: IntArray) {

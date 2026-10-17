@@ -40,11 +40,14 @@
         <activity android:name=".AuthActivity" android:exported="true" android:windowSoftInputMode="adjustResize"><intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter></activity>
         <activity android:name=".ConversationListActivity" android:exported="false" />
         <activity android:name=".SettingsActivity" android:exported="false" />
+        <activity android:name=".StatusViewerActivity" android:exported="false" />
         <activity android:name=".StatusActivity" android:exported="false" />
         <activity android:name=".NearbyActivity" android:exported="false" />
         <activity android:name=".InstantConnectActivity" android:exported="false" />
         <activity android:name=".InstantScanActivity" android:exported="false" />
         <activity android:name=".NetworkVisionActivity" android:exported="false" />
+        <activity android:name=".DropActivity" android:exported="false" />
+        <activity android:name=".DevicesActivity" android:exported="false" />
         <activity android:name=".ConnectivityDiagnosticsActivity" android:exported="false" />
         <activity android:name=".StarredActivity" android:exported="false" />
         <activity android:name=".ChatActivity" android:exported="false" android:launchMode="singleTop" android:windowSoftInputMode="adjustResize" />
