@@ -44,7 +44,7 @@ class SettingsActivity : ThemedActivity() {
         }
 
         section("APPEARANCE") {
-            row("Theme", AppTheme.mode(this@SettingsActivity), "appearance") { AppTheme.choose(this@SettingsActivity) }
+            row("Theme", "${AppTheme.palette(this@SettingsActivity).name} · ${AppTheme.mode(this@SettingsActivity)}", "appearance") { AppTheme.choose(this@SettingsActivity) }
             row("Language", if (L.prefs(this@SettingsActivity).getString("language", "en") == "ur") "اردو" else "English", "language") {
                 RabtaUi.sheet(this@SettingsActivity, "Language", listOf("English", "اردو").mapIndexed { i, label ->
                     RabtaUi.SheetAction(label, if ((i == 1) == (L.prefs(this@SettingsActivity).getString("language", "en") == "ur")) "Selected" else null) {

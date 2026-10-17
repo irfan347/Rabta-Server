@@ -20,6 +20,7 @@ class VoiceMessageView(context:Context,private val body:String,private val sende
     private var player:MediaPlayer?=null
     private var temporary:File?=null
     private var generation=0
+    private var preparing=false
     private var prepared=false
     private var loading=false
     private var lengthMs=0L
@@ -93,20 +94,22 @@ class VoiceMessageView(context:Context,private val body:String,private val sende
     override fun onAttachedToWindow() { super.onAttachedToWindow();prepareInfo() }
     /** Reads length and waveform in the background so they show before the first tap. */
     private fun prepareInfo() {
-        if(temporary!=null||loading)return
-        val version=generation
+        // Length and waveform are facts about the note: once read they stay, even after playback is stopped.
+        if(preparing||loading||(lengthMs>0&&wave.levels!=null))return
+        preparing=true
         prepWorker.execute {
             val result=runCatching {
                 val f=VoiceAudio.tempFile(context,body)
-                Triple(f,VoiceAudio.durationMs(f.absolutePath),VoiceAudio.envelope(f.absolutePath))
+                try { VoiceAudio.durationMs(f.absolutePath) to VoiceAudio.envelope(f.absolutePath) } finally { f.delete() }
             }
             mainHandler.post {
+                preparing=false
                 val info=result.getOrNull()
                 if(info==null) { if(!prepared) time.text="Voice message";return@post }
-                val (f,length,levels)=info
-                if(version!=generation||!isAttachedToWindow||temporary!=null) { f.delete();return@post }
-                temporary=f;lengthMs=length;wave.levels=levels
-                if(!prepared) time.text=if(length>0) VoiceAudio.format(length) else "Voice message"
+                val (length,levels)=info
+                if(length>0&&lengthMs<=0) lengthMs=length
+                if(levels!=null) wave.levels=levels
+                if(!prepared&&!loading) time.text=if(lengthMs>0) VoiceAudio.format(lengthMs) else "Voice message"
             }
         }
     }

@@ -48,6 +48,7 @@
         <activity android:name=".StatusEditorActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".ContactProfileActivity" android:exported="false" />
         <activity android:name=".ProfilePhotoActivity" android:exported="false" />
+        <activity android:name=".ThemeActivity" android:exported="false" />
         <activity android:name=".NearbyActivity" android:exported="false" />
         <activity android:name=".InstantConnectActivity" android:exported="false" />
         <activity android:name=".InstantScanActivity" android:exported="false" />

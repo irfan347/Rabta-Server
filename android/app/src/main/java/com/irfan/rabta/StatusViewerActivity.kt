@@ -191,7 +191,7 @@ class StatusViewerActivity:ThemedActivity() {
         while(last<ids.size-1&&feed[ids[last+1]]?.optString("owner")==who)last++
         bars.count=last-first+1;bars.index=index-first;bars.fraction=0f
     }
-    private fun spinner()=ProgressBar(this).apply {indeterminateTintList=android.content.res.ColorStateList.valueOf(AppTheme.LIME);contentDescription="Opening status"}
+    private fun spinner()=ProgressBar(this).apply {indeterminateTintList=android.content.res.ColorStateList.valueOf(AppTheme.primary(this@StatusViewerActivity));contentDescription="Opening status"}
 
     private fun render(status:JSONObject,local:String?,bitmap:android.graphics.Bitmap?,request:Int) {
         current=status;header(status)

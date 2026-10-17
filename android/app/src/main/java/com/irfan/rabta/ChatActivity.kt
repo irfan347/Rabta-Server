@@ -184,11 +184,11 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     override fun onResume() {
         super.onResume(); if (!::db.isInitialized) return
         openPeer = peerId
-        uiHandler.post(statusTick); RabtaEvents.add(this)
+        uiHandler.post(statusTick); uiHandler.post(presenceTick); RabtaEvents.add(this)
         Thread { try { db.clearUnread(peerId) } catch (_: Exception) {} }.start()
         if (!isGroup) WsClient.sendRead(peerId, "all")
     }
-    override fun onPause() { voiceViews.forEach { it.stop() }; super.onPause(); openPeer = null; uiHandler.removeCallbacks(statusTick); if(recording) stopVoiceRecord(false) }
+    override fun onPause() { voiceViews.forEach { it.stop() }; super.onPause(); openPeer = null; uiHandler.removeCallbacks(statusTick); uiHandler.removeCallbacks(presenceTick); if(recording) stopVoiceRecord(false) }
     override fun onDestroy() {
         endCall(); if(recording) stopVoiceRecord(false); RabtaEvents.remove(this)
         uiHandler.removeCallbacksAndMessages(null)
@@ -201,10 +201,43 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     }
 
     override fun onKeyboardVisibilityChanged(visible:Boolean) {
+        if(visible) {
+            // Remember the keyboard's height so the emoji panel takes exactly its place.
+            window.decorView.rootWindowInsets?.let { wi ->
+                @Suppress("DEPRECATION")
+                val h=if(android.os.Build.VERSION.SDK_INT>=30) wi.getInsets(android.view.WindowInsets.Type.ime()).bottom-wi.getInsets(android.view.WindowInsets.Type.navigationBars()).bottom
+                    else wi.systemWindowInsetBottom-wi.stableInsetBottom
+                if(h>dp(180)) getSharedPreferences("appearance",0).edit().putInt("keyboard_height",h).apply()
+            }
+            if(panelOpen()&&emojiPanel?.searching!=true) hidePanel()
+        }
         if(visible&&::chatScroll.isInitialized&&nearBottom()) scrollBottom(true)
     }
 
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
+    private val groupSize by lazy { if(isGroup) runCatching { db.group(peerId)?.members?.size }.getOrNull() else null }
+    private var presence=""
+    private val presenceTick=object:Runnable { override fun run() { loadPresence(); uiHandler.postDelayed(this,30000) } }
+    /** The contact's real presence from the server; nothing is guessed when the server cannot say. */
+    private fun loadPresence() {
+        if(isGroup||!Session.loggedIn||!WsClient.connected) return
+        Thread {
+            val r=runCatching { FeatureApi.request("/api/user/id/$peerId") }.getOrNull()
+            uiHandler.post {
+                if(isDestroyed||r==null) return@post
+                presence=when { r.optBoolean("online") -> L.t(this,"online"); r.optLong("lastSeen")>0 -> lastSeen(r.optLong("lastSeen")); else -> "" }
+                updateStatus()
+            }
+        }.start()
+    }
+    private fun lastSeen(t:Long):String {
+        val clock=fmtTime(t)
+        return when(dayKey(t)) {
+            dayKey(System.currentTimeMillis()) -> "last seen today at $clock"
+            dayKey(System.currentTimeMillis()-86_400_000) -> "last seen yesterday at $clock"
+            else -> "last seen "+java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM).format(Date(t))
+        }
+    }
     private val myPhoto by lazy { Session.profilePic.takeIf { it.isNotEmpty() }?.let { MediaHelper.base64ToBitmap(it) } }
     private val PROFILE = 120
     private fun openContactProfile() {
@@ -248,8 +281,8 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         val hdrCol = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(10),0,0,0) }
         hdrCol.addView(TextView(this).apply { text=peerName; textSize=17f; typeface=Typeface.create("sans-serif-medium",Typeface.NORMAL); setTextColor(TXT); maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END })
         val subRow = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
-        statusTv  = TextView(this).apply { textSize=12f; setTextColor(SUB);maxLines=2;ellipsize=android.text.TextUtils.TruncateAt.END }
-        typingTv  = TextView(this).apply { textSize=12f; setTextColor(SUB); text="typing..."; visibility=View.GONE }
+        statusTv  = TextView(this).apply { textSize=13f; setTextColor(SUB);maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END }
+        typingTv  = TextView(this).apply { textSize=13f; setTextColor(AppTheme.accent(this@ChatActivity)); text=L.t(this@ChatActivity,"typing…"); visibility=View.GONE }
         subRow.addView(statusTv); subRow.addView(typingTv)
         hdrCol.addView(subRow)
         hdr.addView(hdrCol, LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
@@ -258,7 +291,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         hdr.addView(RabtaUi.iconButton(this,"search","Search chat") {
             if(searchField.visibility==View.VISIBLE) { searchField.setText("");searchField.visibility=View.GONE;input.requestFocus() }
             else openSearch()
-        })
+        }.apply { UiIcons.set(this,"search",TXT,24,"Search chat") })
         if(!isGroup) {
             hdrCol.setOnClickListener { openContactProfile() }
             headerAvatar.setOnClickListener { openContactProfile() }
@@ -267,8 +300,9 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         }
         headerBar=hdr
         root.addView(hdr)
+        // One slim line while offline (tap for the full connection details), not a block of text.
         offlineBanner=RabtaUi.text(this,"",12f,color=AppTheme.sub(this)).apply {
-            minHeight=dp(48);gravity=Gravity.CENTER_VERTICAL;setPadding(dp(16),dp(8),dp(16),dp(8))
+            minHeight=dp(36);gravity=Gravity.CENTER;setPadding(dp(16),dp(6),dp(16),dp(6));maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END
             background=RabtaUi.ripple(this@ChatActivity,AppTheme.raised(this@ChatActivity),0)
             setOnClickListener { ConnectionHelp.show(this@ChatActivity) }
         }
@@ -323,10 +357,10 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
 
         // ── Chat area ──
         chatScroll = ScrollView(this).apply {
-            setBackgroundColor(BEIGE);isVerticalScrollBarEnabled=false;isSmoothScrollingEnabled=true
+            background=ChatWallpaper(this@ChatActivity);isVerticalScrollBarEnabled=false;isSmoothScrollingEnabled=true
             descendantFocusability=ViewGroup.FOCUS_BLOCK_DESCENDANTS;clipToPadding=false
         }
-        chatBox = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(8),dp(16),dp(16)) }
+        chatBox = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(10),dp(6),dp(10),dp(12)) }
         chatScroll.addView(chatBox)
         root.addView(chatScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,0,1f))
 
@@ -463,34 +497,31 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         root.addView(composerBar)
     }
 
-    private val EMOJIS="😀 😂 🤣 😊 😍 🥰 😘 😎 🤩 🥳 😇 🙂 😉 😋 😜 🤔 🤗 🤭 😴 😢 😭 😡 🥺 😱 👍 👎 👏 🙏 🤝 💪 👌 ✌️ 🤞 👋 ❤️ 💚 💙 💜 🖤 💯 🔥 ✨ 🎉 🌹 🌙 ☀️ ⭐ ☕ 🍕 🎂 ⚽ 🏏 🕌 📿 ✅ ❌".split(" ")
-    /** Inserts at the cursor; the keyboard's own emoji panel still works too. */
-    private fun showEmojiPicker() {
-        val dialog=android.app.Dialog(this)
-        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
-        val grid=android.widget.GridLayout(this).apply { columnCount=7;setPadding(dp(12),dp(12),dp(12),dp(12)) }
-        EMOJIS.forEach { emoji ->
-            grid.addView(TextView(this).apply {
-                text=emoji;textSize=26f;gravity=Gravity.CENTER;isFocusable=true;contentDescription=emoji
-                background=RabtaUi.ripple(this@ChatActivity,Color.TRANSPARENT,12)
-                setOnClickListener { val at=input.selectionStart.coerceAtLeast(0);input.text.insert(at,emoji) }
-            },android.widget.GridLayout.LayoutParams().apply { width=dp(46);height=dp(48) })
-        }
-        val sheet=LinearLayout(this).apply {
-            orientation=LinearLayout.VERTICAL;background=RabtaUi.shape(this@ChatActivity,RECV,24)
-            addView(LinearLayout(this@ChatActivity).apply {
-                gravity=Gravity.CENTER_VERTICAL;setPadding(dp(16),dp(8),dp(4),0)
-                addView(RabtaUi.text(this@ChatActivity,"Emoji",17f,true),LinearLayout.LayoutParams(0,-2,1f))
-                addView(RabtaUi.button(this@ChatActivity,"Stickers") { dialog.dismiss();Stickers.picker(this@ChatActivity,{sendContent(it,"sticker")},{pickAttachment("image/*",104)}) }.apply {
-                    layoutParams=LinearLayout.LayoutParams(-2,-2);background=RabtaUi.ripple(this@ChatActivity,Color.TRANSPARENT,16);setTextColor(AppTheme.accent(this@ChatActivity))
-                })
-            })
-            addView(ScrollView(this@ChatActivity).apply { addView(grid) },LinearLayout.LayoutParams(-2,dp(300)))
-        }
-        dialog.setContentView(sheet)
-        dialog.window?.apply { setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));setGravity(Gravity.BOTTOM) }
-        dialog.show()
+    // ── Emoji, GIF and sticker panel in the keyboard's place (WhatsApp-style) ──
+    private var emojiPanel:EmojiPanel?=null
+    private fun panelOpen()=emojiPanel?.visibility==View.VISIBLE
+    private fun keyboardHeight()=getSharedPreferences("appearance",0).getInt("keyboard_height",0).takeIf { it>dp(180) } ?: dp(300)
+    private fun showEmojiPicker() { if(panelOpen()) { hidePanel();showKeyboard() } else showPanel() }
+    private fun showPanel() {
+        val panel=emojiPanel ?: EmojiPanel(this,
+            insert={ e -> val at=input.selectionStart.coerceAtLeast(0);input.text.insert(at,e) },
+            backspace={ input.dispatchKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN,android.view.KeyEvent.KEYCODE_DEL));input.dispatchKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP,android.view.KeyEvent.KEYCODE_DEL)) },
+            sendSticker={ sendContent(it,"sticker") },
+            importSticker={ pickAttachment("image/*",104) },
+            searchChanged={ searching -> emojiPanel?.layoutParams=LinearLayout.LayoutParams(-1,if(searching) -2 else keyboardHeight()) }
+        ).also { emojiPanel=it;composerBar.addView(it,LinearLayout.LayoutParams(-1,keyboardHeight())) }
+        (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(input.windowToken,0)
+        panel.layoutParams=LinearLayout.LayoutParams(-1,keyboardHeight())
+        panel.visibility=View.VISIBLE;setEmojiIcon(true)
     }
+    private fun hidePanel() { emojiPanel?.let { it.stopSearch();it.visibility=View.GONE };setEmojiIcon(false) }
+    private fun showKeyboard() { input.requestFocus();androidx.core.view.WindowCompat.getInsetsController(window,input).show(androidx.core.view.WindowInsetsCompat.Type.ime()) }
+    private fun setEmojiIcon(panel:Boolean) {
+        (emojiBtn as? ImageView)?.setImageDrawable(UiIcons.drawable(this,if(panel) "keyboard" else "emoji",SUB,24))
+        emojiBtn.contentDescription=if(panel) "Keyboard" else "Emoji"
+    }
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() { if(panelOpen()) hidePanel() else super.onBackPressed() }
 
     private var captureUri:android.net.Uri?=null
     private fun takePhoto() {
@@ -551,10 +582,14 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
                             else RabtaUi.empty(this,"chats","Start the conversation","Messages you send and receive will appear here."))
                     }
                     var lastDay=""
+                    var previous:Db.Message?=null
                     items.forEach { (m,meta,progress) ->
                         val day=dayKey(m.sentAt)
-                        if(day!=lastDay) { addDateSeparator(m.sentAt);lastDay=day }
-                        addBubble(m,meta,progress)
+                        val newDay=day!=lastDay
+                        if(newDay) { addDateSeparator(m.sentAt);lastDay=day }
+                        val continued=!newDay&&previous?.let { it.mine==m.mine&&it.fromId==m.fromId&&m.sentAt-it.sentAt<10*60_000 }==true
+                        addBubble(m,meta,progress,continued)
+                        previous=m
                     }
                     if(replyTo==null&&draftReplyId!=null) {
                         items.firstOrNull { it.first.id==draftReplyId }?.first?.let { selectReply(it,false) }
@@ -592,7 +627,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         },LinearLayout.LayoutParams(-2,-2).apply { gravity=Gravity.CENTER;topMargin=dp(16);bottomMargin=dp(14) })
     }
 
-    private fun bubbleSurface(mine:Boolean)=object:LinearLayout(this) {
+    private fun bubbleSurface(mine:Boolean,tail:Boolean)=object:LinearLayout(this) {
         override fun onMeasure(widthMeasureSpec:Int,heightMeasureSpec:Int) {
             val limit=minOf(dp(420),(View.MeasureSpec.getSize(widthMeasureSpec)*0.86f).toInt())
             val contentWidth=(limit-paddingLeft-paddingRight).coerceAtLeast(0)
@@ -604,17 +639,17 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         }
     }.apply {
         orientation=LinearLayout.VERTICAL
-        background=RabtaUi.shape(this@ChatActivity,if(mine) SENT else RECV,20,null).apply {
-            val r=dp(20).toFloat();val corner=dp(6).toFloat()
-            cornerRadii=if(mine) floatArrayOf(r,r,r,r,corner,corner,r,r) else floatArrayOf(r,r,r,r,r,r,corner,corner)
-        }
-        setPadding(dp(14),dp(12),dp(14),dp(8))
+        val drawn=BubbleDrawable(if(mine) SENT else RECV,mine,tail,dp(12).toFloat(),dp(7).toFloat())
+        background=drawn
+        val t=drawn.tail.toInt()
+        setPadding(dp(10)+(if(mine) 0 else t),dp(6),dp(10)+(if(mine) t else 0),dp(5))
     }
 
-    private fun addBubble(m:Db.Message,meta:Pair<Boolean,String>,progress:Int?) {
-        val bubble=bubbleSurface(m.mine)
+    private fun addBubble(m:Db.Message,meta:Pair<Boolean,String>,progress:Int?,continued:Boolean=false) {
+        val bubble=bubbleSurface(m.mine,!continued)
         bubble.tag="bubble:${m.id}"
-        if(isGroup&&!m.mine) bubble.addView(RabtaUi.text(this,m.fromName.ifBlank { peerName },13f,true,AppTheme.accent(this)).apply { setPadding(0,0,0,dp(6)) })
+        if(isGroup&&!m.mine&&!continued) bubble.addView(RabtaUi.text(this,m.fromName.ifBlank { peerName },13f,true,AppTheme.accent(this)).apply { setPadding(0,0,0,dp(2)) })
+        var timeInline=false
         when(m.msgType) {
             "rich" -> {
                 val o=runCatching { org.json.JSONObject(m.body) }.getOrNull()
@@ -624,7 +659,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
                         background=RabtaUi.shape(this@ChatActivity,AppTheme.raised(this@ChatActivity),12)
                         setPadding(dp(12),dp(8),dp(12),dp(8));contentDescription="Quoted message: ${o.optString("reply")}"
                     },LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(8) })
-                    bubble.addView(textLine(o.optString("text")))
+                    bubble.addView(InlineMetaLayout(this,textLine(o.optString("text")),msgFooter(m)));timeInline=true
                 } else bubble.addView(textLine("Reply could not be displayed"))
             }
             "image" -> {
@@ -655,9 +690,9 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
                 else runCatching { iv.setImageURI(android.net.Uri.fromFile(Attachments.file(this,m.body))) }
                 bubble.addView(iv,LinearLayout.LayoutParams(dp(150),dp(150)))
             }
-            else -> bubble.addView(textLine(m.body))
+            else -> { bubble.addView(InlineMetaLayout(this,textLine(m.body),msgFooter(m)));timeInline=true }
         }
-        bubble.addView(msgFooter(m))
+        if(!timeInline) bubble.addView(msgFooter(m),LinearLayout.LayoutParams(-2,-2).apply { gravity=Gravity.END;topMargin=dp(4) })
         val reactions=runCatching { org.json.JSONObject(meta.second) }.getOrDefault(org.json.JSONObject())
         val emojis=reactions.keys().asSequence().map { reactions.optString(it) }.groupingBy { it }.eachCount().entries.joinToString("  ") { it.key+" "+it.value }
         if(meta.first||emojis.isNotEmpty())bubble.addView(RabtaUi.text(this,(if(meta.first) "★  " else "")+emojis,12f,color=SUB))
@@ -676,24 +711,21 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             })
         }
         val wrap=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL;gravity=if(m.mine) Gravity.END else Gravity.START;tag="message:${m.id}" }
-        wrap.addView(bubble,LinearLayout.LayoutParams(-2,-2).apply { bottomMargin=dp(8) })
+        wrap.addView(bubble,LinearLayout.LayoutParams(-2,-2).apply { topMargin=if(continued) dp(2) else dp(8) })
         chatBox.addView(wrap,LinearLayout.LayoutParams(-1,-2))
     }
 
-    private fun textLine(t:String)=RabtaUi.text(this,t,16f).apply { setLineSpacing(dp(2).toFloat(),1.1f) }
-    private fun msgFooter(m:Db.Message)=RabtaUi.text(this,fmtTime(m.sentAt)+(if(m.mine) "  ·  "+MessageDelivery.label(m.status) else ""),12f,color=SUB).apply {
-        gravity=Gravity.END;setPadding(0,dp(8),0,0)
-        contentDescription=java.text.DateFormat.getDateTimeInstance().format(Date(m.sentAt))+(if(m.mine) ", "+MessageDelivery.label(m.status) else "")
+    private fun textLine(t:String)=RabtaUi.text(this,t,16f).apply { setLineSpacing(dp(1).toFloat(),1.05f) }
+    /** Time and, on your own messages, the tick: clock, ✓, ✓✓, blue ✓✓ or a red mark. The words stay for screen readers. */
+    private fun msgFooter(m:Db.Message)=TextView(this).apply {
+        textSize=11f;setTextColor(SUB);maxLines=1;includeFontPadding=false
+        val line=android.text.SpannableStringBuilder(fmtTime(m.sentAt))
         if(m.mine) {
-            val value=text.toString();val offset=value.indexOf("  ·  ")+5
-            text=android.text.SpannableString(value).apply {
-                setSpan(android.text.style.ForegroundColorSpan(when(m.status) {
-                    "read","delivered","direct_delivered"->AppTheme.teal(this@ChatActivity)
-                    "failed","expired","canceled"->AppTheme.error(this@ChatActivity)
-                    else->SUB
-                }),offset,length,android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            }
+            val color=when { m.status==MessageDelivery.READ -> AppTheme.readTick(this@ChatActivity); MessageDelivery.retryable(m.status) -> AppTheme.error(this@ChatActivity); else -> SUB }
+            line.append(" ").append(UiIcons.inline(this@ChatActivity,MessageDelivery.tickIcon(m.status),color,16))
         }
+        text=line
+        contentDescription=java.text.DateFormat.getDateTimeInstance().format(Date(m.sentAt))+(if(m.mine) ", "+MessageDelivery.label(m.status) else "")
     }
     private fun scrollBottom(smooth:Boolean=false) {
         chatScroll.post {
@@ -702,11 +734,18 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         }
     }
     private fun updateStatus() {
-        statusTv.text=if(isGroup) "Group · ${WsClient.status}" else "Your connection: ${WsClient.status}"
-        statusTv.contentDescription="Your connection: ${ConnectionStatus.text(this)}"
-        offlineBanner.visibility=if(WsClient.connected||inCall) View.GONE else View.VISIBLE
-        offlineBanner.text=if(isGroup) "No server connection · Group messages need internet. Tap for connection details."
-            else "No server connection · Nearby supports text and built-in stickers. Tap for connection details."
+        // Like WhatsApp: the subtitle is about the contact (online, last seen); our own link only shows while it is down.
+        val connected=WsClient.connected
+        statusTv.text=when {
+            !connected -> L.t(this,"Connecting…")
+            isGroup -> groupSize?.let { "$it members" } ?: L.t(this,"Group")
+            presence.isNotBlank() -> presence
+            else -> L.t(this,"tap here for contact info")
+        }
+        statusTv.contentDescription=if(connected) statusTv.text else "Your connection: ${ConnectionStatus.text(this)}"
+        offlineBanner.visibility=if(connected||inCall) View.GONE else View.VISIBLE
+        offlineBanner.text=L.t(this,if(isGroup) "Waiting for network · Group messages need internet  ›" else "Waiting for network · Nearby text still works  ›")
+        offlineBanner.contentDescription="${offlineBanner.text}. Tap for connection details"
     }
 
     // ── Send ──
@@ -908,7 +947,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     }
 
     // ── RabtaEvents ──
-    override fun onConnected() { updateStatus(); if(openPeer==peerId && !isGroup) WsClient.sendRead(peerId,"all") }
+    override fun onConnected() { updateStatus(); loadPresence(); if(openPeer==peerId && !isGroup) WsClient.sendRead(peerId,"all") }
     override fun onDisconnected() { updateStatus(); if(inCall) { endCall(false); toast("Call disconnected") } }
     override fun onHistoryChanged(convId:String) { if(convId==peerId) loadHistory() }
     override fun onMessage(fromId:String,fromName:String,msgId:String,body:String,t:Long,msgType:String,groupId:String) {

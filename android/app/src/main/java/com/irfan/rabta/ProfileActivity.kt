@@ -90,7 +90,7 @@ class ProfileActivity : ThemedActivity() {
         // Settings rows with coloured icon circles.
         val actions = group()
         navRow(actions, "status", AppTheme.accent(this), "Availability", "Show when you're free to chat", soon = true) {}
-        navRow(actions, "appearance", AppTheme.violet(this), "Appearance", if (AppTheme.dark(this)) "NOVA Dark · ${AppTheme.mode(this)}" else "NOVA Light · ${AppTheme.mode(this)}") { AppTheme.choose(this) }
+        navRow(actions, "appearance", AppTheme.violet(this), "Appearance", "${AppTheme.palette(this).name} · ${AppTheme.mode(this)} · themes and accent colour") { AppTheme.choose(this) }
         navRow(actions, "privacy", AppTheme.violet(this), "Privacy & Security", "App lock, blocked contacts, language") { startActivity(Intent(this, SettingsActivity::class.java)) }
         navRow(actions, "notifications", AppTheme.teal(this), "Notifications", "Sound, vibration and importance") {
             startActivity(Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, packageName))

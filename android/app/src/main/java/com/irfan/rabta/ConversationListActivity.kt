@@ -552,22 +552,14 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         val out=android.text.SpannableStringBuilder()
         // Own last message: ✓ relayed, ✓✓ delivered, blue ✓✓ read, a clock while waiting, red ! when it failed.
         if(mineStatus!=null) {
-            val (icon,color)=when {
-                mineStatus==MessageDelivery.READ -> "done_all" to READ_BLUE
-                MessageDelivery.delivered(mineStatus) -> "done_all" to SUB
-                mineStatus==MessageDelivery.RELAYED||mineStatus=="sent" -> "check" to SUB
-                MessageDelivery.retryable(mineStatus) -> "error" to AppTheme.error(this)
-                else -> "clock" to SUB
-            }
-            out.append(TextView(this).also { UiIcons.set(it,icon,color,17,icon) }.text).append(" ")
+            val color=when { mineStatus==MessageDelivery.READ -> AppTheme.readTick(this); MessageDelivery.retryable(mineStatus) -> AppTheme.error(this); else -> SUB }
+            out.append(UiIcons.inline(this,MessageDelivery.tickIcon(mineStatus),color,17)).append(" ")
         }
         val voice=last=="Voice note"||last.startsWith("🎤 ")
         if(!voice) return out.append(last)
         val label=last.removePrefix("🎤 ").let { if(it=="Voice note") "Voice message" else it }
-        val icon=TextView(this).also { UiIcons.set(it,"mic",AppTheme.accent(this),16,"Voice") }.text
-        return out.append(icon).append(" ").append(label)
+        return out.append(UiIcons.inline(this,"mic",AppTheme.accent(this),16)).append(" ").append(label)
     }
-    private val READ_BLUE = 0xFF53BDEB.toInt()
 
     private fun divider() = View(this).apply { setBackgroundColor(DIV) }.also {
         it.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)).apply { marginStart = dp(78) }

@@ -112,8 +112,10 @@ class ContactProfileActivity : ThemedActivity() {
     private fun tile(icon: String, label: String, run: () -> Unit) = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; isFocusable = true; contentDescription = label
         background = RabtaUi.ripple(this@ContactProfileActivity, AppTheme.surface(this@ContactProfileActivity), 18); setOnClickListener { run() }
-        addView(UiIcons.image(this@ContactProfileActivity, icon, AppTheme.accent(this@ContactProfileActivity), 26, label).apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }, LinearLayout.LayoutParams(-2, dp(30)))
-        addView(RabtaUi.text(this@ContactProfileActivity, label, 13f, true).apply { setPadding(0, dp(6), 0, 0); importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO })
+        addView(UiIcons.image(this@ContactProfileActivity, icon, AppTheme.accent(this@ContactProfileActivity), 26, label).apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO },
+            LinearLayout.LayoutParams(dp(30), dp(30)).apply { gravity = Gravity.CENTER_HORIZONTAL })
+        addView(RabtaUi.text(this@ContactProfileActivity, label, 13f, true).apply { gravity = Gravity.CENTER; setPadding(0, dp(6), 0, 0); importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO },
+            LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.CENTER_HORIZONTAL })
     }
     private fun row(parent: LinearLayout, icon: String, iconColor: Int, title: String, detail: String?, titleColor: Int = AppTheme.text(this), run: () -> Unit): LinearLayout {
         val r = LinearLayout(this).apply {

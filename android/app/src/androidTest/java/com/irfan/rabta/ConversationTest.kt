@@ -65,8 +65,9 @@ class ConversationTest {
             fun incoming()=views().first { it.tag=="bubble:convo-incoming" }
             waitUi { views().any { it.tag=="bubble:convo-incoming" } }
             ui {
-                assertTrue("Stored Nearby states read as Queued",views().filterIsInstance<TextView>().any { it.text.contains("Queued") })
-                assertTrue("Stored server acceptance reads as Relayed, not Delivered",views().filterIsInstance<TextView>().any { it.text.contains("Relayed") })
+                assertTrue("Stored Nearby states read as Queued",views().any { it.contentDescription?.contains("Queued")==true })
+                assertTrue("Stored server acceptance reads as Relayed, not Delivered",views().any { it.contentDescription?.contains("Relayed")==true })
+                assertFalse(views().any { it.contentDescription?.contains("Delivered")==true })
                 assertTrue(views().filterIsInstance<TextView>().any { it.text=="Yesterday" })
                 for(v in views().filter { it.tag?.toString()?.startsWith("bubble:")==true })assertTrue(v.width<=(v.parent as View).width)
                 incoming().performLongClick()
@@ -113,10 +114,10 @@ class ConversationTest {
             assertTrue("Retry went through the existing websocket",sent.await(8,TimeUnit.SECONDS))
             assertEquals("convo-failed",wireId)
             // The server's ack only proves it relayed the message; the recipient's receipt proves delivery.
-            waitUi { all(a.window.decorView).filterIsInstance<TextView>().any { it.text.contains("Relayed") } }
+            waitUi { all(a.window.decorView).any { it.contentDescription?.contains("Relayed")==true } }
             assertEquals("relayed",db.status("convo-failed"))
             socket!!.send(JSONObject().put("type","receipt").put("id",wireId).put("by",peer).toString())
-            waitUi { all(a.window.decorView).filterIsInstance<TextView>().any { it.text.contains("Delivered") } }
+            waitUi { all(a.window.decorView).any { it.contentDescription?.contains("Delivered")==true } }
             assertEquals(1,db.messages(peer).count { it.id=="convo-failed" })
             assertEquals("Retry this exact payload",db.messages(peer).first { it.id=="convo-failed" }.body)
             assertEquals("delivered",db.status("convo-failed"))
