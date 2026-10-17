@@ -69,6 +69,7 @@ class NearbyPanel(private val activity:Activity) {
                 .setPrompt("Scan a trusted Rabta contact").setBeepEnabled(false).setOrientationLocked(false).initiateScan()
         })
         view.addView(RabtaUi.button(activity,"Connection tools") { tools() })
+        view.addView(RabtaUi.button(activity,"Network Vision") { activity.startActivity(Intent(activity,NetworkVisionActivity::class.java)) })
         view.addView(RabtaUi.button(activity,"Connectivity diagnostics") { activity.startActivity(Intent(activity,ConnectivityDiagnosticsActivity::class.java)) })
         view.addView(FeatureUi.text(activity,"Approved Nearby connections support encrypted text and built-in stickers using the existing mesh. Files, Status, groups and calls require internet. Delivery needs a recipient receipt."))
     }
@@ -206,3 +207,4 @@ class NearbyPanel(private val activity:Activity) {
         return true
     }
 }
+

@@ -42,6 +42,7 @@ class ConnectivityDiagnosticsActivity:ThemedActivity() {
         deliveries=section(body,"Outgoing delivery states")
         relay=section(body,"Relay evidence")
         updated=FeatureUi.text(this,"Loading diagnostics…");body.addView(updated)
+        body.addView(RabtaUi.button(this,"Network Vision") { startActivity(Intent(this,NetworkVisionActivity::class.java)) })
         body.addView(RabtaUi.button(this,"Refresh diagnostics",true) { refresh() })
         body.addView(RabtaUi.button(this,"Retry connections") {
             if(WsClient.authRequired)startActivity(Intent(this,AuthActivity::class.java).putExtra("reauth",true))
@@ -122,3 +123,4 @@ class ConnectivityDiagnosticsActivity:ThemedActivity() {
         }.start()
     }
 }
+

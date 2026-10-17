@@ -20,12 +20,15 @@ class Router(private val ctx:Context,private val ui:UiListener,transportFactory:
     }
     companion object { const val START_HOPS=MeshPolicy.HOPS }
     private val mesh:MeshTransport=transportFactory?.invoke(this)?:Mesh(ctx,this)
+    private val vision=NetworkVisionTrace()
     private val matchedKeys=java.util.concurrent.ConcurrentHashMap<String,String>()
     private val relayAccepted=java.util.concurrent.atomic.AtomicLong()
     private val receiptsAccepted=java.util.concurrent.atomic.AtomicLong()
     private var transportPaused=true
     fun snapshot()=MeshRuntimeSnapshot(running,mesh.active,mesh.discoveredCount,mesh.connectingCount,
         mesh.connected.map { (endpoint,name)->MeshPeer(mesh.userIdOf[endpoint].orEmpty(),name,matchedKeys[endpoint]==mesh.userIdOf[endpoint] && matchedKeys.containsKey(endpoint)) },relayAccepted.get(),receiptsAccepted.get())
+    fun networkObservation()=NetworkObservation(myId,snapshot(),mesh.discoveredPeerIds(),
+        mesh.radarPeers().associate { it.id to it.stage },vision.events(),vision.receiptTimes())
     private val worker=Executors.newSingleThreadExecutor()
     private val main=Handler(Looper.getMainLooper())
     private lateinit var store:MeshStore
@@ -58,7 +61,7 @@ class Router(private val ctx:Context,private val ui:UiListener,transportFactory:
     }
     @Synchronized fun stop() {
         if(worker.isShutdown)return
-        running=false;securityReady=false;main.removeCallbacks(pulse);mesh.stop();matchedKeys.clear()
+        running=false;securityReady=false;main.removeCallbacks(pulse);mesh.stop();matchedKeys.clear();vision.clear()
         worker.execute { if(::store.isInitialized)store.close() };worker.shutdown()
     }
     fun hasKey(peer:String)=running && security.key(peer)!=null
@@ -67,7 +70,10 @@ class Router(private val ctx:Context,private val ui:UiListener,transportFactory:
         if(type!="text" && !(type=="sticker" && Stickers.valid(body))) return false
         if(store.contains(msgId))return true
         val ok=store.pending(MeshStore.Pending(msgId,toId,body,type,System.currentTimeMillis()))
-        if(ok) enqueue { flushPending(); carry() }
+        if(ok) {
+            vision.queued(msgId,toId,android.os.SystemClock.elapsedRealtime(),System.currentTimeMillis())
+            enqueue { flushPending(); carry() }
+        }
         return ok
     }
     private fun maintain() {
@@ -143,6 +149,7 @@ class Router(private val ctx:Context,private val ui:UiListener,transportFactory:
             if(packet!=null && packet.optString("t")==from && packet.optString("f")==to) store.remove(original)
             if(to==myId) {
                 if(!store.seen(id) && Db.get(ctx).status(original)!=null && Db.get(ctx).conversationForMessage(original)==from) {
+                    vision.delivered(original,from,android.os.SystemClock.elapsedRealtime(),System.currentTimeMillis())
                     receiptsAccepted.incrementAndGet();RabtaEvents.postAck(original,"delivered")
                 }
                 store.mark(id,expiry); return
@@ -154,7 +161,10 @@ class Router(private val ctx:Context,private val ui:UiListener,transportFactory:
             val body=plain.getString("body"); val type=plain.optString("type","text")
             if(body.toByteArray().size>12000 || (type!="text" && !(type=="sticker" && Stickers.valid(body)))) return
             ui.onMeshMessage(id,from,plain.optString("name",from),body,sent,START_HOPS-h+1,type) {
-                enqueue { store.mark(id,expiry); receipt(id,from,expiry) }
+                enqueue {
+                    vision.received(id,from,System.currentTimeMillis())
+                    store.mark(id,expiry); receipt(id,from,expiry)
+                }
             }
             return
         }
@@ -162,7 +172,11 @@ class Router(private val ctx:Context,private val ui:UiListener,transportFactory:
         val remaining=MeshPolicy.forwardHops(h)
         if(remaining==0) { store.mark(id,expiry); return }
         o.put("h",remaining)
-        if(store.put(id,o.toString(),expiry)) { relayAccepted.incrementAndGet();store.mark(id,expiry);mesh.sendEnvelopeToAll(o.toString(),source) }
+        if(store.put(id,o.toString(),expiry)) {
+            val directSource=mesh.userIdOf[source]?.takeIf { matchedKeys[source]==it }
+            vision.relay(id,directSource,System.currentTimeMillis())
+            relayAccepted.incrementAndGet();store.mark(id,expiry);mesh.sendEnvelopeToAll(o.toString(),source)
+        }
     }
     private fun receipt(original:String,to:String,originalExpiry:Long) {
         val id=MessageDigest.getInstance("SHA-256").digest(("receipt:"+myId+":"+original).toByteArray()).take(6).joinToString("") { "%02X".format(it) }
@@ -184,3 +198,4 @@ class Router(private val ctx:Context,private val ui:UiListener,transportFactory:
     override fun onStatus(msg:String)=ui.onStatus(msg)
     override fun onRadarRequest(name:String) { main.post { if(running)ui.onRadarRequest(name) } }
 }
+

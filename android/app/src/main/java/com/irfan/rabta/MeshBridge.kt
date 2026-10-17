@@ -10,6 +10,7 @@ object MeshBridge {
 
     val running get() = router?.running == true
     fun snapshot()=router?.snapshot()?:MeshRuntimeSnapshot()
+    fun networkObservation()=router?.networkObservation()?:NetworkObservation()
     fun radarPeers()=router?.radarPeers()?:emptyList()
     fun requestConnection(endpoint:String)=router?.requestConnection(endpoint)==true
     fun approveConnection(endpoint:String)=router?.approveConnection(endpoint)==true
@@ -30,3 +31,4 @@ object MeshBridge {
     fun sendDirect(toId: String, msgId: String, body: String, type: String = "text"): Boolean =
         router?.sendDirect(toId, msgId, body, type) ?: false
 }
+

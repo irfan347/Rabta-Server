@@ -52,6 +52,7 @@ class Mesh(private val ctx: Context, private val cb: Listener,clientFactory:(()-
     private val radar=RadarGate { Privacy.blocked(ctx,it,selfId) }
     private fun now()=android.os.SystemClock.elapsedRealtime()
     override val discoveredCount get()=found.size
+    override fun discoveredPeerIds()=found.values.map { it.second }.toSet()
     override val connectingCount get()=radar.pendingCount()
     private fun current(generation:Int)=generation==epoch && (starting||active)
     override fun retryConnections() {
@@ -253,3 +254,4 @@ class Mesh(private val ctx: Context, private val cb: Listener,clientFactory:(()-
         }
     }
 }
+

@@ -44,6 +44,7 @@
         <activity android:name=".NearbyActivity" android:exported="false" />
         <activity android:name=".InstantConnectActivity" android:exported="false" />
         <activity android:name=".InstantScanActivity" android:exported="false" />
+        <activity android:name=".NetworkVisionActivity" android:exported="false" />
         <activity android:name=".ConnectivityDiagnosticsActivity" android:exported="false" />
         <activity android:name=".StarredActivity" android:exported="false" />
         <activity android:name=".ChatActivity" android:exported="false" android:launchMode="singleTop" android:windowSoftInputMode="adjustResize" />
@@ -65,3 +66,4 @@
 
     </application>
 </manifest>
+
