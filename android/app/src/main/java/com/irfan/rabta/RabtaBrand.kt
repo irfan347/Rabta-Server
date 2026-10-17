@@ -37,5 +37,23 @@ object RabtaBrand {
         return row
     }
 
+    /** NOVA header wordmark: the bare R mark and "rabta" with a lime full stop. */
+    fun wordmark(context: Context, markDp: Int, textSizeSp: Float): LinearLayout = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; contentDescription = "Rabta"
+        addView(ImageView(context).apply {
+            setImageResource(R.drawable.rabta_mark); scaleType = ImageView.ScaleType.FIT_CENTER
+            importantForAccessibility = ImageView.IMPORTANT_FOR_ACCESSIBILITY_NO
+            // Lime reads on navy; light mode uses the deep NOVA green.
+            if (!AppTheme.dark(context)) setColorFilter(AppTheme.accent(context))
+        }, LinearLayout.LayoutParams(dp(context, markDp), dp(context, markDp)))
+        addView(TextView(context).apply {
+            text = android.text.SpannableString("rabta.").apply {
+                setSpan(android.text.style.ForegroundColorSpan(AppTheme.accent(context)), length - 1, length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+            textSize = textSizeSp; typeface = Typeface.create("sans-serif", Typeface.BOLD); setTextColor(AppTheme.text(context))
+            includeFontPadding = false; maxLines = 1; importantForAccessibility = TextView.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(context, 8) })
+    }
+
     private fun dp(context: Context, value: Int): Int = (value * context.resources.displayMetrics.density).toInt()
 }

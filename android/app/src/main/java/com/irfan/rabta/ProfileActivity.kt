@@ -19,75 +19,97 @@ class ProfileActivity : ThemedActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Session.init(this)
-        val body = FeatureUi.page(this, "Profile")
+        val d = { n: Int -> RabtaUi.dp(this, n) }
+        // NOVA page: back · Profile · settings, then a full-width hero and grouped cards.
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(AppTheme.bg(this@ProfileActivity)) }
+        val head = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(d(8), d(8), d(8), d(4)) }
+        head.addView(RabtaUi.iconButton(this, "back", "Back") { finish() }.apply { UiIcons.set(this, "back", AppTheme.text(this@ProfileActivity), 24, "Back") })
+        head.addView(RabtaUi.text(this, "Profile", 22f, true).apply { androidx.core.view.ViewCompat.setAccessibilityHeading(this, true); setPadding(d(4), 0, 0, 0) }, LinearLayout.LayoutParams(0, -2, 1f))
+        head.addView(RabtaUi.iconButton(this, "settings", "Settings") { startActivity(Intent(this, SettingsActivity::class.java)) })
+        root.addView(head)
+        val scroll = ScrollView(this).apply { isVerticalScrollBarEnabled = false }
+        val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(d(16), 0, d(16), d(24)) }
+        scroll.addView(body); root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f)); setContentView(root)
 
-        // NOVA hero: centred avatar with a lime ring, name, username and two real actions.
-        val hero = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
-            background = RabtaUi.shape(this@ProfileActivity, AppTheme.surface(this@ProfileActivity), 24)
-            setPadding(RabtaUi.dp(this@ProfileActivity, 16), RabtaUi.dp(this@ProfileActivity, 20), RabtaUi.dp(this@ProfileActivity, 16), RabtaUi.dp(this@ProfileActivity, 16))
-        }
+        // Hero: signal waves, avatar with lime ring and camera badge, name with presence dot, username.
+        val hero = FrameLayout(this)
+        hero.addView(WaveHeroView(this), FrameLayout.LayoutParams(-1, -1))
+        val heroCol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(0, d(12), 0, d(16)) }
         avatar = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP; background = RabtaUi.shape(this@ProfileActivity, AppTheme.accent(this@ProfileActivity), 999)
-            clipToOutline = true; contentDescription = "Profile photo"
+            clipToOutline = true; contentDescription = "Profile photo"; isFocusable = true
         }
         loadAvatar()
         val ring = FrameLayout(this).apply {
-            background = RabtaUi.shape(this@ProfileActivity, android.graphics.Color.TRANSPARENT, 999).apply { setStroke(RabtaUi.dp(this@ProfileActivity, 2), AppTheme.accent(this@ProfileActivity)) }
-            val pad = RabtaUi.dp(this@ProfileActivity, 5); setPadding(pad, pad, pad, pad)
+            background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(AppTheme.bg(this@ProfileActivity)); setStroke(d(3), AppTheme.accent(this@ProfileActivity)) }
+            setPadding(d(6), d(6), d(6), d(6))
             addView(avatar, FrameLayout.LayoutParams(-1, -1))
         }
-        hero.addView(ring, LinearLayout.LayoutParams(RabtaUi.dp(this, 104), RabtaUi.dp(this, 104)))
-        hero.addView(RabtaUi.text(this, Session.name.ifBlank { Session.username }, 22f, true).apply { gravity = Gravity.CENTER; setPadding(0, RabtaUi.dp(this@ProfileActivity, 12), 0, 0) })
-        hero.addView(RabtaUi.text(this, "@${Session.username}", 14f, color = AppTheme.sub(this)).apply { gravity = Gravity.CENTER })
-        val heroActions = LinearLayout(this).apply { gravity = Gravity.CENTER; setPadding(0, RabtaUi.dp(this@ProfileActivity, 14), 0, 0) }
-        heroActions.addView(RabtaUi.button(this, "Change photo", true, ::pickPhoto).apply { gravity = Gravity.CENTER },
-            LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = RabtaUi.dp(this@ProfileActivity, 8) })
-        heroActions.addView(RabtaUi.button(this, "My QR") { startActivity(Intent(this, InstantConnectActivity::class.java)) }.apply {
-            gravity = Gravity.CENTER; background = RabtaUi.ripple(this@ProfileActivity, AppTheme.raised(this@ProfileActivity), 16)
-            contentDescription = "My QR invitation"
-        }, LinearLayout.LayoutParams(0, -2, 1f))
-        hero.addView(heroActions, LinearLayout.LayoutParams(-1, -2))
-        hero.addView(RabtaUi.text(this, "Your photo and display name are shared with your contacts.", 12f, color = AppTheme.sub(this)).apply { gravity = Gravity.CENTER })
-        body.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = RabtaUi.dp(this@ProfileActivity, 8) })
+        val avatarBox = FrameLayout(this)
+        avatarBox.addView(ring, FrameLayout.LayoutParams(d(120), d(120)))
+        avatarBox.addView(TextView(this).apply {
+            UiIcons.set(this, "photo", AppTheme.onPrimary(this@ProfileActivity), 18, "Change profile photo"); gravity = Gravity.CENTER; isFocusable = true
+            background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(AppTheme.primary(this@ProfileActivity)); setStroke(d(3), AppTheme.bg(this@ProfileActivity)) }
+            setOnClickListener { pickPhoto() }
+        }, FrameLayout.LayoutParams(d(40), d(40), Gravity.BOTTOM or Gravity.END))
+        heroCol.addView(avatarBox, LinearLayout.LayoutParams(d(124), d(124)))
+        val nameRow = LinearLayout(this).apply { gravity = Gravity.CENTER; setPadding(0, d(12), 0, 0) }
+        nameRow.addView(RabtaUi.text(this, Session.name.ifBlank { Session.username }, 24f, true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
+        if (WsClient.connected) nameRow.addView(View(this).apply {
+            background = RabtaUi.shape(this@ProfileActivity, AppTheme.teal(this@ProfileActivity), 999); contentDescription = "Online"
+        }, LinearLayout.LayoutParams(d(10), d(10)).apply { marginStart = d(8) })
+        heroCol.addView(nameRow)
+        heroCol.addView(RabtaUi.text(this, "@${Session.username}", 15f, color = AppTheme.sub(this)).apply { gravity = Gravity.CENTER })
+        hero.addView(heroCol, FrameLayout.LayoutParams(-1, -2))
+        body.addView(hero, LinearLayout.LayoutParams(-1, -2))
 
-        body.addView(RabtaUi.text(this, "ACCOUNT ID", 12f, true, AppTheme.accent(this)).apply {
-            setPadding(RabtaUi.dp(this@ProfileActivity, 4), RabtaUi.dp(this@ProfileActivity, 14), 0, RabtaUi.dp(this@ProfileActivity, 8))
-            androidx.core.view.ViewCompat.setAccessibilityHeading(this, true)
-        })
-        val identity = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; background = RabtaUi.shape(this@ProfileActivity, AppTheme.surface(this@ProfileActivity), 20)
-            clipToOutline = true
+        // Rabta ID card: tap anywhere to copy.
+        val idCard = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL; setPadding(d(16), d(14), d(8), d(14)); isFocusable = true
+            background = RabtaUi.ripple(this@ProfileActivity, AppTheme.surface(this@ProfileActivity), 20)
+            setOnClickListener { copy("Rabta ID", Session.id) }
         }
-        identityRow(identity, "Display name", Session.name, "Change any time · up to 30 characters", "Edit") { AccountUi.editName(this) { recreate() } }
+        idCard.addView(iconCircle("nearby", AppTheme.accent(this)))
+        val idTexts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(d(14), 0, d(8), 0) }
+        idTexts.addView(RabtaUi.text(this, "Rabta ID", 12f, color = AppTheme.sub(this)))
+        idTexts.addView(RabtaUi.text(this, Session.id, 20f, true).apply { setTextIsSelectable(false); typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL) })
+        idTexts.addView(RabtaUi.text(this, "Tap to copy your account ID", 12f, color = AppTheme.sub(this)))
+        idCard.addView(idTexts, LinearLayout.LayoutParams(0, -2, 1f))
+        idCard.addView(TextView(this).apply { UiIcons.set(this, "copy", AppTheme.sub(this@ProfileActivity), 22, "Copy"); gravity = Gravity.CENTER; importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }, LinearLayout.LayoutParams(d(48), d(48)))
+        body.addView(idCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = d(12) })
+
+        // Identity: the real display-name and username editors.
+        val identity = group()
+        identityRow(identity, "Display name", Session.name, "Change any time · up to 30 characters", "Edit", "profile", AppTheme.accent(this)) { AccountUi.editName(this) { recreate() } }
         divider(identity)
-        usernameNote = identityRow(identity, "Username", "@${Session.username}", "Your sign-in username · can change once every 30 days", "Edit") {
+        usernameNote = identityRow(identity, "Username", "@${Session.username}", "Your sign-in username · can change once every 30 days", "Edit", "account", AppTheme.violet(this)) {
             AccountUi.editUsername(this, nextUsernameChangeAt) { recreate() }
         }
-        divider(identity)
-        identityRow(identity, "Rabta ID", Session.id, "Tap to copy your account ID", "Copy") { copy("Rabta ID", Session.id) }
-        body.addView(identity, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = RabtaUi.dp(this@ProfileActivity, 18) })
+        body.addView(identity, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = d(12) })
 
-        body.addView(RabtaUi.text(this, "YOUR RABTA", 12f, true, AppTheme.accent(this)).apply {
-            setPadding(RabtaUi.dp(this@ProfileActivity, 4), RabtaUi.dp(this@ProfileActivity, 8), 0, RabtaUi.dp(this@ProfileActivity, 8))
-            androidx.core.view.ViewCompat.setAccessibilityHeading(this, true)
-        })
-        val actions = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; background = RabtaUi.shape(this@ProfileActivity, AppTheme.surface(this@ProfileActivity), 20); setPadding(RabtaUi.dp(this@ProfileActivity, 14), RabtaUi.dp(this@ProfileActivity, 14), RabtaUi.dp(this@ProfileActivity, 14), RabtaUi.dp(this@ProfileActivity, 8))
+        // Settings rows with coloured icon circles.
+        val actions = group()
+        navRow(actions, "status", AppTheme.accent(this), "Availability", "Show when you're free to chat", soon = true) {}
+        navRow(actions, "appearance", AppTheme.violet(this), "Appearance", "${AppTheme.palette(this).name} · ${AppTheme.mode(this)} · themes and accent colour") { AppTheme.choose(this) }
+        navRow(actions, "privacy", AppTheme.violet(this), "Privacy & Security", "App lock, blocked contacts, language") { startActivity(Intent(this, SettingsActivity::class.java)) }
+        navRow(actions, "notifications", AppTheme.teal(this), "Notifications", "Sound, vibration and importance") {
+            startActivity(Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, packageName))
         }
-        actions.addView(RabtaUi.row(this,"Appearance",AppTheme.mode(this),"appearance") {AppTheme.choose(this)})
-        actions.addView(RabtaUi.row(this,"Privacy & security","App lock, blocked contacts and language","privacy") {startActivity(Intent(this,SettingsActivity::class.java))})
-        actions.addView(RabtaUi.row(this,"Notifications","Sound, vibration and importance","notifications") {
-            startActivity(Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE,packageName))
+        navRow(actions, "backup", AppTheme.violet(this), "Data & Storage", "Encrypted backup and restore of local chats") { startActivity(Intent(this, SettingsActivity::class.java)) }
+        navRow(actions, "devices", AppTheme.violet(this), "Connected Devices", "Phones on your account and recovery code") { startActivity(Intent(this, DevicesActivity::class.java)) }
+        navRow(actions, "star", AppTheme.accent(this), "Starred messages", "Messages you saved") { startActivity(Intent(this, StarredActivity::class.java)) }
+        navRow(actions, "qr", AppTheme.teal(this), "My QR invitation", "Pair with a temporary QR code") { startActivity(Intent(this, InstantConnectActivity::class.java)) }
+        navRow(actions, "privacy", AppTheme.teal(this), "Offline security code", "Verify your identity with a contact") { MeshSecurity.showIdentity(this) }
+        navRow(actions, "connection", AppTheme.teal(this), "Connection", ConnectionStatus.text(this)) { ConnectionHelp.show(this) }
+        navRow(actions, "info", AppTheme.violet(this), "About Rabta", "v${runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: ""} (NOVA)", last = true) {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
+        body.addView(actions, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = d(12) })
+        body.addView(RabtaUi.button(this, "Sign out", action = ::confirmLogout).apply {
+            setTextColor(AppTheme.error(this@ProfileActivity)); gravity = Gravity.CENTER
+            background = RabtaUi.ripple(this@ProfileActivity, AppTheme.surface(this@ProfileActivity), 20)
         })
-        actions.addView(RabtaUi.row(this,"Data & backup","Encrypted backup and restore of local chats","backup") {startActivity(Intent(this,SettingsActivity::class.java))})
-        actions.addView(RabtaUi.row(this,"Phones & recovery","Approve new phones and manage your recovery code","devices") {startActivity(Intent(this,DevicesActivity::class.java))})
-        actions.addView(RabtaUi.row(this,"Offline security code","Verify your identity with a contact","privacy") {MeshSecurity.showIdentity(this)})
-        actions.addView(RabtaUi.row(this,"Connection",ConnectionStatus.text(this),"connection") {ConnectionHelp.show(this)})
-        actions.addView(RabtaUi.comingSoon(this,"Availability","Show when you're available to chat","status"))
-        actions.addView(RabtaUi.comingSoon(this,"Storage usage","See how much space chats and media use","storage"))
-        actions.addView(RabtaUi.button(this,"Sign out",action=::confirmLogout).apply {setTextColor(AppTheme.error(this@ProfileActivity))})
-        body.addView(actions)
+        body.addView(RabtaUi.text(this, "Your photo and display name are shared with your contacts.", 12f, color = AppTheme.sub(this)).apply { gravity = Gravity.CENTER; setPadding(0, d(8), 0, 0) })
         WsClient.api("GET", "/api/me/account", null) { code, account ->
             if (code != 200 || isFinishing) return@api
             nextUsernameChangeAt = account.optLong("nextUsernameChangeAt")
@@ -97,27 +119,61 @@ class ProfileActivity : ThemedActivity() {
     private var nextUsernameChangeAt = 0L
     private var usernameNote: TextView? = null
 
-    private fun identityRow(parent: LinearLayout, label: String, value: String, note: String, actionLabel: String = "", action: (() -> Unit)? = null): TextView {
+    private fun group() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL; background = RabtaUi.shape(this@ProfileActivity, AppTheme.surface(this@ProfileActivity), 20); clipToOutline = true
+    }
+    private fun iconCircle(icon: String, color: Int) = TextView(this).apply {
+        UiIcons.set(this, icon, color, 20, icon); gravity = Gravity.CENTER; importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        background = RabtaUi.shape(this@ProfileActivity, AppTheme.raised(this@ProfileActivity), 999)
+        layoutParams = LinearLayout.LayoutParams(RabtaUi.dp(this@ProfileActivity, 40), RabtaUi.dp(this@ProfileActivity, 40))
+    }
+
+    private fun identityRow(parent: LinearLayout, label: String, value: String, note: String, actionLabel: String, icon: String, color: Int, action: () -> Unit): TextView {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            setPadding(RabtaUi.dp(this@ProfileActivity, 18), RabtaUi.dp(this@ProfileActivity, 13), RabtaUi.dp(this@ProfileActivity, 16), RabtaUi.dp(this@ProfileActivity, 13))
-            if (action != null) { background = RabtaUi.ripple(this@ProfileActivity, AppTheme.surface(this@ProfileActivity), 0); isClickable = true; isFocusable = true; setOnClickListener { action() } }
+            setPadding(RabtaUi.dp(this@ProfileActivity, 16), RabtaUi.dp(this@ProfileActivity, 12), RabtaUi.dp(this@ProfileActivity, 16), RabtaUi.dp(this@ProfileActivity, 12))
+            background = RabtaUi.ripple(this@ProfileActivity, AppTheme.surface(this@ProfileActivity), 0); isClickable = true; isFocusable = true; setOnClickListener { action() }
         }
-        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        texts.addView(RabtaUi.text(this, label, 12f, true, AppTheme.accent(this)))
-        texts.addView(RabtaUi.text(this, value.ifBlank { "Not set" }, 16f, true).apply { setPadding(0, RabtaUi.dp(this@ProfileActivity, 3), 0, 0) })
-        val noteView = RabtaUi.text(this, note, 12f, color = AppTheme.sub(this)).apply { setPadding(0, RabtaUi.dp(this@ProfileActivity, 3), 0, 0) }
+        row.addView(iconCircle(icon, color))
+        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(RabtaUi.dp(this@ProfileActivity, 14), 0, RabtaUi.dp(this@ProfileActivity, 8), 0) }
+        texts.addView(RabtaUi.text(this, label, 12f, color = AppTheme.sub(this)))
+        texts.addView(RabtaUi.text(this, value.ifBlank { "Not set" }, 16f, true).apply { setPadding(0, RabtaUi.dp(this@ProfileActivity, 2), 0, 0) })
+        val noteView = RabtaUi.text(this, note, 12f, color = AppTheme.sub(this)).apply { setPadding(0, RabtaUi.dp(this@ProfileActivity, 2), 0, 0) }
         texts.addView(noteView)
         row.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
-        if (action != null) row.addView(RabtaUi.text(this, actionLabel, 13f, true, AppTheme.accent(this)))
+        row.addView(RabtaUi.text(this, actionLabel, 13f, true, AppTheme.accent(this)))
         parent.addView(row)
         return noteView
     }
 
-    private fun divider(parent: LinearLayout) = parent.addView(View(this).apply { setBackgroundColor(AppTheme.line(this@ProfileActivity)) }, LinearLayout.LayoutParams(-1, RabtaUi.dp(this, 1)).apply { marginStart = RabtaUi.dp(this@ProfileActivity, 18) })
+    /** A settings row: coloured icon circle, title and detail, chevron (or a Coming soon badge). */
+    private fun navRow(parent: LinearLayout, icon: String, color: Int, title: String, detail: String, soon: Boolean = false, last: Boolean = false, action: () -> Unit) {
+        val row = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL; minimumHeight = RabtaUi.dp(this@ProfileActivity, 64); isFocusable = true
+            setPadding(RabtaUi.dp(this@ProfileActivity, 16), RabtaUi.dp(this@ProfileActivity, 10), RabtaUi.dp(this@ProfileActivity, 12), RabtaUi.dp(this@ProfileActivity, 10))
+            background = RabtaUi.ripple(this@ProfileActivity, AppTheme.surface(this@ProfileActivity), 0)
+            contentDescription = if (soon) "$title. Coming soon" else "$title. $detail"
+            setOnClickListener { if (soon) Toast.makeText(this@ProfileActivity, "$title: coming soon", Toast.LENGTH_SHORT).show() else action() }
+        }
+        row.addView(iconCircle(icon, color))
+        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(RabtaUi.dp(this@ProfileActivity, 14), 0, RabtaUi.dp(this@ProfileActivity, 8), 0) }
+        texts.addView(RabtaUi.text(this, title, 15f, true))
+        texts.addView(RabtaUi.text(this, detail, 12f, color = AppTheme.sub(this)).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END })
+        row.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
+        row.addView(if (soon) RabtaUi.badge(this, "Coming soon") else RabtaUi.text(this, "›", 22f, color = AppTheme.sub(this)).apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO })
+        parent.addView(row)
+        if (!last) divider(parent)
+    }
+
+    private fun divider(parent: LinearLayout) = parent.addView(View(this).apply { setBackgroundColor(AppTheme.line(this@ProfileActivity)) }, LinearLayout.LayoutParams(-1, RabtaUi.dp(this, 1)).apply { marginStart = RabtaUi.dp(this@ProfileActivity, 70) })
+
+    override fun onResume() { super.onResume(); if (::avatar.isInitialized) loadAvatar() }
+
+    /** Tapping the photo opens it full screen with Gallery, Camera, Crop and Remove. */
+    private fun openPhoto() = startActivity(Intent(this, ProfilePhotoActivity::class.java))
 
     private fun loadAvatar() {
-        avatar.setOnClickListener {pickPhoto()}
+        avatar.setOnClickListener {openPhoto()}
         avatar.background=RabtaUi.shape(this,AppTheme.sent(this),999)
         avatar.setImageDrawable(null)
         if (Session.profilePic.isNotEmpty()) MediaHelper.base64ToBitmap(Session.profilePic)?.let(avatar::setImageBitmap)
@@ -125,7 +181,7 @@ class ProfileActivity : ThemedActivity() {
             avatar.background=RabtaUi.shape(this,AppTheme.sent(this),999)
             avatar.setImageDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
             avatar.contentDescription = "${Session.name.ifBlank { Session.username }} profile initials"
-            avatar.setOnClickListener { pickPhoto() }
+            avatar.setOnClickListener { openPhoto() }
             avatar.setImageBitmap(initialsBitmap())
         }
     }
@@ -149,21 +205,8 @@ class ProfileActivity : ThemedActivity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != pickCode || resultCode != RESULT_OK) return
         val uri = data?.data ?: return
-        Toast.makeText(this, "Updating photo…", Toast.LENGTH_SHORT).show()
-        val owner=Session.id
-        Thread {
-            // A small avatar keeps the upload well under the server's 256 KB profile photo limit.
-            val encoded = MediaHelper.imageToBase64(this, uri, maxPx = 320, quality = 80)
-            if (encoded != null && Session.id==owner) {
-                Session.profilePic = encoded
-                handler.post {
-                    if (!isDestroyed) loadAvatar()
-                    WsClient.uploadPhoto(Session.serverUrl, Session.token, encoded) { ok, msg ->
-                        if (!isDestroyed) Toast.makeText(this, if (ok) "Profile photo updated" else "Photo saved on this phone, but it could not be shared: $msg", Toast.LENGTH_LONG).show()
-                    }
-                }
-            } else handler.post { if (!isDestroyed) Toast.makeText(this, "Could not open that image", Toast.LENGTH_LONG).show() }
-        }.start()
+        // The camera badge still picks straight from the gallery, now through the same circle crop.
+        ProfilePhoto.cropAndSave(this, uri) { if (!isDestroyed) loadAvatar() }
     }
 
     private fun copy(label: String, value: String) {

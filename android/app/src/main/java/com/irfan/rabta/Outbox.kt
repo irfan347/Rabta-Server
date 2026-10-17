@@ -41,7 +41,7 @@ object Outbox : RabtaEvents.Listener {
         val time = System.currentTimeMillis()
         worker.execute {
             d.saveMessage(id, peerId, Session.id, body, time, true, MessageDelivery.QUEUED, type)
-            val preview = when (type) { "image" -> "Photo"; "voice" -> "Voice note"; "video" -> "Video"; "file" -> Attachments.name(body); "sticker" -> "Sticker"; "rich" -> org.json.JSONObject(body).optString("text"); else -> body }
+            val preview = when (type) { "image" -> "Photo"; "voice" -> VoiceAudio.label(context, body).let { if (it.isEmpty()) "🎤 Voice message" else "🎤 Voice message · $it" }; "video" -> "Video"; "file" -> Attachments.name(body); "sticker" -> "Sticker"; "rich" -> org.json.JSONObject(body).optString("text"); else -> body }
             d.upsertConversation(peerId, peerName, preview, time, false, group)
             RabtaEvents.postHistoryChanged(peerId)
             c.attempt(DeliveryCoordinator.Outgoing(id, peerId, group, body, type, time)); reschedule()

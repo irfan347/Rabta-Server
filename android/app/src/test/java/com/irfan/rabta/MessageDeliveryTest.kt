@@ -47,4 +47,16 @@ class MessageDeliveryTest {
         assertTrue(MessageDelivery.delivered("direct_delivered"))
         assertFalse(MessageDelivery.delivered("relayed"))
     }
+    @Test fun ticksFollowTheRealStateLikeWhatsApp() {
+        assertEquals("clock", MessageDelivery.tickIcon("queued"))
+        assertEquals("clock", MessageDelivery.tickIcon("sending"))
+        assertEquals("clock", MessageDelivery.tickIcon("mesh_wait"))
+        assertEquals("check", MessageDelivery.tickIcon("relayed"))
+        assertEquals("check", MessageDelivery.tickIcon("sent"))
+        assertEquals("done_all", MessageDelivery.tickIcon("delivered"))
+        assertEquals("done_all", MessageDelivery.tickIcon("direct_delivered"))
+        assertEquals("done_all", MessageDelivery.tickIcon("read"))
+        assertEquals("error", MessageDelivery.tickIcon("failed"))
+        assertEquals("error", MessageDelivery.tickIcon("expired"))
+    }
 }

@@ -22,6 +22,8 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
@@ -42,6 +44,11 @@
         <activity android:name=".SettingsActivity" android:exported="false" />
         <activity android:name=".StatusViewerActivity" android:exported="false" />
         <activity android:name=".StatusActivity" android:exported="false" />
+        <activity android:name=".AddStatusActivity" android:exported="false" />
+        <activity android:name=".StatusEditorActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".ContactProfileActivity" android:exported="false" />
+        <activity android:name=".ProfilePhotoActivity" android:exported="false" />
+        <activity android:name=".ThemeActivity" android:exported="false" />
         <activity android:name=".NearbyActivity" android:exported="false" />
         <activity android:name=".InstantConnectActivity" android:exported="false" />
         <activity android:name=".InstantScanActivity" android:exported="false" />

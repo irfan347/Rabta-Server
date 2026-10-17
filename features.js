@@ -74,15 +74,19 @@ module.exports=function install({app,authId,users,getPool}) {
     const audience=[...new Set(Array.isArray(req.body.audience)?req.body.audience:[])].filter(x=>x!==me&&users.has(x)&&!blocked(me,x));ensure(audience.length<=200,'Select up to 200 contacts');
     ensure([...statuses.values()].filter(s=>s.owner===me&&s.expires>Date.now()).length<20,'Maximum 20 active statuses');
     let body=String(req.body.body||'');if(kind==='text')ensure(body.trim().length>0&&body.length<=700,'Status must be 1–700 characters');else {body=validMedia(body,me);ensure(JSON.parse(body).mime.startsWith(kind==='image'?'image/':'video/'),'Media type does not match status');}
-    const s={id:id(),owner:me,kind,body,audience,created:Date.now(),expires:Date.now()+LIFE,viewers:[]};
+    // Optional caption on photo/video updates; older clients simply never send it.
+    const caption=kind==='text'?'':String(req.body.caption||'').trim();ensure(caption.length<=700,'Caption must be up to 700 characters');
+    const s={id:id(),owner:me,kind,body,audience,created:Date.now(),expires:Date.now()+LIFE,viewers:[],viewedAt:{}};if(caption)s.caption=caption;
     if(kind!=='text')for(const to of audience)await grant(body,me,to,s.expires);
     await persist('status',s.id,s);statuses.set(s.id,s);res.json({id:s.id,expires:s.expires});
   }));
   app.get('/api/status',wrap(async(req,res,me)=>{
-    const feed=[...statuses.values()].filter(s=>s.expires>Date.now()&&!blocked(s.owner,me)&&(s.owner===me||s.audience.includes(me))).sort((a,b)=>b.created-a.created).map(s=>({...s,name:users.get(s.owner)?.name||s.owner,audience:undefined,viewers:s.owner===me?s.viewers:undefined}));
+    // Owners also get who viewed and when (records saved before view times existed report 0).
+    const feed=[...statuses.values()].filter(s=>s.expires>Date.now()&&!blocked(s.owner,me)&&(s.owner===me||s.audience.includes(me))).sort((a,b)=>b.created-a.created).map(s=>({...s,name:users.get(s.owner)?.name||s.owner,audience:undefined,viewedAt:undefined,viewers:s.owner===me?s.viewers:undefined,
+      views:s.owner===me?s.viewers.map(v=>({id:v,name:users.get(v)?.name||v,at:(s.viewedAt||{})[v]||0})):undefined}));
     res.json({statuses:feed});
   }));
-  app.post('/api/status/:id/view',wrap(async(req,res,me)=>{const s=statuses.get(req.params.id);ensure(s&&s.expires>Date.now()&&!blocked(s.owner,me)&&(s.owner===me||s.audience.includes(me)),'Status unavailable');if(me!==s.owner&&!s.viewers.includes(me)){const next={...s,viewers:[...s.viewers,me]};await persist('status',s.id,next);statuses.set(s.id,next)}res.json({ok:true});}));
+  app.post('/api/status/:id/view',wrap(async(req,res,me)=>{const s=statuses.get(req.params.id);ensure(s&&s.expires>Date.now()&&!blocked(s.owner,me)&&(s.owner===me||s.audience.includes(me)),'Status unavailable');if(me!==s.owner&&!s.viewers.includes(me)){const next={...s,viewers:[...s.viewers,me],viewedAt:{...(s.viewedAt||{}),[me]:Date.now()}};await persist('status',s.id,next);statuses.set(s.id,next)}res.json({ok:true});}));
   app.delete('/api/status/:id',wrap(async(req,res,me)=>{const s=statuses.get(req.params.id);ensure(s&&s.owner===me,'Status unavailable');await remove('status',s.id);statuses.delete(s.id);res.json({ok:true});}));
   return {init,blocked,grant};
 };

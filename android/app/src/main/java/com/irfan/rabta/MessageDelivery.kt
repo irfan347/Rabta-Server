@@ -58,6 +58,14 @@ object MessageDelivery {
     fun retryable(status: String) = status in setOf(FAILED, EXPIRED, PAUSED, CANCELED)
     fun delivered(status: String) = rank(status) >= 2
 
+    /** Icon for the chat tick: clock while waiting, ✓ relayed, ✓✓ delivered or read (read is blue), error when it needs a retry. */
+    fun tickIcon(status: String): String = when {
+        rank(status) >= 2 -> "done_all"
+        rank(status) == 1 -> "check"
+        retryable(status) -> "error"
+        else -> "clock"
+    }
+
     fun label(status: String): String = when (status) {
         QUEUED, "mesh", "mesh_wait" -> "Queued"
         SENDING -> "Sending…"
