@@ -1,11 +1,8 @@
 package com.irfan.rabta
 
 import com.google.zxing.BarcodeFormat
-import com.google.zxing.BinaryBitmap
 import com.google.zxing.EncodeHintType
-import com.google.zxing.MultiFormatReader
 import com.google.zxing.RGBLuminanceSource
-import com.google.zxing.common.HybridBinarizer
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import com.google.zxing.qrcode.encoder.Encoder
@@ -15,14 +12,18 @@ import java.security.KeyPairGenerator
 
 /** Real signed, expired test records. No Android accounts, Keystore or production storage. */
 class InstantQrTest {
-    private fun decode(raw:String,size:Int,mask:Int?=null):String {
+    private fun decode(raw:String,size:Int,mask:Int?=null,turns:Int=0):String {
         val hints=if(mask==null)emptyMap() else mapOf(EncodeHintType.QR_MASK_PATTERN to mask)
         val matrix=QRCodeWriter().encode(raw,BarcodeFormat.QR_CODE,size,size,hints)
-        val pixels=IntArray(matrix.width*matrix.height) { index ->
+        var pixels=IntArray(matrix.width*matrix.height) { index ->
             if(matrix[index%matrix.width,index/matrix.width])0xFF000000.toInt() else 0xFFFFFFFF.toInt()
         }
-        // Exercise the ordinary detector. No PURE_BARCODE, retries, catch-and-ignore or supplied points.
-        return MultiFormatReader().decode(BinaryBitmap(HybridBinarizer(RGBLuminanceSource(matrix.width,matrix.height,pixels))),InstantQr.decodeHints).text
+        repeat(turns) {
+            val old=pixels
+            pixels=IntArray(size*size) { old[(size-1-it%size)*size+it/size] }
+        }
+        // Exercise the actual camera decoder: bounded ordinary-detection recovery, never PURE_BARCODE.
+        return InstantQrDecoderFactory().createDecoder(mutableMapOf<com.google.zxing.DecodeHintType,Any>()).decode(RGBLuminanceSource(matrix.width,matrix.height,pixels))?.text?:error("Actual scanner could not decode size=$size mask=$mask")
     }
     @Test fun previouslyMissedConfirmationDecodesAtBothRenderingSizesAndEveryMask() {
         val raw=javaClass.getResourceAsStream("/qr-regression.txt")!!.bufferedReader().use { it.readText().trim() }
@@ -30,7 +31,7 @@ class InstantQrTest {
         assertTrue("Fixture must exercise a dense QR",Encoder.encode(raw,ErrorCorrectionLevel.L).version.versionNumber>20)
         for(size in listOf(800,900)) {
             assertEquals("Default mask size=$size",raw,decode(raw,size))
-            for(mask in 0..7)assertEquals("Mask=$mask size=$size",raw,decode(raw,size,mask))
+            for(mask in 0..7)for(turn in 0..3)assertEquals("Mask=$mask size=$size turns=$turn",raw,decode(raw,size,mask,turn))
         }
     }
     @Test fun signedPairingImagesDecodeAcrossStagesAndRasterSizes() {
@@ -47,34 +48,37 @@ class InstantQrTest {
         }
     }
 
-    @Test fun diagnosePreservedDenseQrDetection() {
+    @Test fun realDecoderRecoversRotatedRectangularFramesAndMapsFinderPoints() {
         val raw=javaClass.getResourceAsStream("/qr-regression.txt")!!.bufferedReader().use { it.readText().trim() }
-        val summary=StringBuilder("Dense QR diagnostic (expired public fixture only)\n")
-        for(size in listOf(800,900))for(mask in -1..7) {
-            val hints=if(mask<0)emptyMap() else mapOf(EncodeHintType.QR_MASK_PATTERN to mask)
-            val matrix=QRCodeWriter().encode(raw,BarcodeFormat.QR_CODE,size,size,hints)
-            var pixels=IntArray(size*size) { if(matrix[it%size,it/size])0xFF000000.toInt() else -1 }
-            val attempts=mutableListOf<String>()
-            repeat(4) { rotation ->
-                val bitmap=BinaryBitmap(HybridBinarizer(RGBLuminanceSource(size,size,pixels)))
-                val direct=runCatching { com.google.zxing.qrcode.QRCodeReader().decode(bitmap,InstantQr.decodeHints).text }
-                val pure=runCatching { com.google.zxing.qrcode.QRCodeReader().decode(bitmap,mapOf(com.google.zxing.DecodeHintType.PURE_BARCODE to true)).text }
-                val detected=runCatching {
-                    val found=com.google.zxing.qrcode.detector.Detector(bitmap.blackMatrix).detect(InstantQr.decodeHints)
-                    val points=found.points.joinToString { "("+it.x+","+it.y+")" }
-                    val decoded=runCatching { com.google.zxing.qrcode.decoder.Decoder().decode(found.bits,InstantQr.decodeHints).text }
-                    "dim="+found.bits.width+" points="+points+" data="+if(decoded.getOrNull()==raw)"ok" else decoded.exceptionOrNull()?.javaClass?.simpleName
-                }
-                attempts.add("r="+(rotation*90)+" normal="+(if(direct.getOrNull()==raw)"ok" else direct.exceptionOrNull()?.javaClass?.simpleName)+
-                    " pure="+(if(pure.getOrNull()==raw)"ok" else pure.exceptionOrNull()?.javaClass?.simpleName)+
-                    " detect="+detected.getOrElse { it.javaClass.simpleName })
-                val old=pixels
-                pixels=IntArray(size*size) { i -> old[(size-1-i%size)*size+i/size] }
-            }
-            summary.append("size=").append(size).append(" mask=").append(mask).append(" sameBits=")
-                .append(matrix==BinaryBitmap(HybridBinarizer(RGBLuminanceSource(size,size,IntArray(size*size) { if(matrix[it%size,it/size])0xFF000000.toInt() else -1 }))).blackMatrix)
-                .append(" ").append(attempts.joinToString(" | ")).append("\n")
+        val matrix=QRCodeWriter().encode(raw,BarcodeFormat.QR_CODE,800,900)
+        var width=matrix.width;var height=matrix.height
+        var pixels=IntArray(width*height) { if(matrix[it%width,it/width])0xFF000000.toInt() else -1 }
+        var expected=listOf(70f to 120f,70f to 780f,730f to 120f)
+        repeat(4) {
+            val result=InstantQrDecoderFactory().createDecoder(mutableMapOf<com.google.zxing.DecodeHintType,Any>()).decode(RGBLuminanceSource(width,height,pixels))
+            assertNotNull("Orientation "+it,result);assertEquals(raw,result!!.text)
+            assertEquals(BarcodeFormat.QR_CODE,result.barcodeFormat)
+            expected.forEach { (x,y) -> assertTrue("Finder point must stay in original frame coordinates",
+                result.resultPoints.any { p -> kotlin.math.abs(p.x-x)<=2f&&kotlin.math.abs(p.y-y)<=2f }) }
+            val old=pixels;val oldWidth=width;val oldHeight=height
+            pixels=IntArray(width*height) { index -> old[(oldHeight-1-index%oldHeight)*oldWidth+index/oldHeight] }
+            expected=expected.map { (x,y) -> oldHeight-y to x }
+            width=oldHeight;height=oldWidth
         }
-        throw AssertionError(summary.toString())
+    }
+    @Test fun recoveryIsThrottledAndInvalidFramesDoNotBecomeInvitations() {
+        val raw=javaClass.getResourceAsStream("/qr-regression.txt")!!.bufferedReader().use { it.readText().trim() }
+        val matrix=QRCodeWriter().encode(raw,BarcodeFormat.QR_CODE,800,800)
+        val source=RGBLuminanceSource(800,800,IntArray(800*800) { if(matrix[it%800,it/800])0xFF000000.toInt() else -1 })
+        var now=1000L
+        val reader=com.google.zxing.MultiFormatReader()
+        val decoder=InstantQrDecoder(reader){now}
+        reader.setHints(InstantQr.decodeHints+mapOf(com.google.zxing.DecodeHintType.NEED_RESULT_POINT_CALLBACK to decoder))
+        assertEquals(raw,decoder.decode(source)?.text)
+        assertNull("Do not repeat expensive recovery within 500ms",decoder.decode(source))
+        now+=500;assertEquals(raw,decoder.decode(source)?.text)
+        val blank=RGBLuminanceSource(800,800,IntArray(800*800){-1})
+        repeat(3) { assertNull(decoder.decode(blank)) }
+        assertFalse(InstantQr.decodeHints.containsKey(com.google.zxing.DecodeHintType.PURE_BARCODE))
     }
 }

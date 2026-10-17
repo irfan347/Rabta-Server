@@ -9,10 +9,7 @@ import android.view.ViewGroup
 import android.widget.TextView
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.google.zxing.BinaryBitmap
-import com.google.zxing.MultiFormatReader
 import com.google.zxing.RGBLuminanceSource
-import com.google.zxing.common.HybridBinarizer
 import com.google.zxing.BarcodeFormat
 import com.journeyapps.barcodescanner.BarcodeEncoder
 import org.junit.Assert.*
@@ -41,7 +38,7 @@ class InstantConnectTest {
     }
     private fun decode(bitmap:Bitmap):String {
         val pixels=IntArray(bitmap.width*bitmap.height);bitmap.getPixels(pixels,0,bitmap.width,0,0,bitmap.width,bitmap.height)
-        return MultiFormatReader().decode(BinaryBitmap(HybridBinarizer(RGBLuminanceSource(bitmap.width,bitmap.height,pixels))),InstantQr.decodeHints).text
+        return InstantQrDecoderFactory().createDecoder(mutableMapOf<com.google.zxing.DecodeHintType,Any>()).decode(RGBLuminanceSource(bitmap.width,bitmap.height,pixels))?.text?:error("Real scanner could not decode the rendered QR")
     }
     @Test fun actualQrImagesRoundTripAndOneTimePairingPersists() {
         val aid=id();val bid=id();val a=InstantPairingStore(ctx,aid);val b=InstantPairingStore(ctx,bid)

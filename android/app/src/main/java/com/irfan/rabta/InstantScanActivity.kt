@@ -16,7 +16,6 @@ import com.journeyapps.barcodescanner.BarcodeCallback
 import com.journeyapps.barcodescanner.BarcodeResult
 import com.journeyapps.barcodescanner.BarcodeView
 import com.journeyapps.barcodescanner.CameraPreview
-import com.journeyapps.barcodescanner.DefaultDecoderFactory
 
 /** QR-only camera. Decoding a code never approves a contact or consumes an invitation. */
 class InstantScanActivity:ThemedActivity() {
@@ -29,7 +28,7 @@ class InstantScanActivity:ThemedActivity() {
         val body=FeatureUi.page(this,"Scan to connect")
         body.addView(RabtaUi.text(this,"Scan an invitation, pairing reply or confirmation. You will review the identity before approving.",15f,color=AppTheme.sub(this)))
         val frame=FrameLayout(this).apply { background=RabtaUi.shape(this@InstantScanActivity,AppTheme.raised(this@InstantScanActivity));clipToOutline=true }
-        camera=BarcodeView(this).apply { decoderFactory=DefaultDecoderFactory(InstantQr.formats,InstantQr.decodeHints,null,0) }
+        camera=BarcodeView(this).apply { decoderFactory=InstantQrDecoderFactory() }
         frame.addView(camera,FrameLayout.LayoutParams(-1,-1))
         frame.addView(object:View(this) {
             private val p=Paint(Paint.ANTI_ALIAS_FLAG)

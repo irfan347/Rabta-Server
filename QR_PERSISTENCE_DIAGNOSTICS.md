@@ -14,15 +14,18 @@ A new JVM regression test reproduces the failure independently of Android, camer
 
 The dependency-only 3.5.3 candidate failed both the fixed and varied-image regressions in run 39012170116. It was not accepted as a fix; the dependency pin was removed, preserving the original dependency versions.
 
-The next focused candidate enables QR-only TRY_HARDER hints through shared InstantQr configuration in the actual camera DefaultDecoderFactory and image tests. ZXing's default finder scan assumes up to version 20 for row sampling; TRY_HARDER changes this sampling for denser codes. The preserved confirmation is asserted to exceed version 20. This uses the normal image detector, with no PURE_BARCODE or supplied finder points. The camera continues decoding only in the existing foreground lifecycle. See the [existing 3.4.1 finder sampling logic](https://github.com/zxing/zxing/blob/zxing-3.4.1/core/src/main/java/com/google/zxing/qrcode/detector/FinderPatternFinder.java).
+TRY_HARDER alone also failed in run 39012465191. Test-only phase diagnostics in run 39012674773 isolated the failure: binarization exactly matches the generated raster and an exact-raster check decodes it, while the normal detector mistakes data for the bottom-left finder, samples a 109-module grid instead of the correct 117, and reports FormatException. MultiFormatReader hides that as NotFoundException. Rotating the same raster makes ordinary finder detection succeed. That diagnostic exact-raster mode is never used in production or final pass assertions.
+
+The focused fix supplies InstantQrDecoderFactory to the existing BarcodeView. It first uses the existing normal QR detector. Only after failure with at least two candidate points does it try up to three quarter-turn orientations with normal detection. Points and result metadata are preserved/remapped to the original frame, including non-square frames. Recovery is limited to at most one sequence per 500ms and one-megapixel frames; blank frames keep the fast path. No PURE_BARCODE, supplied finder locations, unbounded retry or alternate authentication path. The original ZXing dependencies and camera lifecycle are retained.
 
 There is no invitation format, signature, expiry, replay-cache, key approval, authentication, encryption, message, database or backend implementation change. NFC still exchanges the same public invitation text.
 
 Coverage added:
-- Decode the preserved confirmation using default selection and each of all eight QR masks, at 800px and 900px (18 images). This avoids relying on a fortunate default mask.
+- Decode the preserved confirmation using default selection and each of all eight QR masks, at 800px and 900px in all four orientations (66 images including two default-mask renders). This avoids relying on a fortunate default mask.
 - Generate 32 real signed offer/reply/confirmation exchanges, with ASCII and Urdu fixture names; decode all three stages at both existing raster sizes (192 images).
-- Both use the normal detector, without PURE_BARCODE, supplied finder points, catch-and-ignore or success-seeking retries.
+- Both use the actual production scanner factory, with its bounded ordinary-detection orientation recovery. No PURE_BARCODE, supplied finder points or test-only success fallback.
 - The existing Android confirmation test additionally reads and decodes the actual 800px BitmapDrawable rendered by the production Activity. Existing key-approval assertions remain.
+- Tests also exercise non-square rotated frames, finder-point mapping, recovery throttling and blank-frame rejection.
 - Existing expiry/replay/mismatched-key/account/history/mesh tests remain in the complete suite.
 
 Build, JVM and API 29/34 outcomes and the actual APK artifact are recorded in testing PR #5 once they complete. This document does not claim a green candidate run in advance. Physical camera scans, lighting, glare and cross-device display sizes still require two-phone checks.
