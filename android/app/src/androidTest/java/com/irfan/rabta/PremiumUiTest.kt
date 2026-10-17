@@ -140,7 +140,7 @@ class PremiumUiTest {
         override val connected=ConcurrentHashMap<String,String>()
         override val userIdOf=ConcurrentHashMap<String,String>()
         val peers=CopyOnWriteArrayList<RadarPeer>()
-        override var active=false
+        @Volatile override var active=false
         override val discoveredCount get()=peers.size
         override val connectingCount=0
         override fun start(name:String,userId:String){active=true;MeshBridge.status="Nearby searching — keep both phones open"}
@@ -151,6 +151,15 @@ class PremiumUiTest {
         override fun connect(endpointId:String){error("UI must not connect without approval")}
         override fun sendEnvelopeToAll(json:String,exceptEndpoint:String?) {}
         override fun sendEnvelopeTo(endpointId:String,json:String) {}
+    }
+    /**
+     * Starting a router first creates the fixture account's RSA identity key in the Android Keystore.
+     * On a busy emulator that alone can outlast a UI wait, so the radio gets its own wait.
+     */
+    private fun awaitRadio(router:Router,radio:Radio) {
+        val end=System.currentTimeMillis()+60000
+        while(!radio.active&&router.running&&System.currentTimeMillis()<end)Thread.sleep(50)
+        assertTrue("Isolated radio fixture started",radio.active)
     }
     private fun closeRouter(router:Router) {
         ui {router.stop();MeshBridge.detach()}
@@ -175,6 +184,7 @@ class PremiumUiTest {
         val router=Router(ctx,object:Router.UiListener {}) {radio}
         ui {RadarPrefs.setEnabled(ctx,true);router.start(account,"Irfan");MeshBridge.attach(router)}
         try {
+            awaitRadio(router,radio)
             waitUi("Real peers appear") {radio.active&&labels(a).contains("Ali")&&labels(a).contains("Samira")}
             val search=all(a.window.decorView).filterIsInstance<EditText>().first {it.contentDescription=="Search nearby users"}
             ui {search.setText("aLI")}
@@ -286,6 +296,7 @@ class PremiumUiTest {
         ui {RadarPrefs.setEnabled(ctx,true);router.start(account,"Irfan");MeshBridge.attach(router)}
         try {
             val a=launch(NetworkVisionActivity::class.java)
+            awaitRadio(router,radio)
             waitUi("Observed network count") {radio.active&&labels(a).any {it.startsWith("27 nearby peers")}}
             ui {
                 all(a.window.decorView).first {it.contentDescription=="Next peers"}.performClick()
