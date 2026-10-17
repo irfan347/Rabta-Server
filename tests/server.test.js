@@ -181,3 +181,12 @@ test('database keeps receipts for an offline sender and removes them once writte
   const a=f.socket(f.alice);await settle();await settle();
   assert.equal(a.messages.filter(m=>m.type==='receipt').length,1);assert.equal(rows.length,0);
 });
+test('contact lookup by account ID needs sign-in and hides blocked contacts',async()=>{
+  const f=await fixture();const get=f.routes.get('GET /api/user/id/:id');
+  const call=async(token,id)=>{const r={code:200,status(n){this.code=n;return this},json(v){this.body=v;return this}};await get({headers:token?{authorization:'Bearer '+token}:{},params:{id},query:{}},r);return r;};
+  assert.equal((await call(null,f.bob.id)).code,401);
+  const found=await call(f.alice.token,f.bob.id.toLowerCase());assert.equal(found.code,200);assert.equal(found.body.username,'bob');assert.equal(found.body.id,f.bob.id);assert.equal(found.body.pass_hash,undefined);
+  assert.equal((await call(f.alice.token,'FFFFFFFFFFFF')).code,404);
+  await f.routes.get('POST /api/block')({headers:{authorization:'Bearer '+f.bob.token},body:{target:f.alice.id},params:{},query:{}},{status(){return this},json(){},setHeader(){}});
+  assert.equal((await call(f.alice.token,f.bob.id)).code,404);
+});

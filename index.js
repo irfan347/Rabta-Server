@@ -143,6 +143,13 @@ app.get('/api/user/:username', (req, res) => {
   const onlineNow = online.has(user.id);
   res.json({ id: user.id, username: user.username, name: user.name, online: onlineNow, lastSeen: user.last_seen });
 });
+// Contact info by account ID (signed-in callers only): the same public fields as a username lookup.
+app.get('/api/user/id/:id', (req, res) => {
+  const me = authId(req); if (!me) return res.status(401).json({ error: 'login required' });
+  const user = memUsers.get(String(req.params.id || '').toUpperCase());
+  if (!user || features.blocked(user.id, me)) return res.status(404).json({ error: 'User not found' });
+  res.json({ id: user.id, username: user.username, name: user.name, online: online.has(user.id), lastSeen: user.last_seen });
+});
 app.get('/api/me', (req, res) => {
   const id = authId(req); if (!id) return res.status(401).json({ error: 'login required' });
   const user = memUsers.get(id); if (!user) return res.status(404).json({ error: 'not found' });
