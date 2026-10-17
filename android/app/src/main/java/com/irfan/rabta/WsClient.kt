@@ -146,9 +146,8 @@ object WsClient {
             override fun onResponse(c: Call, r: Response) { val b=r.body?.string()?: ""; val o=try{JSONObject(b)}catch(_:Exception){JSONObject()}; handler.post { if(r.isSuccessful) cb(true,"ok",o) else cb(false,o.optString("error","Not found"),null) } }
         })
     }
-    fun uploadPhoto(srv: String, tok: String, b64: String) {
-        Thread { try { post(srv, "/api/me/photo", org.json.JSONObject().put("photo", b64.take(200000)).toString(), tok) { _,_,_ -> } } catch (_: Exception) {} }.start()
-    }
+    fun uploadPhoto(srv: String, tok: String, b64: String, cb: (Boolean,String) -> Unit) =
+        post(srv, "/api/me/photo", JSONObject().put("photo", b64).toString(), tok) { ok, msg, _ -> cb(ok, msg) }
     fun fetchPhoto(srv: String, tok: String, userId: String, cb: (String?) -> Unit) {
         http.newCall(Request.Builder().url(srv.trimEnd('/')+"/api/user/photo/$userId").header("Authorization","Bearer $tok").build()).enqueue(object:Callback{
             override fun onFailure(c: Call, e: IOException) { handler.post { cb(null) } }

@@ -38,7 +38,7 @@ class ProfileActivity : ThemedActivity() {
         labels.addView(RabtaUi.text(this,"@${Session.username}",13f,color=AppTheme.sub(this)))
         identityHead.addView(labels,LinearLayout.LayoutParams(0,-2,1f));hero.addView(identityHead)
         hero.addView(RabtaUi.button(this, "Change profile photo", action = ::pickPhoto).apply { (layoutParams as LinearLayout.LayoutParams).topMargin=RabtaUi.dp(this@ProfileActivity,16) })
-        hero.addView(RabtaUi.text(this, "Photo stays on this phone; profile photo sync is not supported by the current server.", 12f, color = AppTheme.sub(this)).apply { gravity = Gravity.CENTER; setPadding(0, 0, 0, 0) })
+        hero.addView(RabtaUi.text(this, "Your photo is shared with your contacts. Name and username cannot be changed yet.", 12f, color = AppTheme.sub(this)).apply { gravity = Gravity.CENTER; setPadding(0, 0, 0, 0) })
         body.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = RabtaUi.dp(this@ProfileActivity, 18) })
 
         body.addView(RabtaUi.text(this, "ACCOUNT ID", 12f, true, AppTheme.accent(this)).apply {
@@ -124,10 +124,16 @@ class ProfileActivity : ThemedActivity() {
         Toast.makeText(this, "Updating photo…", Toast.LENGTH_SHORT).show()
         val owner=Session.id
         Thread {
-            val encoded = MediaHelper.imageToBase64(this, uri)
+            // A small avatar keeps the upload well under the server's 256 KB profile photo limit.
+            val encoded = MediaHelper.imageToBase64(this, uri, maxPx = 320, quality = 80)
             if (encoded != null && Session.id==owner) {
                 Session.profilePic = encoded
-                handler.post { if (!isDestroyed) { loadAvatar(); Toast.makeText(this, "Photo saved on this phone", Toast.LENGTH_LONG).show() } }
+                handler.post {
+                    if (!isDestroyed) loadAvatar()
+                    WsClient.uploadPhoto(Session.serverUrl, Session.token, encoded) { ok, msg ->
+                        if (!isDestroyed) Toast.makeText(this, if (ok) "Profile photo updated" else "Photo saved on this phone, but it could not be shared: $msg", Toast.LENGTH_LONG).show()
+                    }
+                }
             } else handler.post { if (!isDestroyed) Toast.makeText(this, "Could not open that image", Toast.LENGTH_LONG).show() }
         }.start()
     }
