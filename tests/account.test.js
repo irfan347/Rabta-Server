@@ -1,0 +1,169 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const vm = require('node:vm');
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+
+// The real server in a sandbox with fake HTTP/WebSocket objects; no network or production data.
+function server(database = false) {
+  const routes = new Map(); let connect; const queries = [];
+  const app = { use() {}, post(p, f) { routes.set('POST ' + p, f); }, get(p, f) { routes.set('GET ' + p, f); }, delete(p, f) { routes.set('DELETE ' + p, f); } };
+  const express = () => app; express.json = () => () => {};
+  class WebSocketServer { on(event, cb) { if (event === 'connection') connect = cb; } }
+  class Pool { async query(sql, args) { queries.push([sql, args]); return { rows: [] }; } }
+  const context = vm.createContext({ require(name) { if (name === './features') return require('../features'); if (name === './account') return require('../account'); if (name === 'express') return express; if (name === 'ws') return { WebSocketServer }; if (name === 'http') return { createServer() { return { listen() {} }; } }; if (name === 'pg') return { Pool }; return require(name); },
+    setTimeout: (fn, ms) => ({ unref() {} }), clearTimeout() {}, process: { env: database ? { DATABASE_URL: 'test' } : {}, exitCode: 0 }, console, Buffer, URL });
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../index.js'), 'utf8'), context);
+  async function call(method, route, { body = {}, token, params = {}, query = {}, headers = {} } = {}) {
+    let status = 200, json;
+    const res = { status(n) { status = n; return this; }, json(v) { json = v; }, send(v) { json = v; }, setHeader() {} };
+    await routes.get(method + ' ' + route)({ body, params, query, headers: { ...headers, ...(token ? { authorization: 'Bearer ' + token } : {}) } }, res);
+    return { status, ...json };
+  }
+  function socket(token) {
+    const handlers = {}, messages = []; const ws = { readyState: 1, closed: false, send(s, cb) { messages.push(JSON.parse(s)); cb?.(); }, close() { this.readyState = 3; this.closed = true; handlers.close?.(); }, on(e, f) { handlers[e] = f; } };
+    connect(ws, { headers: { authorization: 'Bearer ' + token }, url: '/ws' }); return { ws, messages };
+  }
+  return { call, socket, queries };
+}
+
+// A phone's Keystore key, as the app creates it: EC P-256, public key sent as X.509 (SPKI) DER.
+function phone(name = 'Pixel') {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const der = publicKey.export({ format: 'der', type: 'spki' });
+  const id = crypto.createHash('sha256').update(der).digest('hex').slice(0, 32);
+  return { id, proof(purpose, time = Date.now()) {
+    return { id, key: der.toString('base64'), name, time, sig: crypto.sign('sha256', Buffer.from(`rabta-device\n${purpose}\n${id}\n${time}`), privateKey).toString('base64') };
+  } };
+}
+const register = (s, username, device) => s.call('POST', '/api/register', { body: { username, pin: '123456', name: username, ...(device ? { device: device.proof('register:' + username) } : {}) } });
+const login = (s, username, device, extra = {}) => s.call('POST', '/api/login', { body: { username, pin: '123456', ...(device ? { device: device.proof('login:' + username) } : {}), ...extra } });
+const me = (s, token) => s.call('GET', '/api/me', { token });
+
+test('username: first change is immediate, the next waits 30 days, and the old name stays reserved', async () => {
+  const s = server(); const ali = await register(s, 'ali'); await register(s, 'sara');
+  assert.deepEqual(await s.call('GET', '/api/username/available', { query: { u: 'sara' } }), { status: 200, available: false, error: 'Username already used' });
+  assert.equal((await s.call('GET', '/api/username/available', { query: { u: 'a!' } })).available, false);
+  assert.equal((await s.call('GET', '/api/username/available', { query: { u: 'ali_new' } })).available, true);
+  assert.equal((await s.call('GET', '/api/username/available', { query: { u: 'ali' }, token: ali.token })).error, 'This is already your username');
+
+  const changed = await s.call('POST', '/api/me/username', { token: ali.token, body: { username: 'Ali_New' } });
+  assert.equal(changed.status, 200); assert.equal(changed.username, 'ali_new');
+  assert.equal((await me(s, ali.token)).username, 'ali_new', 'Same account, same ID, new name');
+  assert.equal((await s.call('POST', '/api/me/username', { token: ali.token, body: { username: 'sara' } })).status, 429);
+  const early = await s.call('POST', '/api/me/username', { token: ali.token, body: { username: 'ali_third' } });
+  assert.equal(early.status, 429); assert.ok(early.nextUsernameChangeAt > Date.now() + 29 * 86400000);
+
+  assert.equal((await register(s, 'ali')).status, 409, 'The old name is reserved for 30 days');
+  assert.equal((await s.call('GET', '/api/username/available', { query: { u: 'ali' } })).error, 'Username already used');
+  assert.equal((await s.call('GET', '/api/username/available', { query: { u: 'ali' }, token: ali.token })).available, true, 'Its owner may take it back');
+
+  const real = Date.now;
+  try {
+    Date.now = () => real() + 31 * 86400000;
+    assert.equal((await s.call('POST', '/api/me/username', { token: ali.token, body: { username: 'ali_third' } })).status, 200);
+    assert.equal((await s.call('GET', '/api/username/available', { query: { u: 'ali' } })).available, true, 'Released after 30 days');
+  } finally { Date.now = real; }
+});
+
+test('display name can change any time and is limited to 30 characters', async () => {
+  const s = server(); const ali = await register(s, 'ali');
+  for (const name of ['Ali Khan', 'Ali', '  Ali   Raza  ']) assert.equal((await s.call('POST', '/api/me/name', { token: ali.token, body: { name } })).status, 200);
+  assert.equal((await me(s, ali.token)).name, 'Ali Raza');
+  assert.equal((await s.call('POST', '/api/me/name', { token: ali.token, body: { name: 'x'.repeat(31) } })).status, 400);
+  assert.equal((await s.call('POST', '/api/me/name', { token: ali.token, body: { name: '   ' } })).status, 400);
+  assert.equal((await s.call('POST', '/api/me/name', { body: { name: 'Nope' } })).status, 401);
+});
+
+test('a stolen PIN on a new phone waits for approval from the trusted phone', async () => {
+  const s = server(); const mine = phone('My phone'), thief = phone('Unknown phone');
+  const created = await register(s, 'ali', mine);
+  assert.match(created.recoveryCode, /^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/);
+  assert.equal(created.token.split('.').length, 4);
+  const trusted = s.socket(created.token);
+
+  const attempt = await login(s, 'ali', thief);
+  assert.equal(attempt.status, 202); assert.equal(attempt.token, undefined, 'No session from the PIN alone');
+  assert.equal(trusted.messages.find(m => m.type === 'device_request').request.name, 'Unknown phone');
+  assert.equal((await s.call('POST', '/api/login/request/:id', { params: { id: attempt.requestId }, body: { device: thief.proof('poll:' + attempt.requestId) } })).status, 202);
+  assert.equal((await s.call('POST', '/api/login/request/:id', { params: { id: attempt.requestId }, body: { device: mine.proof('poll:' + attempt.requestId) } })).status, 403, 'Only the waiting phone can collect it');
+
+  assert.equal((await s.call('POST', '/api/devices/requests/:id', { token: created.token, params: { id: attempt.requestId }, body: { approve: false } })).status, 'denied');
+  assert.equal((await s.call('POST', '/api/login/request/:id', { params: { id: attempt.requestId }, body: { device: thief.proof('poll:' + attempt.requestId) } })).status, 403);
+
+  const again = await login(s, 'ali', thief);
+  const listed = await s.call('GET', '/api/devices', { token: created.token });
+  assert.equal(listed.devices.length, 1); assert.equal(listed.requests[0].id, again.requestId);
+  await s.call('POST', '/api/devices/requests/:id', { token: created.token, params: { id: again.requestId }, body: { approve: true } });
+  const approved = await s.call('POST', '/api/login/request/:id', { params: { id: again.requestId }, body: { device: thief.proof('poll:' + again.requestId) } });
+  assert.equal(approved.status, 200); assert.equal((await me(s, approved.token)).username, 'ali');
+  assert.equal((await login(s, 'ali', thief)).status, 200, 'An approved phone signs in directly next time');
+});
+
+test('the recovery code signs in a new phone, removes the old ones and is replaced', async () => {
+  const s = server(); const lost = phone(), fresh = phone(), other = phone();
+  const created = await register(s, 'ali', lost);
+  const oldSocket = s.socket(created.token);
+  assert.equal((await login(s, 'ali', fresh, { recoveryCode: 'AAAA-BBBB-CCCC' })).status, 401);
+  const recovered = await login(s, 'ali', fresh, { recoveryCode: created.recoveryCode.toLowerCase().replace(/-/g, ' ') });
+  assert.equal(recovered.status, 200); assert.ok(recovered.recoveryCode && recovered.recoveryCode !== created.recoveryCode);
+  assert.equal((await me(s, created.token)).status, 401, 'The lost phone is signed out');
+  assert.equal(oldSocket.ws.closed, true);
+  assert.equal((await login(s, 'ali', other, { recoveryCode: created.recoveryCode })).status, 401, 'A used code stops working');
+  assert.equal((await login(s, 'ali', lost)).status, 202, 'The lost phone now needs approval');
+});
+
+test('device proofs cannot be replayed, altered or reused for another account', async () => {
+  const s = server(); const mine = phone();
+  await register(s, 'ali', mine); await register(s, 'sara');
+  const proof = mine.proof('login:ali');
+  assert.equal((await s.call('POST', '/api/login', { body: { username: 'ali', pin: '123456', device: proof } })).status, 200);
+  assert.equal((await s.call('POST', '/api/login', { body: { username: 'ali', pin: '123456', device: proof } })).status, 400, 'Replay');
+  assert.equal((await s.call('POST', '/api/login', { body: { username: 'ali', pin: '123456', device: mine.proof('login:sara') } })).status, 400, 'Wrong purpose');
+  assert.equal((await s.call('POST', '/api/login', { body: { username: 'ali', pin: '123456', device: { ...mine.proof('login:ali'), id: 'f'.repeat(32) } } })).status, 400, 'Claimed another device ID');
+  assert.equal((await s.call('POST', '/api/login', { body: { username: 'ali', pin: '123456', device: mine.proof('login:ali', Date.now() - 10 * 60000) } })).status, 400, 'Stale');
+  assert.equal((await s.call('POST', '/api/login', { body: { username: 'ali', pin: '000000', device: mine.proof('login:ali') } })).status, 401, 'PIN is still required');
+});
+
+test('existing accounts: older apps keep working until the first updated phone becomes trusted', async () => {
+  const s = server(); const legacy = await register(s, 'ali');
+  assert.equal(legacy.token.split('.').length, 3); assert.equal(legacy.recoveryCode, undefined);
+  assert.equal((await login(s, 'ali')).status, 200, 'Old app, no trusted phone yet');
+  const mine = phone();
+  const upgraded = await s.call('POST', '/api/me/device', { token: legacy.token, body: { device: mine.proof('bootstrap:' + legacy.id) } });
+  assert.equal(upgraded.status, 200); assert.ok(upgraded.recoveryCode); assert.equal(upgraded.token.split('.').length, 4);
+  assert.equal((await me(s, legacy.token)).status, 401, 'Old-style tokens stop once a phone is trusted');
+  assert.equal((await login(s, 'ali')).status, 426, 'Old apps must update to sign in');
+  assert.equal((await login(s, 'ali', phone())).status, 202, 'Other phones now need approval');
+  const second = await s.call('POST', '/api/me/device', { token: (await login(s, 'ali', mine)).token, body: { device: phone().proof('bootstrap:' + legacy.id) } });
+  assert.equal(second.status, 200, 'Already trusted phone just keeps its session');
+});
+
+test('trusted phones can see and remove other phones; admin reset needs the server key', async () => {
+  const s = server(); const a = phone('A'), b = phone('B');
+  const created = await register(s, 'ali', a);
+  const pending = await login(s, 'ali', b);
+  await s.call('POST', '/api/devices/requests/:id', { token: created.token, params: { id: pending.requestId }, body: { approve: true } });
+  const bToken = (await s.call('POST', '/api/login/request/:id', { params: { id: pending.requestId }, body: { device: b.proof('poll:' + pending.requestId) } })).token;
+  assert.equal((await s.call('DELETE', '/api/devices/:id', { token: created.token, params: { id: a.id } })).status, 400, 'Cannot remove the current phone');
+  assert.equal((await s.call('DELETE', '/api/devices/:id', { token: created.token, params: { id: b.id } })).status, 200);
+  assert.equal((await me(s, bToken)).status, 401);
+
+  assert.equal((await s.call('POST', '/api/admin/reset-devices', { body: { username: 'ali' } })).status, 404);
+  const key = 'k'.repeat(40); process.env.ADMIN_KEY = key;
+  try {
+    assert.equal((await s.call('POST', '/api/admin/reset-devices', { body: { username: 'ali' }, headers: { 'x-admin-key': 'x'.repeat(40) } })).status, 404);
+    assert.equal((await s.call('POST', '/api/admin/reset-devices', { body: { username: 'ali' }, headers: { 'x-admin-key': key } })).status, 200);
+  } finally { delete process.env.ADMIN_KEY; }
+  const restarted = await login(s, 'ali', phone());
+  assert.equal(restarted.status, 200); assert.ok(restarted.recoveryCode, 'After a reset the next phone becomes trusted with a new code');
+});
+
+test('device records and username changes are written to the database', async () => {
+  const s = server(true); const created = await register(s, 'ali', phone());
+  assert.ok(s.queries.some(([sql, a]) => sql.startsWith('INSERT INTO ru_devices') && a[0] === created.id));
+  assert.ok(s.queries.some(([sql]) => sql.startsWith('UPDATE ru_users SET recovery_hash')));
+  await s.call('POST', '/api/me/username', { token: created.token, body: { username: 'ali_new' } });
+  assert.ok(s.queries.some(([sql, a]) => sql.startsWith('INSERT INTO ru_reserved') && a[0] === 'ali'));
+});

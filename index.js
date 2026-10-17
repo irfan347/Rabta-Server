@@ -50,6 +50,7 @@ async function initDb() {
   `);
   const rows = (await pool.query('SELECT id,username,pass_hash,name FROM ru_users')).rows;
   for (const r of rows) memUsers.set(r.id, r);
+  await account.init();
   for (const g of (await pool.query('SELECT * FROM rg_groups')).rows) groups.set(g.id, { ...g, members: new Set(g.members.split(',')) });
 }
 
@@ -64,30 +65,38 @@ function checkPin(pin, stored) {
   if (!s || !h) return false;
   return safeEq(crypto.scryptSync(pin, s, 32).toString('hex'), h);
 }
-function makeToken(id) {
-  const payload = id + '.' + (Date.now() + 30 * 24 * 3600 * 1000);
+// Tokens name the trusted device they were issued to ("id.expiry.device.sig"); older "id.expiry.sig" tokens
+// stay valid only while the account has no trusted device.
+function makeToken(id, device = null) {
+  const payload = id + '.' + (Date.now() + 30 * 24 * 3600 * 1000) + (device ? '.' + device : '');
   return payload + '.' + crypto.createHmac('sha256', TOKEN_SECRET).update(payload).digest('hex');
 }
-function readToken(tok) {
+function readTokenFull(tok) {
   const p = String(tok || '').split('.');
-  if (p.length !== 3) return null;
-  const payload = p[0] + '.' + p[1];
+  if (p.length !== 3 && p.length !== 4) return null;
+  const payload = p.slice(0, -1).join('.');
   const sig = crypto.createHmac('sha256', TOKEN_SECRET).update(payload).digest('hex');
-  if (!safeEq(sig, p[2]) || Number(p[1]) < Date.now()) return null;
-  return p[0];
+  if (!safeEq(sig, p[p.length - 1]) || Number(p[1]) < Date.now()) return null;
+  const device = p.length === 4 ? p[2] : null;
+  return account.tokenAllowed(p[0], device) ? { id: p[0], device } : null;
 }
-function authId(req) { return readToken(String(req.headers.authorization || '').replace(/^Bearer\s+/i, '')); }
+const readToken = tok => readTokenFull(tok)?.id || null;
+const bearer = req => String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+function authId(req) { return readToken(bearer(req)); }
+
+const account = require('./account')({ app, users: memUsers, getPool: () => pool, authToken: req => readTokenFull(bearer(req)), makeToken, checkPin, sendTo,
+  closeDevice: (userId, device) => { const w = online.get(userId); if (w && w.rabtaDevice === device) try { w.close(1008, 'auth'); } catch (_) {} } });
 
 // ---------- register ----------
 const regFails = new Map();
 app.post('/api/register', async (req, res) => {
   const username = String(req.body?.username || '').trim().toLowerCase();
   const pin = String(req.body?.pin || '');
-  const name = String(req.body?.name || username).trim().slice(0, 40);
+  const name = account.cleanName(req.body?.name || username) || username;
   if (!UN_RE.test(username)) return res.status(400).json({ error: 'Username 3-20 letters/numbers only' });
   if (!/^\d{4,8}$/.test(pin)) return res.status(400).json({ error: 'PIN must be 4-8 digits' });
-  const existing = [...memUsers.values()].find(u => u.username === username);
-  if (existing) return res.status(409).json({ error: 'Username already taken' });
+  const status = account.usernameStatus(username);
+  if (!status.available) return res.status(409).json({ error: status.error });
   const id = crypto.randomBytes(6).toString('hex').toUpperCase();
   const user = { id, username, pass_hash: hashPin(pin), name, created_at: Date.now(), last_seen: Date.now() };
   memUsers.set(id, user); // reserves the username while the insert is in flight
@@ -97,17 +106,18 @@ app.post('/api/register', async (req, res) => {
         [id, username, user.pass_hash, name, user.created_at, user.last_seen]);
     } catch (e) {
       memUsers.delete(id);
-      if (e.code === '23505') return res.status(409).json({ error: 'Username already taken' });
+      if (e.code === '23505') return res.status(409).json({ error: 'Username already used' });
       console.error('Account storage failed:', e.message);
       return res.status(503).json({ error: 'Account could not be saved, please try again' });
     }
   }
-  res.json({ id, username, name, token: makeToken(id) });
+  try { res.json(await account.registered(user, req.body?.device)); }
+  catch (e) { console.error('Device registration failed:', e.message); res.json({ id, username, name, token: makeToken(id) }); }
 });
 
 // ---------- login ----------
 const loginFails = new Map();
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const username = String(req.body?.username || '').trim().toLowerCase();
   const pin = String(req.body?.pin || '');
   const f = loginFails.get(username);
@@ -118,8 +128,12 @@ app.post('/api/login', (req, res) => {
     cur.count++; loginFails.set(username, cur);
     return res.status(401).json({ error: 'Wrong username or PIN' });
   }
-  loginFails.delete(username);
-  res.json({ id: user.id, username: user.username, name: user.name, token: makeToken(user.id) });
+  try {
+    const [status, body, failed] = await account.signIn(user, req.body);
+    if (failed) { const cur = (f && f.until > Date.now()) ? f : { count: 0, until: Date.now() + 15 * 60 * 1000 }; cur.count++; loginFails.set(username, cur); }
+    else if (status === 200) loginFails.delete(username);
+    res.status(status).json(body);
+  } catch (e) { console.error('Sign-in failed:', e.message); res.status(503).json({ error: 'Sign-in could not be completed, please try again' }); }
 });
 
 // ---------- user lookup ----------
@@ -245,14 +259,16 @@ function updateLastSeen(userId) {
 
 wss.on('connection', (ws, req) => {
   const token = req.headers['authorization']?.replace(/^Bearer\s+/i, '') || new URL(req.url, 'http://x').searchParams.get('token');
-  const userId = readToken(token);
+  const auth = readTokenFull(token), userId = auth?.id;
   if (!userId || !memUsers.has(userId)) { ws.close(1008, 'auth'); return; }
+  ws.rabtaDevice = auth.device;
   const user = memUsers.get(userId);
   if (online.has(userId)) try { online.get(userId).close(); } catch (_) {}
   online.set(userId, ws);
   updateLastSeen(userId);
 
   ws.send(JSON.stringify({ type: 'ready', id: userId, name: user.name, protocol: 2, receipts: true }));
+  for (const frame of account.pendingFor(userId)) ws.send(JSON.stringify(frame));
   deliverPending(userId, ws).then(() => deliverReceipts(userId, ws)).catch(e => console.error('Offline delivery failed:', e.message));
   for(const call of [...voiceCalls.values(),...videoCalls.values()]) if(call.to===userId) deliverCall(call);
 
