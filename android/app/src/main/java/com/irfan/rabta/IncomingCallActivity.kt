@@ -67,27 +67,27 @@ class IncomingCallActivity : ThemedActivity(), RabtaEvents.Listener {
     private fun buildUi() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
-            setBackgroundColor(BG); setPadding(dp(32), dp(60), dp(32), dp(60))
+            setBackgroundColor(BG); setPadding(dp(24),dp(32),dp(24),dp(32))
         }
         setContentView(root)
 
         // Caller avatar
         root.addView(TextView(this).apply {
-            val cols = listOf(0xFF2196F3, 0xFF9C27B0, 0xFF009688)
+            val cols = listOf(0xFF6248A5,0xFF325E71,0xFF286F68)
             text = fromName.filter { it.isLetterOrDigit() }.take(1).uppercase().ifEmpty { "?" }
             textSize = 40f; typeface = Typeface.DEFAULT_BOLD; setTextColor(Color.WHITE); gravity = Gravity.CENTER
             background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(cols[(fromName.hashCode() and 0x7FFFFFFF) % cols.size].toInt()) }
-        }, LinearLayout.LayoutParams(dp(100), dp(100)).apply { gravity = Gravity.CENTER })
+        }, LinearLayout.LayoutParams(dp(88),dp(88)).apply { gravity = Gravity.CENTER })
 
         root.addView(TextView(this).apply {
-            text = fromName; textSize = 28f; typeface = Typeface.DEFAULT_BOLD
+            text = fromName; textSize = 24f; typeface = Typeface.DEFAULT_BOLD
             setTextColor(AppTheme.text(this@IncomingCallActivity)); gravity = Gravity.CENTER
             setPadding(0, dp(20), 0, dp(8))
         })
         root.addView(TextView(this).apply {
             text = if(isVideo) "Incoming video call…" else "Incoming voice call…"; textSize = 16f
             setTextColor(AppTheme.sub(this@IncomingCallActivity)); gravity = Gravity.CENTER
-            setPadding(0, 0, 0, dp(60))
+            setPadding(0, 0, 0, dp(40))
         })
 
         // Buttons row

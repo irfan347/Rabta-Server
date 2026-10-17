@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="rabta_graphite">#0B0F19</color>
-    <color name="rabta_violet">#8868F7</color>
-    <color name="rabta_teal">#43D7C5</color>
+    <color name="rabta_graphite">#0B1020</color>
+    <color name="rabta_violet">#8F74F8</color>
+    <color name="rabta_teal">#35C9BC</color>
 </resources>

@@ -38,15 +38,15 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     companion object { @Volatile var openPeer: String? = null }
 
     private val GREEN get() = AppTheme.accent(this)
-    private val GREEN2 get() = AppTheme.ACCENT
+    private val GREEN2 get() = AppTheme.primary(this)
     private val BEIGE get() = AppTheme.bg(this@ChatActivity)
     private val SENT get() = AppTheme.sent(this@ChatActivity)
     private val RECV get() = AppTheme.surface(this@ChatActivity)
     private val TXT get() = AppTheme.text(this@ChatActivity)
     private val SUB get() = AppTheme.sub(this@ChatActivity)
-    private val DARK    = 0xFF0C1317.toInt()
-    private val DARK2   = 0xFF1F2C34.toInt()
-    private val GRAY_BTN= 0xFF2A3942.toInt()
+    private val DARK    = 0xFF0B1020.toInt()
+    private val DARK2   = 0xFF171D30.toInt()
+    private val GRAY_BTN= 0xFF293149.toInt()
     private val RED     = 0xFFD32F2F.toInt()
 
     private lateinit var peerId: String
@@ -313,7 +313,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         bar.addView(RabtaUi.iconButton(this,"sticker","Stickers") { Stickers.picker(this@ChatActivity,{sendContent(it,"sticker")},{pickAttachment("image/*",104)}) })
         input = EditText(this).apply {
             hint=L.t(this@ChatActivity,"Message"); minHeight=dp(48);textSize=16f; setTextColor(TXT); setHintTextColor(SUB); maxLines=5
-            background = RabtaUi.shape(this@ChatActivity,BEIGE,20,AppTheme.line(this@ChatActivity))
+            background = RabtaUi.shape(this@ChatActivity,BEIGE,20)
             setPadding(dp(14),dp(10),dp(14),dp(10))
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
             addTextChangedListener(object:TextWatcher{
@@ -330,12 +330,12 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         }
         bar.addView(input, LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f).apply { marginStart=dp(4); marginEnd=dp(4) })
         sendBtn = TextView(this).apply {
-            UiIcons.set(this,"send",label="Send message"); textSize=20f; setTextColor(Color.WHITE); gravity=Gravity.CENTER
+            UiIcons.set(this,"send",AppTheme.onPrimary(this@ChatActivity),label="Send message"); textSize=20f; setTextColor(Color.WHITE); gravity=Gravity.CENTER
             background=RabtaUi.ripple(this@ChatActivity,GREEN2,24); isFocusable=true;isClickable=true; setOnClickListener{sendMsg()}; visibility=View.GONE
         }
         bar.addView(sendBtn, LinearLayout.LayoutParams(dp(48),dp(48)))
         micBtn = TextView(this).apply {
-            UiIcons.set(this,"mic",label="Hold to record; release to send"); textSize=20f; gravity=Gravity.CENTER; background=RabtaUi.ripple(this@ChatActivity,GREEN2,24);isFocusable=true
+            UiIcons.set(this,"mic",AppTheme.onPrimary(this@ChatActivity),label="Hold to record; release to send"); textSize=20f; gravity=Gravity.CENTER; background=RabtaUi.ripple(this@ChatActivity,GREEN2,24);isFocusable=true
             setOnClickListener { if(recording) stopVoiceRecord(true) else checkAudioPermission { startVoiceRecord() } }
             setOnTouchListener { _,ev -> when(ev.action){ MotionEvent.ACTION_DOWN->{ checkAudioPermission{startVoiceRecord()}; true }; MotionEvent.ACTION_MOVE->{ if(ev.x < -dp(48)) stopVoiceRecord(false); true }; MotionEvent.ACTION_UP->{ stopVoiceRecord(true); true }; MotionEvent.ACTION_CANCEL->{ stopVoiceRecord(false); true }; else->false } }
         }
@@ -445,7 +445,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         }
     }.apply {
         orientation=LinearLayout.VERTICAL
-        background=RabtaUi.shape(this@ChatActivity,if(mine) SENT else RECV,20,if(mine) null else AppTheme.line(this@ChatActivity)).apply {
+        background=RabtaUi.shape(this@ChatActivity,if(mine) SENT else RECV,20,null).apply {
             val r=dp(20).toFloat();val corner=dp(6).toFloat()
             cornerRadii=if(mine) floatArrayOf(r,r,r,r,corner,corner,r,r) else floatArrayOf(r,r,r,r,r,r,corner,corner)
         }

@@ -25,6 +25,9 @@ class NearbyPanel(private val activity:Activity) {
     private val radar:RadarView
     private val users=LinearLayout(activity).apply { orientation=LinearLayout.VERTICAL }
     private val count:TextView
+    private val search:CompactSearchView
+    private var query=""
+    private var syncingDiscoverability=false
     private val handler=Handler(Looper.getMainLooper())
     private var active=false
     private var rendered=""
@@ -34,65 +37,94 @@ class NearbyPanel(private val activity:Activity) {
     }
     init {
         val card=RabtaUi.card(activity)
-        card.addView(RabtaUi.text(activity,"Rabta Radar",25f,true))
-        card.addView(RabtaUi.text(activity,"Meet nearby. Stay private.",14f,color=AppTheme.sub(activity)))
+        val header=LinearLayout(activity).apply {gravity=Gravity.CENTER_VERTICAL}
+        val title=LinearLayout(activity).apply {orientation=LinearLayout.VERTICAL}
+        title.addView(RabtaUi.text(activity,"Discover nearby",20f,true))
+        title.addView(RabtaUi.text(activity,"Connect on your terms",13f,color=AppTheme.sub(activity)))
+        header.addView(title,LinearLayout.LayoutParams(0,-2,1f))
+        header.addView(RabtaUi.iconButton(activity,"more","Nearby options") { options() })
+        card.addView(header)
         radar=RadarView(activity)
-        card.addView(radar,LinearLayout.LayoutParams(-1,RabtaUi.dp(activity,200)))
+        card.addView(radar,LinearLayout.LayoutParams(-1,RabtaUi.dp(activity,128)))
         discoverable=Switch(activity).apply {
-            text="Discoverability";textSize=16f;setTextColor(AppTheme.text(activity))
-            minHeight=RabtaUi.dp(activity,56);isChecked=RadarPrefs.enabled(activity)
+            text="Discoverability";textSize=15f;setTextColor(AppTheme.text(activity))
+            minHeight=RabtaUi.dp(activity,48);isChecked=RadarPrefs.enabled(activity)
             contentDescription="Radar discoverability"
             setOnCheckedChangeListener { _,enabled ->
+                if(syncingDiscoverability)return@setOnCheckedChangeListener
                 if(!Session.loggedIn){isChecked=false;Toast.makeText(activity,"Sign in to use Radar",0).show();return@setOnCheckedChangeListener}
                 MeshBridge.setDiscoverable(activity,enabled);pendingOpen=null;rendered="";refresh()
                 if(enabled&&NearbySetup.problem(activity)!=null)guidance()
             }
         }
         card.addView(discoverable)
-        info=RabtaUi.text(activity,"Radar is off",14f,color=AppTheme.sub(activity))
+        info=RabtaUi.text(activity,"Radar is off",13f,color=AppTheme.sub(activity)).apply {
+            accessibilityLiveRegion=android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE
+            setPadding(0,RabtaUi.dp(activity,4),0,0)
+        }
         card.addView(info)
-        card.addView(RabtaUi.text(activity,"When on, nearby phones can see your Rabta display name and ID until you turn it off. Every new connection needs approval. Turning off disconnects Nearby; queued messages stay saved.",13f,color=AppTheme.sub(activity)).apply { setPadding(0,RabtaUi.dp(activity,12),0,0) })
+        card.addView(RabtaUi.text(activity,"Share your display name and Rabta ID only while discoverable. Connections always need approval.",12f,color=AppTheme.sub(activity)).apply {setPadding(0,RabtaUi.dp(activity,8),0,0)})
         view.addView(card)
-        view.addView(RabtaUi.button(activity,"Permissions & discovery help") { guidance() })
-        view.addView(RabtaUi.button(activity,"Retry discovery") {
-            if(!RadarPrefs.enabled(activity))Toast.makeText(activity,"Enable discoverability first",0).show()
-            else if(NearbySetup.problem(activity)!=null)guidance()
-            else {MessageService.restartNearby(activity);rendered="";refresh()}
-        })
-        count=RabtaUi.text(activity,"Nearby users",19f,true).apply { setPadding(0,RabtaUi.dp(activity,8),0,RabtaUi.dp(activity,12)) }
-        view.addView(count);view.addView(users)
-        view.addView(RabtaUi.text(activity,"No phone numbers are shared. The Radar animation shows discovery activity; it does not measure distance or location.",13f,color=AppTheme.sub(activity)).apply { setPadding(0,RabtaUi.dp(activity,8),0,RabtaUi.dp(activity,16)) })
-        view.addView(RabtaUi.button(activity,"Instant Connect · temporary QR",true) { activity.startActivity(Intent(activity,InstantConnectActivity::class.java)) })
-        view.addView(RabtaUi.button(activity,"My contact QR") { showQr() })
-        view.addView(RabtaUi.button(activity,"Scan contact QR") {
-            IntentIntegrator(activity).setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
-                .setPrompt("Scan a trusted Rabta contact").setBeepEnabled(false).setOrientationLocked(false).initiateScan()
-        })
-        view.addView(RabtaUi.button(activity,"Connection tools") { tools() })
-        view.addView(RabtaUi.button(activity,"Network Vision") { activity.startActivity(Intent(activity,NetworkVisionActivity::class.java)) })
-        view.addView(RabtaUi.button(activity,"Connectivity diagnostics") { activity.startActivity(Intent(activity,ConnectivityDiagnosticsActivity::class.java)) })
-        view.addView(FeatureUi.text(activity,"Approved Nearby connections support encrypted text and built-in stickers using the existing mesh. Files, Status, groups and calls require internet. Delivery needs a recipient receipt."))
+        search=CompactSearchView(activity,"Search nearby users") { value ->query=value;rendered="";refresh() }
+        view.addView(search,LinearLayout.LayoutParams(-1,-2).apply {topMargin=RabtaUi.dp(activity,8);bottomMargin=RabtaUi.dp(activity,8)})
+        val nearbyHeading=LinearLayout(activity).apply {gravity=Gravity.CENTER_VERTICAL}
+        count=RabtaUi.text(activity,"Nearby users",15f,true)
+        nearbyHeading.addView(count,LinearLayout.LayoutParams(0,-2,1f))
+        nearbyHeading.addView(RabtaUi.iconButton(activity,"restore","Retry discovery") { retry() })
+        view.addView(nearbyHeading);view.addView(users)
+        view.addView(RabtaUi.text(activity,"No phone numbers are shared. Radar shows activity, not distance or location.",12f,color=AppTheme.sub(activity)).apply {setPadding(0,RabtaUi.dp(activity,8),0,RabtaUi.dp(activity,16))})
+        view.addView(RabtaUi.row(activity,"Instant Connect","Pair with a temporary QR invitation","privacy") { activity.startActivity(Intent(activity,InstantConnectActivity::class.java)) })
+        view.addView(RabtaUi.row(activity,"Network Vision","Explore your live nearby connections","nearby") { activity.startActivity(Intent(activity,NetworkVisionActivity::class.java)) })
+        view.addView(RabtaUi.row(activity,"Connection help","Permissions, radios and discovery","connection") { guidance() })
     }
+    fun saveState(state:android.os.Bundle) {state.putString("nearbyQuery",query)}
+    fun restoreState(state:android.os.Bundle?) {search.field.setText(state?.getString("nearbyQuery").orEmpty())}
+    fun handleBack():Boolean {
+        if(search.field.hasFocus()) {
+            search.field.clearFocus()
+            androidx.core.view.WindowCompat.getInsetsController(activity.window,activity.window.decorView).hide(androidx.core.view.WindowInsetsCompat.Type.ime())
+            return true
+        }
+        if(query.isNotEmpty()){search.field.setText("");return true}
+        return false
+    }
+    private fun retry() {
+        if(!RadarPrefs.enabled(activity))Toast.makeText(activity,"Enable discoverability first",0).show()
+        else if(NearbySetup.problem(activity)!=null)guidance()
+        else {MessageService.restartNearby(activity);rendered="";refresh()}
+    }
+    private fun options()=RabtaUi.sheet(activity,"Nearby options",listOf(
+        RabtaUi.SheetAction("My contact QR","Permanent contact key") {showQr()},
+        RabtaUi.SheetAction("Scan contact QR") {
+            IntentIntegrator(activity).setDesiredBarcodeFormats(IntentIntegrator.QR_CODE).setPrompt("Scan a trusted Rabta contact").setBeepEnabled(false).setOrientationLocked(false).initiateScan()
+        },
+        RabtaUi.SheetAction("Connection tools") {tools()}
+    ))
     fun resume() { if(active)return;active=true;MessageService.start(activity);handler.post(tick) }
     fun pause() { active=false;handler.removeCallbacks(tick);radar.scanning(false) }
     fun refresh() {
         if(!active||activity.isDestroyed||activity.isFinishing)return
         val enabled=RadarPrefs.enabled(activity)
-        if(discoverable.isChecked!=enabled)discoverable.isChecked=enabled
+        if(discoverable.isChecked!=enabled){syncingDiscoverability=true;discoverable.isChecked=enabled;syncingDiscoverability=false}
         val problem=if(enabled)NearbySetup.problem(activity)else null
         val snapshot=MeshBridge.snapshot()
         radar.scanning(enabled&&problem==null&&snapshot.active)
         info.text=if(!enabled)"Off · you are not discoverable" else problem?:MeshBridge.status
+        info.setTextColor(if(problem!=null)AppTheme.error(activity)else AppTheme.sub(activity))
         val peers=if(enabled)MeshBridge.radarPeers()else emptyList()
-        count.text="Nearby users · ${peers.size}"
+        val matches=NearbySearch.filter(peers,query)
+        count.text=if(query.isBlank())"Nearby users · ${peers.size}" else "${matches.size} of ${peers.size} users"
         val now=SystemClock.elapsedRealtime()
-        val signature=peers.joinToString { "${it.endpoint}:${it.id}:${it.name}:${it.stage}:${it.code}:${now>=it.retryAt}" }+snapshot.peers.toString()+enabled+problem
+        val signature=peers.joinToString { "${it.endpoint}:${it.id}:${it.name}:${it.stage}:${it.code}:${now>=it.retryAt}" }+snapshot.peers.toString()+enabled+problem+query
         if(signature!=rendered) {
             rendered=signature;users.removeAllViews()
-            if(peers.isEmpty()) {
+            if(matches.isEmpty()) {
+                if(query.isNotBlank())users.addView(RabtaUi.empty(activity,"search","No nearby matches","Try another display name or Rabta ID.","Clear search") {search.field.setText("")})
+                else {
                 users.addView(RabtaUi.empty(activity,"nearby",if(enabled)"No users found yet" else "Your Radar is private",if(enabled)"Both people need discoverability on, Nearby permissions and compatible Rabta versions. No location or distance is shown." else "Turn on discoverability when you want to meet someone nearby."))
-            }else peers.take(50).forEach { peer -> peerCard(peer,snapshot.peers.firstOrNull { it.id==peer.id }?.keyMatched==true,now) }
-            if(peers.size>50)users.addView(RabtaUi.text(activity,"Showing 50 of ${peers.size} discovered users",13f))
+            }
+            }else matches.take(50).forEach { peer -> peerCard(peer,snapshot.peers.firstOrNull { it.id==peer.id }?.keyMatched==true,now) }
+            if(matches.size>50)users.addView(RabtaUi.text(activity,"Showing 50 of ${matches.size} matching users",13f))
         }
         pendingOpen?.let { id ->
             val peer=peers.firstOrNull { it.id==id&&it.stage==RadarStage.CONNECTED }
@@ -102,14 +134,21 @@ class NearbyPanel(private val activity:Activity) {
     private fun peerCard(peer:RadarPeer,keyMatched:Boolean,now:Long) {
         val card=RabtaUi.card(activity)
         val head=LinearLayout(activity).apply { gravity=Gravity.CENTER_VERTICAL }
-        head.addView(RabtaUi.text(activity,peer.name.take(1).uppercase().ifBlank { "R" },22f,true,AppTheme.accent(activity)).apply {
+        head.addView(RabtaUi.text(activity,peer.name.take(1).uppercase().ifBlank { "R" },18f,true,AppTheme.accent(activity)).apply {
             gravity=Gravity.CENTER;background=RabtaUi.shape(activity,AppTheme.sent(activity),28)
             contentDescription="${peer.name} avatar"
-        },LinearLayout.LayoutParams(RabtaUi.dp(activity,52),RabtaUi.dp(activity,52)))
+        },LinearLayout.LayoutParams(RabtaUi.dp(activity,44),RabtaUi.dp(activity,44)))
         val identity=LinearLayout(activity).apply { orientation=LinearLayout.VERTICAL;setPadding(RabtaUi.dp(activity,12),0,0,0) }
-        identity.addView(RabtaUi.text(activity,peer.name.ifBlank { "Rabta user" },17f,true))
+        identity.addView(RabtaUi.text(activity,peer.name.ifBlank { "Rabta user" },15f,true))
         identity.addView(RabtaUi.text(activity,peer.id,12f,color=AppTheme.sub(activity)))
-        head.addView(identity,LinearLayout.LayoutParams(0,-2,1f));card.addView(head)
+        head.addView(identity,LinearLayout.LayoutParams(0,-2,1f))
+        head.addView(RabtaUi.iconButton(activity,"more","Options for ${peer.name}") {
+            val actions=mutableListOf<RabtaUi.SheetAction>()
+            if(peer.stage==RadarStage.CONNECTED)actions.add(RabtaUi.SheetAction("Compare security code") {MeshSecurity.showContact(activity,peer.id)})
+            actions.add(RabtaUi.SheetAction("Block user") {confirmBlock(peer)})
+            RabtaUi.sheet(activity,peer.name.ifBlank {"Rabta user"},actions)
+        })
+        card.addView(head)
         val status=when(peer.stage) {
             RadarStage.FOUND -> "Discovered · approval required"
             RadarStage.OUTGOING -> "Request sent · waiting for approval"
@@ -129,19 +168,18 @@ class NearbyPanel(private val activity:Activity) {
             RadarStage.OUTGOING,RadarStage.APPROVED -> card.addView(RabtaUi.button(activity,"Cancel request") { MeshBridge.rejectConnection(peer.endpoint);pendingOpen=null;refresh() })
             RadarStage.CONNECTED -> {
                 card.addView(RabtaUi.button(activity,if(keyMatched)"Open private chat" else "Waiting for security verification",keyMatched) { if(keyMatched)openChat(peer) }.apply { isEnabled=keyMatched;alpha=if(keyMatched)1f else 0.55f })
-                card.addView(RabtaUi.button(activity,"Compare security code") { MeshSecurity.showContact(activity,peer.id) })
             }
             else -> card.addView(RabtaUi.button(activity,if(now<peer.retryAt)"Request cooldown · try again shortly" else "Request connection",now>=peer.retryAt) {
                 if(MeshBridge.requestConnection(peer.endpoint))pendingOpen=peer.id else Toast.makeText(activity,"Request unavailable. Refresh Radar or wait for the cooldown.",0).show()
                 refresh()
             }.apply { isEnabled=now>=peer.retryAt;alpha=if(isEnabled)1f else 0.55f })
         }
-        card.addView(RabtaUi.button(activity,"Block user") {
-            AlertDialog.Builder(activity).setTitle("Block ${peer.name}?")
-                .setMessage("Disconnect this user and reject future Radar requests. You can manage blocked users in Privacy settings.")
-                .setNegativeButton("Cancel",null).setPositiveButton("Block") { _,_ -> MeshBridge.blockUser(activity,peer.id);if(pendingOpen==peer.id)pendingOpen=null;refresh() }.show()
-        })
         users.addView(card)
+    }
+    private fun confirmBlock(peer:RadarPeer) {
+        AlertDialog.Builder(activity).setTitle("Block ${peer.name}?")
+            .setMessage("Disconnect this user and reject future Radar requests. Manage blocked users in Privacy settings.")
+            .setNegativeButton("Cancel",null).setPositiveButton("Block") { _,_ -> MeshBridge.blockUser(activity,peer.id);if(pendingOpen==peer.id)pendingOpen=null;rendered="";refresh() }.show()
     }
     private fun openChat(peer:RadarPeer) {
         if(!MeshBridge.snapshot().peers.any { it.id==peer.id&&it.keyMatched }||Privacy.blocked(activity,peer.id))return
@@ -180,7 +218,8 @@ class NearbyPanel(private val activity:Activity) {
                     .addOnSuccessListener { MessageService.restartNearby(activity) }
                     .addOnFailureListener { Toast.makeText(activity,"Update or enable Google Play services on this phone",1).show() }
             },
-            RabtaUi.SheetAction("Retry connection") { WsClient.retry();MessageService.restartNearby(activity);refresh() }
+            RabtaUi.SheetAction("Retry connection") { WsClient.retry();retry() },
+            RabtaUi.SheetAction("Connectivity diagnostics") {activity.startActivity(Intent(activity,ConnectivityDiagnosticsActivity::class.java))}
         ))
     }
     fun handleResult(req: Int,res: Int,data: Intent?): Boolean {

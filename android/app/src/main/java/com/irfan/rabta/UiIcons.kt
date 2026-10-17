@@ -11,6 +11,9 @@ import androidx.core.graphics.PathParser
 /** Bundled vector paths: the same controls on every Android version. */
 object UiIcons {
     private val paths = mapOf(
+        "zoom_in" to "M10,2a8,8 0,1 0,5,14l6,6 1,-1 -6,-6A8,8 0,0 0,10,2z M10,4a6,6 0,1 1,0,12 6,6 0,0 1,0,-12z M9,6h2v3h3v2h-3v3H9v-3H6V9h3z",
+        "zoom_out" to "M10,2a8,8 0,1 0,5,14l6,6 1,-1 -6,-6A8,8 0,0 0,10,2z M10,4a6,6 0,1 1,0,12 6,6 0,0 1,0,-12z M6,9h8v2H6z",
+        "forward" to "M4,11h12.2l-5.6,-5.6L12,4l8,8 -8,8 -1.4,-1.4L16.2,13H4z",
         "profile" to "M12,12a4,4 0,1 0,0,-8 4,4 0,0 0,0,8z M4,21a8,6 0,0 1,16,0z",
         "backup" to "M12,3v11l4,-4 1.4,1.4L12,17l-5.4,-5.6L8,10l4,4V3z M4,18h16v3H4z",
         "restore" to "M12,4a8,8 0,1 0,7.7,10h-2.1A6,6 0,1 1,12,6v3l5,-4 -5,-4z M13,8v5l4,2 1,-1.7 -3,-1.5V8z",

@@ -224,6 +224,17 @@ jobs:
             ${{ steps.project.outputs.directory }}/app/build/outputs/apk/device/*.apk
             ${{ steps.project.outputs.directory }}/app/build/outputs/apk/device/APK-VERIFICATION.txt
           if-no-files-found: error
+      - name: Android lint
+        id: lint
+        continue-on-error: true
+        run: gradle --project-dir android :app:lintDebug --no-daemon --stacktrace
+      - name: Upload lint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rabta-lint-reports
+          path: android/app/build/reports/lint-results-debug.*
+          if-no-files-found: ignore
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -275,6 +286,16 @@ jobs:
             bash -c 'if adb shell run-as com.irfan.rabta.testing ls files/rabta-ci-preservation-check >/dev/null 2>&1; then echo "Test package unexpectedly sees original private fixture"; exit 1; fi'
             adb shell run-as com.irfan.rabta rm files/rabta-ci-preservation-check
             bash -c 'result=0; gradle --project-dir android :app:connectedDebugAndroidTest --no-daemon || result=$?; adb pull /sdcard/Download/rabta-interface interface-screenshots || true; exit "$result"'
+      - name: Review rendered premium screens
+        if: always() && matrix.api == 34
+        shell: bash
+        run: |
+          if [ -f interface-screenshots/premium-review.b64 ]; then
+            echo 'RABTA_PREVIEW_BEGIN'
+            cat interface-screenshots/premium-review.b64
+            echo
+            echo 'RABTA_PREVIEW_END'
+          fi
       - name: Upload interface screenshots
         if: always()
         uses: actions/upload-artifact@v4

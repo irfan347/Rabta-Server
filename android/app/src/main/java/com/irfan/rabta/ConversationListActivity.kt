@@ -55,6 +55,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
     private val callSearchTask=Runnable { renderCalls() }
     private val homeBack=object:androidx.activity.OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
+            if(activeTab==1 && nearbyPanel.handleBack()) return
             if(activeTab==3 && callSearch.hasFocus()) { hideKeyboard();return }
             if(activeTab==3 && callQuery.isNotEmpty()) { callSearch.setText("");return }
             switchTab(0)
@@ -98,6 +99,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         queries[2]=savedInstanceState?.getString("spaceQuery").orEmpty()
         callQuery=savedInstanceState?.getString("callQuery").orEmpty()
         buildUi()
+        nearbyPanel.restoreState(savedInstanceState)
         onBackPressedDispatcher.addCallback(this,homeBack)
         askPermissions()
         MessageService.start(this)
@@ -118,6 +120,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
     override fun onDestroy() { RabtaEvents.remove(this);uiHandler.removeCallbacksAndMessages(null);super.onDestroy() }
     override fun onSaveInstanceState(state:Bundle) {
         queries[activeTab]=searchQuery
+        nearbyPanel.saveState(state)
         state.putInt("destination",activeTab);state.putString("chatQuery",queries[0]);state.putString("spaceQuery",queries[2])
         state.putString("callQuery",callQuery)
         state.putInt("chatFilter",activeFilter)
@@ -143,7 +146,15 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         val header=LinearLayout(this).apply {
             gravity=Gravity.CENTER_VERTICAL;setPadding(dp(16),dp(8),dp(12),0)
         }
-        header.addView(RabtaBrand.lockup(this,32,TXT,24f),LinearLayout.LayoutParams(0,-2,1f))
+        val brand=LinearLayout(this).apply {orientation=LinearLayout.VERTICAL;minimumHeight=dp(48);gravity=Gravity.CENTER_VERTICAL;isFocusable=true;setOnClickListener {ConnectionHelp.show(this@ConversationListActivity)}}
+        brand.addView(RabtaBrand.lockup(this,28,TXT,22f))
+        connectionTv=RabtaUi.text(this,"",12f,color=SUB).apply {maxLines=2;setPadding(0,dp(4),0,0)}
+        val connectionRow=LinearLayout(this).apply {gravity=Gravity.CENTER_VERTICAL}
+        connectionDot=View(this).apply {background=pill(SUB);importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO}
+        connectionRow.addView(connectionDot,LinearLayout.LayoutParams(dp(6),dp(6)).apply {marginEnd=dp(6)})
+        connectionRow.addView(connectionTv,LinearLayout.LayoutParams(0,-2,1f))
+        brand.addView(connectionRow)
+        header.addView(brand,LinearLayout.LayoutParams(0,-2,1f))
         header.addView(RabtaUi.iconButton(this,"status","Status") { startActivity(Intent(this,StatusActivity::class.java)) })
         header.addView(RabtaUi.iconButton(this,"more","More options") {
             RabtaUi.sheet(this,"Rabta",listOf(
@@ -166,30 +177,17 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         }
         header.addView(myAvatarView,LinearLayout.LayoutParams(dp(48),dp(48)))
         root.addView(header)
-        connectionTv=RabtaUi.text(this,"",12f,color=SUB).apply {
-            minHeight=dp(48);gravity=Gravity.CENTER_VERTICAL;setPadding(dp(20),0,dp(20),0)
-            background=RabtaUi.ripple(this@ConversationListActivity,Color.TRANSPARENT)
-            setOnClickListener { ConnectionHelp.show(this@ConversationListActivity) }
-            contentDescription="Connection details and retry"
-        }
-        val connectionRow=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL }
-        connectionDot=View(this).apply {
-            background=pill(if(WsClient.connected) AppTheme.teal(this@ConversationListActivity) else SUB)
-            contentDescription="Connectivity indicator"
-        }
-        connectionRow.addView(connectionDot,LinearLayout.LayoutParams(dp(8),dp(8)).apply { marginStart=dp(20) })
-        connectionRow.addView(connectionTv,LinearLayout.LayoutParams(0,dp(48),1f))
-        root.addView(connectionRow);updateConnection()
-        pageTitle=RabtaUi.text(this,"Chats",28f,true).apply {
-            setPadding(dp(20),dp(4),dp(20),dp(8))
+        updateConnection()
+        pageTitle=RabtaUi.text(this,"Chats",24f,true).apply {
+            setPadding(dp(20),dp(16),dp(20),dp(8))
             androidx.core.view.ViewCompat.setAccessibilityHeading(this,true)
         }
         root.addView(pageTitle)
         searchField=EditText(this).apply {
             hint=L.t(this@ConversationListActivity,"Search names or messages")
             imeOptions=android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
-            textSize=15f;setTextColor(TXT);setHintTextColor(SUB);setSingleLine(true)
-            minHeight=dp(52);setPadding(0,dp(12),0,dp(12));background=null
+            textSize=14f;setTextColor(TXT);setHintTextColor(SUB);setSingleLine(true)
+            minHeight=dp(48);setPadding(0,dp(8),0,dp(8));background=null
             contentDescription=L.t(this@ConversationListActivity,"Search names or messages")
             addTextChangedListener(object:android.text.TextWatcher {
                 override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int) {}
@@ -205,14 +203,21 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         }
         val searchRow=LinearLayout(this).apply {
             orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL
-            setPadding(dp(16),0,dp(16),0)
-            background=RabtaUi.shape(this@ConversationListActivity,WHITE,16,AppTheme.line(this@ConversationListActivity))
+            setPadding(dp(12),0,0,0)
+            background=RabtaUi.shape(this@ConversationListActivity,WHITE,16)
         }
         searchRow.addView(TextView(this).apply {
             UiIcons.set(this,"search",SUB,18,"Search conversations");gravity=Gravity.CENTER
             importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
         },LinearLayout.LayoutParams(dp(24),dp(24)).apply { marginEnd=dp(10) })
         searchRow.addView(searchField,LinearLayout.LayoutParams(0,-2,1f))
+        val clearChats=RabtaUi.iconButton(this,"close","Clear conversation search") {searchField.setText("")}.apply {visibility=View.GONE}
+        searchRow.addView(clearChats,LinearLayout.LayoutParams(dp(48),dp(48)))
+        searchField.addTextChangedListener(object:android.text.TextWatcher {
+            override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int) {}
+            override fun afterTextChanged(s:android.text.Editable?) {}
+            override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int) {clearChats.visibility=if(s.isNullOrEmpty())View.GONE else View.VISIBLE}
+        })
         conversationSearchRow=searchRow
         root.addView(searchRow,LinearLayout.LayoutParams(-1,-2).apply { setMargins(dp(20),0,dp(20),dp(8)) })
         buildCallSearch(root)
@@ -244,19 +249,19 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         listOf(chatsScroll,nearbyScroll,spacesScroll,callsScroll).forEach { content.addView(it,FrameLayout.LayoutParams(-1,-1)) }
         root.addView(content,LinearLayout.LayoutParams(-1,0,1f))
         fab=RabtaUi.iconButton(this,"compose","New chat or group") { if(activeTab==2) showCreateGroup() else showFabMenu() }.apply {
-            UiIcons.set(this,"compose",Color.WHITE,label="New chat or group")
-            background=RabtaUi.ripple(this@ConversationListActivity,AppTheme.ACCENT,20);elevation=dp(3).toFloat()
+            UiIcons.set(this,"compose",AppTheme.onPrimary(this@ConversationListActivity),label="New chat or group")
+            background=RabtaUi.ripple(this@ConversationListActivity,AppTheme.primary(this@ConversationListActivity),20);elevation=dp(1).toFloat()
         }
         content.addView(fab,FrameLayout.LayoutParams(dp(56),dp(56),Gravity.BOTTOM or Gravity.END).apply { setMargins(dp(20),dp(12),dp(20),dp(20)) })
         root.addView(View(this).apply { setBackgroundColor(DIV) },LinearLayout.LayoutParams(-1,dp(1)))
         bottomNav=LinearLayout(this).apply {
-            orientation=LinearLayout.HORIZONTAL;setBackgroundColor(WHITE);setPadding(dp(8),dp(6),dp(8),dp(6))
+            orientation=LinearLayout.HORIZONTAL;setBackgroundColor(WHITE);setPadding(dp(8),dp(8),dp(8),dp(8))
             contentDescription="Main navigation"
         }
         val icons=listOf("chats","nearby","spaces","phone")
         listOf("Chats","Nearby","Spaces","Calls").forEachIndexed { index,label ->
             val item=LinearLayout(this).apply {
-                orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER;minimumHeight=dp(64)
+                orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER;minimumHeight=dp(56)
                 setPadding(dp(2),dp(8),dp(2),dp(8));isFocusable=true;contentDescription=L.t(this@ConversationListActivity,label)
                 setOnClickListener { switchTab(index) }
             }
@@ -291,9 +296,9 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         if(!::bottomNav.isInitialized)return
         hideKeyboard()
         val searchable=destination==0||destination==2
-        pageTitle.textSize=if(destination==3) 24f else 28f
+        pageTitle.textSize=24f
         pageTitle.text=L.t(this,listOf("Chats","Nearby","Spaces","Calls")[destination])
-        conversationSearchRow.visibility=if(destination==3) View.GONE else View.VISIBLE
+        conversationSearchRow.visibility=if(searchable) View.VISIBLE else View.GONE
         callSearchRow.visibility=if(destination==3 && callRecords.isNotEmpty()) View.VISIBLE else View.GONE
         searchField.visibility=if(searchable) View.VISIBLE else View.GONE
         chatFilters.visibility=if(destination==0) View.VISIBLE else View.GONE
@@ -367,8 +372,8 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
     private fun convRow(c: Db.Conversation): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            background=RabtaUi.ripple(this@ConversationListActivity,WHITE,18);setPadding(dp(14),dp(16),dp(14),dp(16))
-            layoutParams=LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(8) }
+            background=RabtaUi.ripple(this@ConversationListActivity,Color.TRANSPARENT,16);setPadding(0,dp(12),0,dp(12))
+            layoutParams=LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(0) }
             isClickable = true; isFocusable = true
             setOnClickListener { open(c.peerId, c.peerName, c.isGroup) }
         }
@@ -412,7 +417,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         callSearchRow=LinearLayout(this).apply {
             gravity=Gravity.CENTER_VERTICAL;setPadding(dp(12),0,dp(4),0)
             background=RabtaUi.shape(this@ConversationListActivity,
-                if(AppTheme.dark(this@ConversationListActivity)) 0xFF171D2C.toInt() else WHITE,12,
+                if(AppTheme.dark(this@ConversationListActivity)) AppTheme.surface(this@ConversationListActivity) else WHITE,12,
                 if(AppTheme.dark(this@ConversationListActivity)) 0xFF2A3142.toInt() else DIV)
             visibility=View.GONE
         }
