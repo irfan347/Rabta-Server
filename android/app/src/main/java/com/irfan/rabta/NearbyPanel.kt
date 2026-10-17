@@ -74,6 +74,7 @@ class NearbyPanel(private val activity:Activity) {
         view.addView(nearbyHeading);view.addView(users)
         view.addView(RabtaUi.text(activity,"No phone numbers are shared. Radar shows activity, not distance or location.",12f,color=AppTheme.sub(activity)).apply {setPadding(0,RabtaUi.dp(activity,8),0,RabtaUi.dp(activity,16))})
         view.addView(RabtaUi.row(activity,"Instant Connect","Pair with a temporary QR invitation","privacy") { activity.startActivity(Intent(activity,InstantConnectActivity::class.java)) })
+        view.addView(RabtaUi.row(activity,"Rabta Drop","Send photos, videos and documents to a verified contact nearby","backup") { activity.startActivity(Intent(activity,DropActivity::class.java)) })
         view.addView(RabtaUi.row(activity,"Network Vision","Explore your live nearby connections","nearby") { activity.startActivity(Intent(activity,NetworkVisionActivity::class.java)) })
         view.addView(RabtaUi.row(activity,"Connection help","Permissions, radios and discovery","connection") { guidance() })
     }

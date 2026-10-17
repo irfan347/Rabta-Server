@@ -51,7 +51,7 @@ class Router(private val ctx:Context,private val ui:UiListener,transportFactory:
         if(running || !MeshPolicy.validId(userId)) return
         myId=userId; myName=name; store=MeshStore(ctx,myId); security=MeshSecurity(ctx,myId); running=true
         worker.execute {
-            try { security.pair(); maintain(); securityReady=true;main.post { if(running) { retryTransport(); main.post(pulse) } } }
+            try { security.pair(); maintain(); securityReady=true;runCatching { startDrop() };main.post { if(running) { retryTransport(); main.post(pulse) } } }
             catch(_:Exception) { running=false; main.post { ui.onStatus("Offline security key unavailable") } }
         }
     }
@@ -61,10 +61,39 @@ class Router(private val ctx:Context,private val ui:UiListener,transportFactory:
     }
     @Synchronized fun stop() {
         if(worker.isShutdown)return
-        running=false;securityReady=false;main.removeCallbacks(pulse);mesh.stop();matchedKeys.clear();vision.clear()
+        running=false;securityReady=false;main.removeCallbacks(pulse);drop?.let(RabtaDrop::detach);drop=null;dropIo.shutdownNow();mesh.stop();matchedKeys.clear();vision.clear()
         worker.execute { if(::store.isInitialized)store.close() };worker.shutdown()
     }
     fun hasKey(peer:String)=running && security.key(peer)!=null
+
+    // ---------- Rabta Drop: files only between directly connected, key-verified phones ----------
+    private val dropIo=Executors.newCachedThreadPool()
+    private val peerOfEndpoint=java.util.concurrent.ConcurrentHashMap<String,String>()
+    @Volatile private var drop:DropEngine?=null
+    private fun verifiedEndpoint(peer:String)=mesh.connected.keys.firstOrNull { mesh.userIdOf[it]==peer && matchedKeys[it]==peer }
+    private fun verifiedPeer(endpoint:String)=mesh.userIdOf[endpoint]?.takeIf { matchedKeys[endpoint]==it }
+    private fun startDrop() {
+        val dropStore=DropStore(ctx,myId)
+        val engine=DropEngine(myId,myName,object:DropEngine.Link {
+            override fun verified(peer:String)=direct(peer)
+            override fun name(peer:String)=mesh.connected.entries.firstOrNull { mesh.userIdOf[it.key]==peer }?.value?:peer
+            override fun control(peer:String,message:String)=verifiedEndpoint(peer)?.let { mesh.sendDrop(it,message) }==true
+            override fun stream(peer:String,data:java.io.InputStream)=verifiedEndpoint(peer)?.let { mesh.sendStream(it,data) }
+            override fun cancel(payloadId:Long)=mesh.cancelPayload(payloadId)
+        },DropFiles(ctx),dropStore,object:DropEngine.Keys {
+            override val private get()=security.pair().private
+            override fun pinned(peer:String)=security.key(peer)?.let { runCatching { MeshCrypto.publicKey(it) }.getOrNull() }
+        },RabtaDrop.listener(ctx),
+            io={ task -> if(!dropIo.isShutdown) runCatching { dropIo.execute { runCatching { task.run() } } } },
+            later={ ms,task -> main.postDelayed({ if(running) runCatching { task.run() } },ms) })
+        drop=engine;RabtaDrop.attach(engine,dropStore)
+    }
+    override fun onDropControl(endpointId:String,message:String) {
+        val peer=verifiedPeer(endpointId)?:return
+        val engine=drop?:return
+        if(!dropIo.isShutdown) runCatching { dropIo.execute { runCatching { engine.onControl(peer,message) } } }
+    }
+    override fun onPayloadFailed(endpointId:String,payloadId:Long) { drop?.onPayloadFailed(payloadId) }
     fun direct(peer:String)=running && mesh.connected.keys.any { endpoint -> mesh.userIdOf[endpoint]==peer && matchedKeys[endpoint]==peer }
     fun carrying(msgId:String)=running && (store.contains(msgId) || store.pending().any { it.id==msgId })
     @Synchronized fun sendDirect(toId:String,msgId:String,body:String,type:String="text"):Boolean {
@@ -188,15 +217,21 @@ class Router(private val ctx:Context,private val ui:UiListener,transportFactory:
     }
     override fun onFound(endpointId:String,name:String,userId:String) { ui.onPeople() }
     override fun onConnected(endpointId:String,userId:String,name:String) {
+        peerOfEndpoint[endpointId]=userId
         ui.onStatus("Nearby: ${connected.size} phone(s) connected");ui.onPeople()
         enqueue { maintain();mesh.sendEnvelopeTo(endpointId,keyPacket());carry(endpointId) }
     }
     override fun onLost(endpointId:String)=ui.onPeople()
     override fun onConnecting(endpointId:String,name:String) {}
-    override fun onDisconnected(endpointId:String) {matchedKeys.remove(endpointId);ui.onStatus(if(connected.isEmpty())"Nearby peer disconnected — searching again" else "Nearby: ${connected.size} phone(s) connected");ui.onPeople()}
+    override fun onDisconnected(endpointId:String) {matchedKeys.remove(endpointId);peerOfEndpoint.remove(endpointId)?.let { drop?.onPeerLost(it) };ui.onStatus(if(connected.isEmpty())"Nearby peer disconnected — searching again" else "Nearby: ${connected.size} phone(s) connected");ui.onPeople()}
     override fun onFileStart(endpointId:String,payloadId:Long,name:String,size:Long) {}
     override fun onFileDone(endpointId:String,payloadId:Long) {}
-    override fun onStream(endpointId:String,payload:Payload) {}
+    override fun onStream(endpointId:String,payload:Payload) {
+        val input=payload.asStream()?.asInputStream()?:return
+        val peer=verifiedPeer(endpointId);val engine=drop
+        if(peer==null||engine==null){runCatching { input.close() };return}
+        engine.onStream(peer,payload.id,input)
+    }
     override fun onAudio(endpointId:String,frame:ByteArray) {} // Never broadcast call audio to relay peers.
     override fun onStatus(msg:String)=ui.onStatus(msg)
     override fun onRadarRequest(name:String) { main.post { if(running)ui.onRadarRequest(name) } }
