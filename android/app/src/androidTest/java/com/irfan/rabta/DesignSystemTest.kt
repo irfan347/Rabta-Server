@@ -103,7 +103,10 @@ class DesignSystemTest {
                 ui { nav("Calls").performClick() }
                 waitUntil { nav("Calls").isSelected }
                 capture("23-calls-${mode.lowercase()}")
-                ui { all(a.window.decorView).first { it.contentDescription=="Status" }.performClick() }
+                ui { nav("Chats").performClick() }
+                waitUntil { nav("Chats").isSelected }
+                // Status is reached from the first Moments item.
+                ui { all(a.window.decorView).first { it.contentDescription=="My Moment. Status" }.performClick() }
                 waitUntil {
                     androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()
                         .getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED).any { it is StatusActivity }
@@ -112,9 +115,9 @@ class DesignSystemTest {
                 assertNotNull("Status is a real screen",status)
                 ui { status?.finish() }
                 inst.waitForIdleSync()
-                ui { all(a.window.decorView).first { it.contentDescription=="More options" }.performClick() }
-                capture("24-sheet-${mode.lowercase()}")
-                inst.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+                ui { all(a.window.decorView).first { it.contentDescription=="Search chats" }.performClick() }
+                waitUntil { all(a.window.decorView).filterIsInstance<EditText>().any { it.isShown && it.contentDescription=="Search names or messages" } }
+                capture("24-search-${mode.lowercase()}")
             } finally { ui { a.finish() };MessageService.stop(ctx) }
         }
     }

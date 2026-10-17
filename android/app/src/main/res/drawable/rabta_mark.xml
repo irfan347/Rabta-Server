@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The NOVA R cropped tightly for headers and wordmarks (same paths as ic_launcher_fg). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="24dp" android:height="24dp" android:viewportWidth="312" android:viewportHeight="312">
+    <group android:translateX="-109" android:translateY="-103">
+        <path android:pathData="M163,376 V135 H272 C345,135 381,171 381,228 C381,286 344,314 276,314 H179" android:fillColor="#00000000" android:strokeWidth="54" android:strokeLineCap="round" android:strokeLineJoin="round">
+            <aapt:attr name="android:strokeColor"><gradient android:type="linear" android:startX="136" android:startY="108" android:endX="394" android:endY="410"><item android:offset="0" android:color="#FFE5FF9E"/><item android:offset="0.42" android:color="#FFBFFF76"/><item android:offset="1" android:color="#FF98F650"/></gradient></aapt:attr>
+        </path>
+        <path android:pathData="M269,314 L367,383" android:fillColor="#00000000" android:strokeWidth="54" android:strokeLineCap="round">
+            <aapt:attr name="android:strokeColor"><gradient android:type="linear" android:startX="136" android:startY="108" android:endX="394" android:endY="410"><item android:offset="0" android:color="#FFE5FF9E"/><item android:offset="0.42" android:color="#FFBFFF76"/><item android:offset="1" android:color="#FF98F650"/></gradient></aapt:attr>
+        </path>
+        <path android:pathData="M371,112 A8,8 0,1 1,387,112 A8,8 0,1 1,371,112 Z" android:fillColor="#FFA997FF" />
+    </group>
+</vector>
