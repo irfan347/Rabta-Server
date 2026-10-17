@@ -28,6 +28,9 @@ class NetworkVisionActivity:ThemedActivity() {
     private lateinit var previous:TextView
     private lateinit var next:TextView
     private lateinit var pageNumber:TextView
+    private lateinit var graphTools:LinearLayout
+    private lateinit var peersHeading:TextView
+    private lateinit var eventsHeading:TextView
     private var current=VisionState()
     private var owner=""
     private var selected:String?=null
@@ -56,7 +59,7 @@ class NetworkVisionActivity:ThemedActivity() {
             onPeer={ selectPeer(it) }
         }
         body.addView(graph,LinearLayout.LayoutParams(-1,dp(300)).apply {topMargin=dp(16)})
-        val graphTools=LinearLayout(this).apply {gravity=Gravity.CENTER_VERTICAL}
+        graphTools=LinearLayout(this).apply {gravity=Gravity.CENTER_VERTICAL}
         graphTools.addView(text("Network view",13f,color=AppTheme.sub(this@NetworkVisionActivity)),LinearLayout.LayoutParams(0,-2,1f))
         graphTools.addView(RabtaUi.iconButton(this,"zoom_out","Zoom out") {graph.zoomBy(0.8f)})
         graphTools.addView(RabtaUi.iconButton(this,"zoom_in","Zoom in") {graph.zoomBy(1.25f)})
@@ -82,13 +85,13 @@ class NetworkVisionActivity:ThemedActivity() {
             background=RabtaUi.shape(this@NetworkVisionActivity,AppTheme.surface(this@NetworkVisionActivity),16)
             accessibilityLiveRegion=View.ACCESSIBILITY_LIVE_REGION_POLITE
         };body.addView(details,LinearLayout.LayoutParams(-1,-2).apply {topMargin=dp(16);bottomMargin=dp(16)})
-        body.addView(text("Peers",18f,true))
+        peersHeading=text("Peers",16f,true);body.addView(peersHeading)
         list=LinearLayout(this).apply {orientation=LinearLayout.VERTICAL};body.addView(list)
         body.addView(text("Network activity",16f,true).apply {setPadding(0,dp(20),0,dp(8))})
         evidence=text("",13f,color=AppTheme.sub(this@NetworkVisionActivity));body.addView(evidence)
-        body.addView(text("Latest message activity",16f,true).apply {setPadding(0,dp(20),0,dp(8))})
+        eventsHeading=text("Latest message activity",16f,true).apply {setPadding(0,dp(16),0,dp(8))};body.addView(eventsHeading)
         activity=LinearLayout(this).apply {orientation=LinearLayout.VERTICAL};body.addView(activity)
-        body.addView(text("Peer labels are private to this screen. Names, phone numbers, account IDs, endpoint IDs, message contents and keys are not displayed.",12f,color=AppTheme.sub(this@NetworkVisionActivity)).apply {setPadding(0,dp(20),0,dp(8))})
+        body.addView(text("Private peer labels · no location tracking.",12f,color=AppTheme.sub(this@NetworkVisionActivity)).apply {setPadding(0,dp(20),0,dp(8))})
         body.addView(RabtaUi.row(this,"About network information","Privacy, link quality and relay limits","info") {
             android.app.AlertDialog.Builder(this).setTitle("Network information").setMessage("Only observed devices and direct connections are drawn. Layout does not represent location or distance. Signal strength and radio RTT are not exposed by the current Nearby transport. Remote relay routes cannot be verified: packets contain no signed route proof. Motion means a live link, not message traffic.").setPositiveButton("Close",null).show()
         })
@@ -104,14 +107,22 @@ class NetworkVisionActivity:ThemedActivity() {
         val blocked=Privacy.prefs(this).getStringSet("blocked",emptySet()).orEmpty().toSet()
         val next=reducer.render(owner,RadarPrefs.enabled(this),MeshBridge.networkObservation(),blocked)
         counts.text="${next.peers.size} nearby peers · ${next.directCount} direct · ${next.discoveredCount} discovered"
-        condition.text=when { !next.enabled->"Radar is off · Vision does not enable discovery.";next.active->"Reading live Nearby observations · updates every 2 seconds";else->"Discovery is not active. Open Radar or diagnostics for permissions and radio guidance." }
+        condition.text=when { !next.enabled->"Radar is off · discoverability stays private.";next.active->"Live Nearby network";else->NearbySetup.problem(this)?:MeshBridge.status }
         if(next!=current) {
             current=next
             if(current.peers.none { it.id==selected })selected=null
             renderPeers();renderEvents();showDetails()
         }
         graph.update(current,selected)
-        empty.visibility=if(current.peers.isEmpty())View.VISIBLE else View.GONE
+        val hasPeers=current.peers.isNotEmpty()
+        empty.visibility=if(hasPeers)View.GONE else View.VISIBLE
+        details.visibility=if(hasPeers)View.VISIBLE else View.GONE
+        peersHeading.visibility=if(hasPeers)View.VISIBLE else View.GONE
+        graphTools.visibility=if(hasPeers)View.VISIBLE else View.GONE
+        eventsHeading.visibility=if(current.events.isEmpty())View.GONE else View.VISIBLE
+        activity.visibility=if(current.events.isEmpty())View.GONE else View.VISIBLE
+        val graphHeight=dp(if(hasPeers)300 else 160)
+        if(graph.layoutParams.height!=graphHeight){graph.layoutParams=graph.layoutParams.apply {height=graphHeight}}
         graphCaption.text="Schematic layout · no distance estimates\nTeal: verified direct link · Violet: verifying key"
         evidence.text="${current.relays} signed relay envelopes · ${current.receipts} recipient receipts\nVerified remote relay links: unavailable."
         updatePaging()

@@ -66,9 +66,10 @@ object Stickers {
                 grid.addView(icon,GridLayout.LayoutParams().apply { width=dp(88); height=dp(88) })
             }
         }
-        listOf("Rabta","Recent","Favorites").forEachIndexed { i,label -> tabs.addView(RadioButton(a).apply { id=100+i; text=label; textSize=12f }) }
-        tabs.setOnCheckedChangeListener { _,id -> show(id-100) }; col.addView(tabs)
-        scroll.addView(grid); col.addView(scroll); tabs.check(100)
+        val tabIds=listOf(R.id.stickers_bundled,R.id.stickers_recent,R.id.stickers_favorites)
+        listOf("Rabta","Recent","Favorites").forEachIndexed { i,label -> tabs.addView(RadioButton(a).apply { id=tabIds[i]; text=label; textSize=12f }) }
+        tabs.setOnCheckedChangeListener { _,id -> show(tabIds.indexOf(id).coerceAtLeast(0)) }; col.addView(tabs)
+        scroll.addView(grid); col.addView(scroll); tabs.check(R.id.stickers_bundled)
         dialog=AlertDialog.Builder(a).setTitle("Stickers").setView(col).setNeutralButton("Import sticker") { _,_ -> import() }.setNegativeButton("Close",null).create()
         dialog.show()
     }

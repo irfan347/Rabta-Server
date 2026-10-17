@@ -6,7 +6,6 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.os.PowerManager
 import android.view.View
-import android.view.animation.LinearInterpolator
 
 /** Decorative activity indicator. Rings and sweep never encode users, location or distance. */
 class RadarView(c:Context):View(c) {

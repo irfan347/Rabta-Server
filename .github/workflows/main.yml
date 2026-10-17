@@ -228,6 +228,27 @@ jobs:
         id: lint
         continue-on-error: true
         run: gradle --project-dir android :app:lintDebug --no-daemon --stacktrace
+      - name: Summarize Android validation reports
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          import collections
+          import xml.etree.ElementTree as ET
+          reports=Path('android/app/build/test-results/testDebugUnitTest')
+          suites=[ET.parse(p).getroot() for p in reports.glob('TEST-*.xml')]
+          print('JVM test totals:',{key:sum(int(s.get(key,0)) for s in suites) for key in ('tests','failures','errors','skipped')})
+          report=Path('android/app/build/reports/lint-results-debug.xml')
+          if report.exists():
+              issues=ET.parse(report).getroot().findall('issue')
+              print('Lint totals:',dict(collections.Counter(i.get('severity') for i in issues)))
+              for issue in issues:
+                  if issue.get('severity') in ('Error','Fatal'):
+                      print(issue.get('id'),issue.get('message'))
+                      for location in issue.findall('location'):
+                          print(location.attrib)
+          PYTHON
       - name: Upload lint reports
         if: always()
         uses: actions/upload-artifact@v4

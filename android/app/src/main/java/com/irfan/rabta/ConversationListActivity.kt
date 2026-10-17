@@ -62,6 +62,8 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         }
     }
     private lateinit var myAvatarView: FrameLayout
+    private var avatarName=""
+    private var avatarPhoto=""
     private val uiHandler = Handler(Looper.getMainLooper())
     private lateinit var db: Db
     private lateinit var connectionTv: TextView
@@ -108,7 +110,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
 
     override fun onResume() {
         super.onResume();if(!::connectionTv.isInitialized)return
-        resumed=true;MessageService.start(this);RabtaEvents.add(this)
+        resumed=true;refreshAvatar();MessageService.start(this);RabtaEvents.add(this)
         uiHandler.removeCallbacks(connectionTick);uiHandler.post(connectionTick)
         when(activeTab) { 1->nearbyPanel.resume();3->loadCalls();else->loadConvs() }
     }
@@ -168,13 +170,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
             contentDescription="My profile, ${Session.name}";isFocusable=true;background=RabtaUi.ripple(this@ConversationListActivity,Color.TRANSPARENT)
             setOnClickListener { startActivity(Intent(this@ConversationListActivity,ProfileActivity::class.java)) }
         }
-        myAvatarView.addView(initials(Session.name,dp(36)),FrameLayout.LayoutParams(dp(36),dp(36),Gravity.CENTER))
-        if(Session.profilePic.isNotEmpty()) MediaHelper.base64ToBitmap(Session.profilePic)?.let { bmp ->
-            myAvatarView.addView(ImageView(this).apply {
-                setImageBitmap(bmp);scaleType=ImageView.ScaleType.CENTER_CROP;clipToOutline=true
-                background=RabtaUi.shape(this@ConversationListActivity,WHITE,999,AppTheme.line(this@ConversationListActivity))
-            },FrameLayout.LayoutParams(dp(36),dp(36),Gravity.CENTER))
-        }
+        refreshAvatar()
         header.addView(myAvatarView,LinearLayout.LayoutParams(dp(48),dp(48)))
         root.addView(header)
         updateConnection()
@@ -278,6 +274,21 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         root.addView(bottomNav)
         switchTab(activeTab,animate=false)
         updateChatFilters()
+    }
+
+    private fun refreshAvatar() {
+        if(!::myAvatarView.isInitialized)return
+        val photo=Session.profilePic;val name=Session.name
+        if(avatarName==name&&avatarPhoto==photo&&myAvatarView.childCount>0)return
+        avatarName=name;avatarPhoto=photo;myAvatarView.removeAllViews()
+        myAvatarView.contentDescription="My profile, $name"
+        myAvatarView.addView(initials(name,dp(36)),FrameLayout.LayoutParams(dp(36),dp(36),Gravity.CENTER))
+        if(photo.isNotEmpty())MediaHelper.base64ToBitmap(photo)?.let {bmp->
+            myAvatarView.addView(ImageView(this).apply {
+                setImageBitmap(bmp);scaleType=ImageView.ScaleType.CENTER_CROP;clipToOutline=true
+                background=RabtaUi.shape(this@ConversationListActivity,WHITE,999)
+            },FrameLayout.LayoutParams(dp(36),dp(36),Gravity.CENTER))
+        }
     }
 
     private fun hideKeyboard() {
