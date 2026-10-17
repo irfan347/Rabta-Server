@@ -16,6 +16,7 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
 
     companion object {
         const val MSG_CHANNEL  = "rabta_messages"
+        const val SERVICE_CHANNEL = "rabta_connection"
         const val CALL_CHANNEL = "rabta_calls_ringtone_v2"
         const val CALL_NOTIF   = 2
         const val RADAR_NOTIF = 3
@@ -163,10 +164,10 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
 
     private fun persistentNotification(): Notification {
         val pi = PendingIntent.getActivity(this, 0, Intent(this, ConversationListActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-        return Notification.Builder(this, MSG_CHANNEL)
+        return Notification.Builder(this, SERVICE_CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_rabta)
             .setContentTitle("Rabta")
-            .setContentText("Messages ki waiting mein...")
+            .setContentText("Tap to open your conversations")
             .setContentIntent(pi)
             .setOngoing(true)
             .build()
@@ -174,6 +175,7 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
 
     private fun createChannels() {
         val nm = getSystemService(NotificationManager::class.java) ?: return
+        nm.createNotificationChannel(NotificationChannel(SERVICE_CHANNEL,"Connection service",NotificationManager.IMPORTANCE_LOW).apply {description="Keeps Rabta available in the background"})
         nm.createNotificationChannel(NotificationChannel(RADAR_CHANNEL,"Radar requests",NotificationManager.IMPORTANCE_DEFAULT).apply { description="Review nearby connection requests in Radar" })
         nm.createNotificationChannel(NotificationChannel(MSG_CHANNEL, "Messages", NotificationManager.IMPORTANCE_HIGH).apply {
             description = "New message notifications"; enableLights(true); enableVibration(true)

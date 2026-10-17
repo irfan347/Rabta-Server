@@ -52,7 +52,7 @@ class PremiumUiTest {
     private fun launch(type:Class<out Activity>,id:String?=null):Activity {
         val intent=Intent(ctx,type).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         if(id!=null)intent.putExtra("statusId",id)
-        return inst.startActivitySync(intent).also {screens.add(it)}
+        return inst.startActivitySync(intent).also {screens.add(it);inst.waitForIdleSync()}
     }
     private fun click(value:String) {
         val until=System.currentTimeMillis()+8000
@@ -78,7 +78,7 @@ class PremiumUiTest {
         assertTrue(node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,android.os.Bundle().apply {putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,value)}))
     }
     private fun capture(name:String) {
-        inst.waitForIdleSync()
+        inst.waitForIdleSync();Thread.sleep(300);inst.waitForIdleSync()
         val dir=File(ctx.getExternalFilesDir(null),"premium-captures").apply {mkdirs()}
         val shot=inst.uiAutomation.takeScreenshot()?:return
         val scaled=Bitmap.createScaledBitmap(shot,360,(shot.height*360f/shot.width).toInt(),true)
@@ -140,7 +140,7 @@ class PremiumUiTest {
         override var active=false
         override val discoveredCount get()=peers.size
         override val connectingCount=0
-        override fun start(name:String,userId:String){active=true}
+        override fun start(name:String,userId:String){active=true;MeshBridge.status="Nearby searching — keep both phones open"}
         override fun stop(){active=false}
         override fun discoveredPeerIds()=peers.map {it.id}.toSet()
         override fun radarPeers()=peers.toList()
@@ -156,12 +156,23 @@ class PremiumUiTest {
     }
     @Test fun nearbySearchFiltersLiveObservedPeersAndBackPreservesOptIn()=fixture {_,account ->
         val a=launch(NearbyActivity::class.java) as NearbyActivity
+        waitUi("Nearby lifecycle resumed") {androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED).contains(a)}
+        ui {
+            val manager=ctx.getSystemService(android.app.NotificationManager::class.java)
+            assertEquals(android.app.NotificationManager.IMPORTANCE_LOW,manager.getNotificationChannel(MessageService.SERVICE_CHANNEL).importance)
+            assertTrue(manager.getNotificationChannel(MessageService.MSG_CHANNEL).importance>=android.app.NotificationManager.IMPORTANCE_DEFAULT)
+        }
         ui {MessageService.stop(ctx)};inst.waitForIdleSync()
+        waitUi("Real foreground service stopped before attaching an isolated radio fixture") {
+            @Suppress("DEPRECATION")
+            val services=(ctx.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).getRunningServices(Int.MAX_VALUE)
+            services.none {it.service.className==MessageService::class.java.name}
+        }
         val radio=Radio();radio.peers.addAll(listOf(RadarPeer("a","AAAABBBBCCCC","Ali"),RadarPeer("b","DDDDEEEEFFFF","Samira")))
         val router=Router(ctx,object:Router.UiListener {}) {radio}
         ui {RadarPrefs.setEnabled(ctx,true);router.start(account,"Irfan");MeshBridge.attach(router)}
         try {
-            waitUi("Real peers appear") {labels(a).contains("Ali")&&labels(a).contains("Samira")}
+            waitUi("Real peers appear") {radio.active&&labels(a).contains("Ali")&&labels(a).contains("Samira")}
             val search=all(a.window.decorView).filterIsInstance<EditText>().first {it.contentDescription=="Search nearby users"}
             ui {search.setText("aLI")}
             waitUi("Case-insensitive nearby search") {labels(a).contains("Ali")&&!labels(a).contains("Samira")}
@@ -247,7 +258,7 @@ class PremiumUiTest {
         ui {RadarPrefs.setEnabled(ctx,true);router.start(account,"Irfan");MeshBridge.attach(router)}
         try {
             val a=launch(NetworkVisionActivity::class.java)
-            waitUi("Observed network count") {labels(a).any {it.startsWith("27 nearby peers")}}
+            waitUi("Observed network count") {radio.active&&labels(a).any {it.startsWith("27 nearby peers")}}
             ui {
                 all(a.window.decorView).first {it.contentDescription=="Next peers"}.performClick()
                 assertTrue(labels(a).contains("Page 2 of 3"))

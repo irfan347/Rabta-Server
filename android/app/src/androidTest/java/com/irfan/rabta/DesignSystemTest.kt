@@ -98,7 +98,7 @@ class DesignSystemTest {
                 }
                 capture("21-spaces-${mode.lowercase()}")
                 ui { nav("Nearby").performClick() }
-                waitUntil { all(a.window.decorView).filterIsInstance<TextView>().any { it.isShown && it.text=="My contact QR" } }
+                waitUntil { all(a.window.decorView).filterIsInstance<TextView>().any { it.isShown && it.contentDescription=="Search nearby users" } }
                 capture("22-nearby-${mode.lowercase()}")
                 ui { nav("Calls").performClick() }
                 waitUntil { nav("Calls").isSelected }

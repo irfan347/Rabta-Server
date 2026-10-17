@@ -306,6 +306,23 @@ jobs:
             bash -c 'if adb shell run-as com.irfan.rabta.testing ls files/rabta-ci-preservation-check >/dev/null 2>&1; then echo "Test package unexpectedly sees original private fixture"; exit 1; fi'
             adb shell run-as com.irfan.rabta rm files/rabta-ci-preservation-check
             bash -c 'result=0; gradle --project-dir android :app:connectedDebugAndroidTest --no-daemon || result=$?; adb pull /sdcard/Download/rabta-interface interface-screenshots || true; exit "$result"'
+      - name: Summarize instrumented test results
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          cases=[]
+          for path in Path('android/app/build/outputs/androidTest-results').rglob('TEST-*.xml'):
+              cases.extend(ET.parse(path).getroot().iter('testcase'))
+          print('Device test totals:',{'tests':len(cases),'failed':sum(c.find('failure') is not None or c.find('error') is not None for c in cases),'skipped':sum(c.find('skipped') is not None for c in cases)})
+          for case in cases:
+              for tag in ('failure','error'):
+                  failure=case.find(tag)
+                  if failure is not None:
+                      print(case.get('classname'),case.get('name'),(failure.text or '')[:6000])
+          PYTHON
       - name: Review rendered premium screens
         if: always() && matrix.api == 34
         shell: bash
