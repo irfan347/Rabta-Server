@@ -29,7 +29,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Debuggable builds (Rabta Test, CI) never check, so test phones and device tests are not interrupted.
  */
 object AppUpdate {
-    private const val LATEST = "https://github.com/irfan347/Rabta-Server/releases/latest/download/rabta-update.json"
+    /** Public, APK-only repository, so the source repository can stay private. */
+    private const val RELEASES = "https://github.com/irfan347/rabta-app/releases"
+    private const val LATEST = "$RELEASES/latest/download/rabta-update.json"
     private const val EVERY = 6 * 60 * 60 * 1000L
     private const val RETRY = 30 * 60 * 1000L
 
@@ -88,7 +90,7 @@ object AppUpdate {
         val release = Release(o.getLong("versionCode"), o.getString("versionName"), o.getString("apk"), o.getString("sha256").lowercase(),
             o.optLong("size"), o.optLong("minVersionCode"), o.optString("notes"))
         // Only Rabta's own releases on GitHub; anything else is ignored.
-        require(release.apk.startsWith("https://github.com/irfan347/Rabta-Server/releases/download/") && release.sha256.matches(Regex("[0-9a-f]{64}")))
+        require(release.apk.startsWith("$RELEASES/download/") && release.sha256.matches(Regex("[0-9a-f]{64}")))
         return release
     }
 

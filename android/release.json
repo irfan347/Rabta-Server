@@ -1,4 +1,4 @@
 {
   "minVersionCode": 0,
-  "notes": "Fixed: Rabta could close while you moved the circle to crop a profile photo.\nThe Gallery, Camera, Crop and Remove labels now sit neatly under their buttons."
+  "notes": "Rabta now downloads its updates from a new home. Install this update to keep getting future updates.\nIncludes the profile photo crop fix."
 }
