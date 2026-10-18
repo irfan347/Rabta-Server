@@ -1,15 +1,20 @@
 package com.irfan.rabta
 
 import android.Manifest
-import android.app.Activity
+import android.app.PictureInPictureParams
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Rational
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
@@ -17,10 +22,14 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.ActivityCompat
-import org.json.JSONObject
-import org.webrtc.*
+import org.webrtc.RendererCommon
+import org.webrtc.SurfaceViewRenderer
 
-class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
+/**
+ * Shows the [VideoCall]. Back or Home turns it into a small picture-in-picture window so you can use your chats
+ * while the call goes on; closing that window leaves the call going, with the green bar and its notice to return.
+ */
+class VideoCallActivity : ThemedActivity(), CallWatcher {
 
     companion object {
         const val PEER_ID    = "peerId"
@@ -28,49 +37,22 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
         const val IS_CALLER  = "isCaller"
         const val CALL_ID    = "callId"
         const val OFFER_SDP  = "offerSdp"
+        private const val SHARE = 41
     }
 
     private val handler = Handler(Looper.getMainLooper())
-    private lateinit var peerId: String
-    private lateinit var peerName: String
-    private lateinit var callId: String
-    private var isCaller = false
-
-    private var eglBase: EglBase? = null
-    private var factory: PeerConnectionFactory? = null
-    private var pc: PeerConnection? = null
-    private val pendingIce=mutableListOf<IceCandidate>()
-    private fun flushIce() { handler.post { if(pc?.remoteDescription!=null) { pendingIce.forEach { pc?.addIceCandidate(it) }; pendingIce.clear() } } }
-    private var capturer: CameraVideoCapturer? = null
     private var localView: SurfaceViewRenderer? = null
     private var remoteView: SurfaceViewRenderer? = null
-    private var surfaceHelper: SurfaceTextureHelper? = null
-    private var videoSource: VideoSource? = null
-    private var audioSource: AudioSource? = null
-    private var localVideoTrack: VideoTrack? = null
-    private var localAudioTrack: AudioTrack? = null
-    private var muted = false
-    private var useFrontCamera = true
-    private val ringback=CallSounds()
-    private val ringTimeout=Runnable { if(connectedAt==0L) {outcome="no answer";hangUp()} }
-    private var connectedAt=0L
-    private var historyId=-1L
-    private var outcome="cancelled"
-    private var speakerOn=true
-    private var previousAudioMode=android.media.AudioManager.MODE_NORMAL
-    private var previousSpeaker=false
-    private lateinit var speakerBtn: TextView
-    private val durationTick=object:Runnable {
-        override fun run() {
-            if(connectedAt==0L || isFinishing) return
-            val secs=(android.os.SystemClock.elapsedRealtime()-connectedAt)/1000
-            statusTv.text="Connected · %d:%02d".format(secs/60,secs%60)
-            handler.postDelayed(this,1000)
-        }
-    }
-
     private lateinit var statusTv: TextView
     private lateinit var muteBtn: TextView
+    private lateinit var speakerBtn: TextView
+    private lateinit var shareBtn: TextView
+    private lateinit var controls: LinearLayout
+    private lateinit var sharingNote: LinearLayout
+    private var pending: Intent? = null
+    private var askingShare = false
+    private var started = false
+    private val tick = Runnable { render() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -78,28 +60,96 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
             WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
             WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
         Session.init(this)
-        peerId   = intent.getStringExtra(PEER_ID)   ?: ""; if (peerId.isEmpty()) { finish(); return }
-        peerName = intent.getStringExtra(PEER_NAME) ?: "User"
-        callId   = intent.getStringExtra(CALL_ID)   ?: System.currentTimeMillis().toString()
-        isCaller = intent.getBooleanExtra(IS_CALLER, false)
-        if (!hasPerms()) { askPerms(); return }
-        begin()
+        // Brought back after the call ended (e.g. from Recents): never place the call again by itself.
+        if (savedInstanceState != null && !VideoCall.active) { finish(); return }
+        open(intent)
     }
 
-    override fun onBackPressed() { hangUp() }
-    override fun onDestroy() { RabtaEvents.remove(this); cleanup(); super.onDestroy() }
-
-    private var callActive = false
-    private var cameraPaused = false
-    // Android takes the camera from a call screen that is locked or in the background: pause the video there and
-    // resume it on return, while the voice keeps going through MessageService's microphone mode.
-    override fun onStop() {
-        super.onStop()
-        if (capturer != null && !isFinishing) try { capturer?.stopCapture(); cameraPaused = true } catch (_: Exception) {}
+    override fun onNewIntent(next: Intent) {
+        super.onNewIntent(next)
+        setIntent(next)
+        open(next)
     }
-    override fun onStart() {
-        super.onStart()
-        if (cameraPaused) { cameraPaused = false; try { capturer?.startCapture(640, 480, 24) } catch (_: Exception) {} }
+
+    /** A new call when the intent names one; otherwise back to the call going on. */
+    private fun open(i: Intent) {
+        val peer = i.getStringExtra(PEER_ID).orEmpty()
+        val id = i.getStringExtra(CALL_ID).orEmpty()
+        if (peer.isEmpty() || (VideoCall.active && VideoCall.callId == id)) {
+            if (VideoCall.active) attach() else finish()
+            return
+        }
+        if (!hasPerms()) { pending = i; askPerms(); return }
+        begin(i)
+    }
+
+    private fun begin(i: Intent) {
+        releaseViews()
+        VideoCall.start(this, i.getStringExtra(PEER_ID).orEmpty(), i.getStringExtra(PEER_NAME) ?: "User", i.getBooleanExtra(IS_CALLER, false),
+            i.getStringExtra(CALL_ID) ?: System.currentTimeMillis().toString(), i.getStringExtra(OFFER_SDP))
+        attach()
+    }
+
+    private fun attach() {
+        val egl = VideoCall.egl ?: run { finish(); return }
+        releaseViews()
+        buildUi()
+        localView?.init(egl.eglBaseContext, null)
+        remoteView?.init(egl.eglBaseContext, remoteEvents)
+        VideoCall.attach(localView!!, remoteView!!)
+        VideoCall.watch(this)
+        if (started) VideoCall.visible(true)
+        pip(isInPictureInPictureMode)
+        render()
+    }
+
+    /** Your own shared phone screen is tall: show all of it rather than filling the view. */
+    private val remoteEvents = object : RendererCommon.RendererEvents {
+        override fun onFirstFrameRendered() {}
+        override fun onFrameResolutionChanged(width: Int, height: Int, rotation: Int) {
+            val ratio = if (rotation % 180 == 0) height.toFloat() / width.coerceAtLeast(1) else width.toFloat() / height.coerceAtLeast(1)
+            handler.post { remoteView?.setScalingType(if (ratio > 1.7f || ratio < 0.8f) RendererCommon.ScalingType.SCALE_ASPECT_FIT else RendererCommon.ScalingType.SCALE_ASPECT_BALANCED) }
+        }
+    }
+
+    private fun releaseViews() {
+        VideoCall.unwatch(this)
+        val local = localView; val remote = remoteView
+        if (local != null && remote != null) VideoCall.detach(local, remote)
+        try { local?.release() } catch (_: Exception) {}
+        try { remote?.release() } catch (_: Exception) {}
+        localView = null; remoteView = null
+    }
+
+    override fun callChanged() {
+        if (!VideoCall.active) { releaseViews(); finish(); return }
+        render()
+    }
+
+    override fun onStart() { super.onStart(); started = true; if (VideoCall.active && localView != null) VideoCall.visible(true) }
+    // Locked, closed or Rabta in the background: the camera pauses there and resumes on return, the voice goes on.
+    override fun onStop() { super.onStop(); started = false; if (VideoCall.active && !isChangingConfigurations) VideoCall.visible(false) }
+    override fun onDestroy() { handler.removeCallbacksAndMessages(null); releaseViews(); super.onDestroy() }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() { if (!minimize()) finish() }
+    override fun onUserLeaveHint() { super.onUserLeaveHint(); if (!askingShare) minimize() }
+
+    /** The small floating window, like WhatsApp; false where this phone does not offer it. */
+    private fun minimize(): Boolean {
+        if (!VideoCall.active || isInPictureInPictureMode || !packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) return false
+        return runCatching { enterPictureInPictureMode(PictureInPictureParams.Builder().setAspectRatio(Rational(9, 16)).build()) }.getOrDefault(false)
+    }
+
+    override fun onPictureInPictureModeChanged(inPip: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(inPip, newConfig)
+        pip(inPip)
+    }
+    private fun pip(inPip: Boolean) {
+        if (!::controls.isInitialized) return
+        val chrome = if (inPip) View.GONE else View.VISIBLE
+        controls.visibility = chrome; localView?.visibility = if (inPip || VideoCall.sharing) View.GONE else View.VISIBLE
+        if (inPip) sharingNote.visibility = View.GONE else render()
     }
 
     private fun hasPerms() = checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED &&
@@ -109,8 +159,10 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
         arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO), 1)
 
     override fun onRequestPermissionsResult(r: Int, p: Array<out String>, g: IntArray) {
-        if (g.size >= 2 && g.all { it == PackageManager.PERMISSION_GRANTED }) begin()
-        else { Toast.makeText(this, "Camera aur mic chahiye video call ke liye", Toast.LENGTH_SHORT).show(); finish() }
+        super.onRequestPermissionsResult(r, p, g)
+        val next = pending; pending = null
+        if (g.size >= 2 && g.all { it == PackageManager.PERMISSION_GRANTED } && next != null) begin(next)
+        else { Toast.makeText(this, "Camera aur mic chahiye video call ke liye", Toast.LENGTH_SHORT).show(); if (!VideoCall.active) finish() }
     }
 
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
@@ -130,223 +182,81 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
 
         // Name + status (center)
         val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
-        info.addView(TextView(this).apply { text = peerName; textSize = 24f; typeface = Typeface.DEFAULT_BOLD; setTextColor(Color.WHITE); gravity = Gravity.CENTER })
-        statusTv = TextView(this).apply { text = if(isCaller) "Calling…" else "Connecting…"; textSize = 14f; setTextColor(0xCCFFFFFF.toInt()); gravity = Gravity.CENTER }
+        info.addView(TextView(this).apply { text = VideoCall.peerName; textSize = 24f; typeface = Typeface.DEFAULT_BOLD; setTextColor(Color.WHITE); gravity = Gravity.CENTER })
+        statusTv = TextView(this).apply { textSize = 14f; setTextColor(0xCCFFFFFF.toInt()); gravity = Gravity.CENTER }
         info.addView(statusTv)
         root.addView(info, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             gravity = Gravity.CENTER; bottomMargin = dp(160) })
 
-        // Controls
-        val ctrl = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
-        fun cBtn(icon: String, bg: Int, sz: Int, act: () -> Unit) = TextView(this).apply {
-            UiIcons.set(this,UiIcons.fromSymbol(icon) ?: "phone"); textSize = 24f; gravity = Gravity.CENTER; background = oval(bg)
-            isClickable = true; setOnClickListener { act() }
+        // While your screen is shared, your camera preview gives way to this note.
+        sharingNote = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; visibility = View.GONE; setPadding(dp(20), dp(14), dp(20), dp(14))
+            background = GradientDrawable().apply { setColor(0xE6172230.toInt()); cornerRadius = dp(18).toFloat() }
+            addView(RabtaUi.text(this@VideoCallActivity, "You're sharing your screen", 15f, true, Color.WHITE).apply { gravity = Gravity.CENTER })
+            addView(RabtaUi.text(this@VideoCallActivity, "Stop sharing", 14f, true, AppTheme.ACCENT).apply {
+                gravity = Gravity.CENTER; minHeight = dp(44); setPadding(dp(16), dp(8), dp(16), 0); isFocusable = true; setOnClickListener { VideoCall.stopSharing() }
+            })
         }
-        muteBtn = cBtn("🎤", 0xEE172230.toInt(), dp(60)) { toggleMute() }
-        val endBtn = cBtn("📵", 0xFFD32F2F.toInt(), dp(70)) { hangUp() }
-        val flipBtn = cBtn("🔄", 0xEE172230.toInt(), dp(60)) { flipCamera() }
-        speakerBtn=cBtn("🔊",AppTheme.ACCENT,dp(60)) { toggleSpeaker() }
-        listOf(muteBtn,endBtn,flipBtn,speakerBtn).forEach { ctrl.addView(it,LinearLayout.LayoutParams(dp(56),dp(56)).apply { marginStart=dp(8); marginEnd=dp(8) }) }
-        muteBtn.contentDescription="Mute microphone"; endBtn.contentDescription="End call"; flipBtn.contentDescription="Switch camera"; speakerBtn.contentDescription="Speaker on"
-        root.addView(ctrl, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+        root.addView(sharingNote, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; topMargin = dp(64) })
+
+        // Controls
+        controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+        fun cBtn(icon: String, bg: Int, act: () -> Unit) = TextView(this).apply {
+            UiIcons.set(this,UiIcons.fromSymbol(icon) ?: icon); textSize = 24f; gravity = Gravity.CENTER; background = oval(bg)
+            isClickable = true; isFocusable = true; setOnClickListener { act() }
+        }
+        muteBtn = cBtn("🎤", 0xEE172230.toInt()) { VideoCall.toggleMute() }
+        val endBtn = cBtn("📵", 0xFFD32F2F.toInt()) { VideoCall.hangUp() }
+        val flipBtn = cBtn("🔄", 0xEE172230.toInt()) { VideoCall.flipCamera(this) }
+        speakerBtn = cBtn("🔊", AppTheme.ACCENT) { VideoCall.toggleSpeaker() }
+        shareBtn = cBtn("screen_share", 0xEE172230.toInt()) { toggleShare() }
+        listOf(muteBtn, flipBtn, shareBtn, speakerBtn, endBtn).forEach { controls.addView(it, LinearLayout.LayoutParams(dp(54), dp(54)).apply { marginStart = dp(6); marginEnd = dp(6) }) }
+        endBtn.contentDescription = "End call"; flipBtn.contentDescription = "Switch camera"
+        root.addView(controls, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             gravity = Gravity.BOTTOM; bottomMargin = dp(48) })
     }
 
-    private fun begin() {
-        historyId=Db.get(this).logCallStart(peerId,peerName,if(isCaller)"outgoing video" else "incoming video")
-        buildUi()
-        val am=getSystemService(AUDIO_SERVICE) as android.media.AudioManager
-        previousAudioMode=am.mode; previousSpeaker=am.isSpeakerphoneOn
-        am.mode=android.media.AudioManager.MODE_IN_COMMUNICATION; am.isSpeakerphoneOn=true
-        RabtaEvents.add(this)
-        MessageService.callStarted(this, peerName, true); callActive = true
-        initWebRtc()
-        statusTv.text="Preparing connection…"
-        Thread {
-            val ice=runCatching {
-                val servers=FeatureApi.request("/api/ice").getJSONArray("servers")
-                (0 until servers.length()).map { i ->val s=servers.getJSONObject(i);val urls=s.getJSONArray("urls");PeerConnection.IceServer.builder((0 until urls.length()).map {urls.getString(it)}).setUsername(s.optString("username")).setPassword(s.optString("credential")).createIceServer() }
-            }.getOrElse { listOf(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer()) }
-            handler.post { if(!isFinishing&&!isDestroyed) {
-                createPeerConnection(ice);handler.postDelayed(ringTimeout,45000)
-                if(isCaller) {statusTv.text="Calling…";createAndSendOffer()}
-                else {val sdp=intent.getStringExtra(OFFER_SDP);if(sdp!=null)acceptOffer(sdp)else finish()}
-            } }
-        }.start()
+    private fun render() {
+        handler.removeCallbacks(tick)
+        if (!::statusTv.isInitialized || !VideoCall.active) return
+        val s = VideoCall.seconds()
+        statusTv.text = if (VideoCall.connectedAt > 0 && VideoCall.status == "Connected") "Connected · %d:%02d".format(s / 60, s % 60) else VideoCall.status
+        val muted = VideoCall.muted
+        UiIcons.set(muteBtn, if (muted) "muted" else "mic", label = if (muted) "Unmute microphone" else "Mute microphone")
+        muteBtn.background = oval(if (muted) AppTheme.ACCENT else 0xEE172230.toInt()); muteBtn.isSelected = muted
+        speakerBtn.background = oval(if (VideoCall.speakerOn) AppTheme.ACCENT else 0xEE172230.toInt()); speakerBtn.isSelected = VideoCall.speakerOn
+        speakerBtn.contentDescription = if (VideoCall.speakerOn) "Speaker on" else "Speaker off"
+        val sharing = VideoCall.sharing
+        shareBtn.background = oval(if (sharing) AppTheme.ACCENT else 0xEE172230.toInt()); shareBtn.isSelected = sharing
+        shareBtn.contentDescription = if (sharing) "Stop sharing your screen" else "Share your screen"
+        val inPip = isInPictureInPictureMode
+        sharingNote.visibility = if (sharing && !inPip) View.VISIBLE else View.GONE
+        localView?.visibility = if (sharing || inPip) View.GONE else View.VISIBLE
+        if (VideoCall.connectedAt > 0) handler.postDelayed(tick, 1000)
     }
 
-    private fun initWebRtc() {
-        PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(applicationContext).createInitializationOptions())
-        eglBase = EglBase.create()
-        localView?.init(eglBase!!.eglBaseContext, null)
-        remoteView?.init(eglBase!!.eglBaseContext, null)
-        factory = PeerConnectionFactory.builder()
-            .setVideoDecoderFactory(DefaultVideoDecoderFactory(eglBase!!.eglBaseContext))
-            .setVideoEncoderFactory(DefaultVideoEncoderFactory(eglBase!!.eglBaseContext, true, true))
-            .createPeerConnectionFactory()
-        surfaceHelper = SurfaceTextureHelper.create("CamThread", eglBase!!.eglBaseContext)
-        videoSource = factory!!.createVideoSource(false)
-        val enumerator = Camera2Enumerator(this)
-        val camId = enumerator.deviceNames.firstOrNull { enumerator.isFrontFacing(it) }
-            ?: enumerator.deviceNames.firstOrNull() ?: return
-        capturer = Camera2Capturer(this, camId, null).apply {
-            initialize(surfaceHelper, applicationContext, videoSource!!.capturerObserver)
-            startCapture(640, 480, 24)
-        }
-        localVideoTrack = factory!!.createVideoTrack("v0", videoSource!!)
-        localVideoTrack!!.addSink(localView!!)
-        audioSource = factory!!.createAudioSource(MediaConstraints())
-        localAudioTrack = factory!!.createAudioTrack("a0", audioSource!!)
-    }
-
-    private fun createPeerConnection(ice:List<PeerConnection.IceServer>) {
-        val cfg = PeerConnection.RTCConfiguration(ice).apply { sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN }
-        pc = factory!!.createPeerConnection(cfg, object : PeerConnection.Observer {
-            override fun onIceCandidate(c: IceCandidate) {
-                WsClient.sendRaw(JSONObject().put("type","ice_candidate").put("to",peerId).put("callId",callId)
-                    .put("sdpMid",c.sdpMid).put("sdpMLineIndex",c.sdpMLineIndex).put("sdp",c.sdp).toString())
-            }
-            override fun onTrack(t: RtpTransceiver) {
-                val track = t.receiver.track() ?: return
-                if (track is VideoTrack) handler.post { remoteView?.let { track.addSink(it) } }
-            }
-            override fun onConnectionChange(s: PeerConnection.PeerConnectionState) {
-                handler.post {
-                    if(isFinishing) return@post
-                    when(s) {
-                        PeerConnection.PeerConnectionState.CONNECTED -> { ringback.stop(); handler.removeCallbacks(ringTimeout); if(connectedAt==0L) connectedAt=android.os.SystemClock.elapsedRealtime(); handler.removeCallbacks(durationTick); handler.post(durationTick) }
-                        PeerConnection.PeerConnectionState.DISCONNECTED -> { handler.removeCallbacks(durationTick); statusTv.text="Reconnecting…" }
-                        PeerConnection.PeerConnectionState.FAILED -> { Toast.makeText(this@VideoCallActivity,"Connection failed",Toast.LENGTH_SHORT).show(); hangUp() }
-                        else -> {}
-                    }
-                }
-            }
-            override fun onSignalingChange(s: PeerConnection.SignalingState) {}
-            override fun onIceConnectionChange(s: PeerConnection.IceConnectionState) {}
-            override fun onIceConnectionReceivingChange(b: Boolean) {}
-            override fun onIceGatheringChange(s: PeerConnection.IceGatheringState) {}
-            override fun onIceCandidatesRemoved(a: Array<out IceCandidate>) {}
-            override fun onAddStream(s: MediaStream) {}
-            override fun onRemoveStream(s: MediaStream) {}
-            override fun onDataChannel(d: DataChannel) {}
-            override fun onRenegotiationNeeded() {}
-        })
-        val stream = "s0"
-        pc!!.addTrack(localVideoTrack!!, listOf(stream))
-        pc!!.addTrack(localAudioTrack!!, listOf(stream))
-    }
-
-    private fun sdpObserver(onSet: () -> Unit = {}, onCreate: (SessionDescription) -> Unit = {}) = object : SdpObserver {
-        override fun onCreateSuccess(s: SessionDescription) { onCreate(s) }
-        override fun onSetSuccess() { onSet() }
-        override fun onCreateFailure(e: String) { handler.post { if (!isFinishing) statusTv.text = "Couldn't connect the call" } }
-        override fun onSetFailure(e: String) { handler.post { if (!isFinishing) statusTv.text = "Couldn't connect the call" } }
-    }
-
-    private fun createAndSendOffer() {
-        val mc = MediaConstraints().apply {
-            mandatory += MediaConstraints.KeyValuePair("OfferToReceiveVideo","true")
-            mandatory += MediaConstraints.KeyValuePair("OfferToReceiveAudio","true")
-        }
-        pc!!.createOffer(object : SdpObserver {
-            override fun onCreateSuccess(sdp: SessionDescription) {
-                pc!!.setLocalDescription(sdpObserver(onSet = {
-                    WsClient.sendRaw(JSONObject().put("type","video_offer").put("to",peerId).put("callId",callId)
-                        .put("fromName",Session.name).put("sdp",sdp.description).toString())
-                    handler.post { statusTv.text = "Calling…" }
-                }), sdp)
-            }
-            override fun onSetSuccess() {}
-            override fun onCreateFailure(e: String) { handler.post { statusTv.text = "Couldn't connect the call" } }
-            override fun onSetFailure(e: String) {}
-        }, mc)
-    }
-
-    private fun acceptOffer(offerSdp: String) {
-        pc!!.setRemoteDescription(sdpObserver(onSet = {
-            flushIce()
-            pc!!.createAnswer(object : SdpObserver {
-                override fun onCreateSuccess(sdp: SessionDescription) {
-                    pc!!.setLocalDescription(sdpObserver(onSet = {
-                        WsClient.sendRaw(JSONObject().put("type","video_answer").put("to",peerId).put("callId",callId).put("sdp",sdp.description).toString())
-                        handler.post { statusTv.text = "Connecting..." }
-                    }), sdp)
-                }
-                override fun onSetSuccess() {}
-                override fun onCreateFailure(e: String) { handler.post { statusTv.text = "Couldn't connect the call" } }
-                override fun onSetFailure(e: String) {}
-            }, MediaConstraints())
-        }), SessionDescription(SessionDescription.Type.OFFER, offerSdp))
-    }
-
-    private fun toggleMute() {
-        muted = !muted; localAudioTrack?.setEnabled(!muted)
-        UiIcons.set(muteBtn,if(muted) "muted" else "mic",label=if(muted) "Unmute microphone" else "Mute microphone")
-        muteBtn.background=oval(if(muted) AppTheme.ACCENT else 0xEE172230.toInt()); muteBtn.isSelected=muted
-    }
-    private fun toggleSpeaker() {
-        speakerOn=!speakerOn
-        (getSystemService(AUDIO_SERVICE) as android.media.AudioManager).isSpeakerphoneOn=speakerOn
-        speakerBtn.background=oval(if(speakerOn) AppTheme.ACCENT else 0xEE172230.toInt()); speakerBtn.isSelected=speakerOn
-        speakerBtn.contentDescription=if(speakerOn) "Speaker on" else "Speaker off"
-    }
-
-    private fun flipCamera() {
-        useFrontCamera = !useFrontCamera
-        val enumerator = Camera2Enumerator(this)
-        val id = if (useFrontCamera) enumerator.deviceNames.firstOrNull { enumerator.isFrontFacing(it) }
-                 else enumerator.deviceNames.firstOrNull { enumerator.isBackFacing(it) }
-        id?.let { (capturer as? Camera2Capturer)?.switchCamera(null, it) }
-    }
-
-    private fun hangUp() {
-        try { WsClient.sendRaw(JSONObject().put("type","video_end").put("to",peerId).put("callId",callId).toString()) } catch (_: Exception) {}
-        cleanup(); finish()
-    }
-
-    private fun cleanup() {
-        if (callActive) { callActive = false; MessageService.callEnded(this) }
-        if(historyId>0){val db=Db.get(this);if(connectedAt>0)db.logCallEnd(historyId,((android.os.SystemClock.elapsedRealtime()-connectedAt)/1000).toInt())else db.callOutcome(historyId,outcome+" · video");historyId=-1L}
-        ringback.stop(); handler.removeCallbacks(ringTimeout)
-        handler.removeCallbacks(durationTick)
-        if(::speakerBtn.isInitialized) try { (getSystemService(AUDIO_SERVICE) as android.media.AudioManager).apply { isSpeakerphoneOn=previousSpeaker; mode=previousAudioMode } } catch (_:Exception) {}
-        try { capturer?.stopCapture() } catch (_: Exception) {}
-        try { capturer?.dispose() } catch (_: Exception) {}; capturer = null
-        try { localVideoTrack?.dispose() } catch (_: Exception) {}; localVideoTrack = null
-        try { localAudioTrack?.dispose() } catch (_: Exception) {}; localAudioTrack = null
-        try { audioSource?.dispose() } catch (_: Exception) {}; audioSource = null
-        try { videoSource?.dispose() } catch (_: Exception) {}; videoSource = null
-        try { pc?.close() } catch (_: Exception) {}; pc = null
-        try { surfaceHelper?.dispose() } catch (_: Exception) {}; surfaceHelper = null
-        try { localView?.release() } catch (_: Exception) {}; localView = null
-        try { remoteView?.release() } catch (_: Exception) {}; remoteView = null
-        try { factory?.dispose() } catch (_: Exception) {}; factory = null
-        try { eglBase?.release() } catch (_: Exception) {}; eglBase = null
-    }
-
-    // RabtaEvents
-    override fun onCallState(fromId:String,callId:String,state:String) {
-        if(callId!=this.callId || fromId!=peerId || !isCaller || connectedAt!=0L) return
-        when(state) {
-            "calling" -> { ringback.stop(); statusTv.text="Calling…" }
-            "ringing" -> { ringback.ringing(); statusTv.text="Ringing…" }
-            "accepted" -> { ringback.stop(); statusTv.text="Connecting…" }
-            "busy" -> { outcome="busy";Toast.makeText(this,"Busy",Toast.LENGTH_SHORT).show(); cleanup(); finish() }
+    /** Android asks once per share whether Rabta may show your screen; the other phone then sees it instead of your camera. */
+    private fun toggleShare() {
+        if (VideoCall.sharing) { VideoCall.stopSharing(); return }
+        if (VideoCall.connectedAt == 0L) { Toast.makeText(this, "Share your screen once the call connects", Toast.LENGTH_SHORT).show(); return }
+        val projection = getSystemService(MediaProjectionManager::class.java) ?: return
+        askingShare = true
+        if (runCatching { startActivityForResult(projection.createScreenCaptureIntent(), SHARE) }.isFailure) {
+            askingShare = false; Toast.makeText(this, "Screen sharing isn't available on this phone", Toast.LENGTH_SHORT).show()
         }
     }
-    override fun onDisconnected() { outcome="disconnected";cleanup(); finish() }
-    override fun onVideoAnswer(callId: String, sdp: String) {
-        if (callId != this.callId) return
-        ringback.stop(); statusTv.text="Connecting…"
-        pc?.setRemoteDescription(sdpObserver(onSet={flushIce()}), SessionDescription(SessionDescription.Type.ANSWER, sdp))
-    }
-    override fun onIceCandidateEvent(callId: String, sdpMid: String, sdpMLineIndex: Int, sdp: String) {
-        if (callId != this.callId) return
-        val candidate=IceCandidate(sdpMid,sdpMLineIndex,sdp)
-        if(pc?.remoteDescription!=null) pc?.addIceCandidate(candidate) else if(pendingIce.size<64) pendingIce.add(candidate)
-    }
-    override fun onVideoEnd(callId: String) {
-        if (callId != this.callId) return
-        handler.post { outcome="ended before answer";cleanup(); finish() }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != SHARE) return
+        askingShare = false
+        if (resultCode != RESULT_OK || data == null || !VideoCall.active) return
+        // Android wants its screen-sharing notice in place before the screen is captured.
+        if (!MessageService.sharingStarted() || !VideoCall.share(this, data)) {
+            MessageService.sharingEnded()
+            Toast.makeText(this, "Screen sharing could not start. Try again.", Toast.LENGTH_SHORT).show()
+        }
     }
 }

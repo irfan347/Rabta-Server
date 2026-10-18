@@ -96,6 +96,8 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
     }
     private lateinit var connectionStrip: LinearLayout
     private lateinit var backgroundStrip: LinearLayout
+    /** Green "Tap to return to call" while a call goes on behind the chats. */
+    private lateinit var callBar: CallBar
     private lateinit var searchToggle: TextView
     private lateinit var chatsBadge: TextView
     private var searchOpen=false
@@ -132,9 +134,11 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         if(activeTab==0) loadMoments(force=true)
         AppUpdate.check(this)
         backgroundStrip.visibility=if(BackgroundRun.shouldOffer(this)) View.VISIBLE else View.GONE;BackgroundRun.followUp(this)
+        callBar.start()
     }
     override fun onPause() {
         resumed=false;if(::nearbyPanel.isInitialized)nearbyPanel.pause()
+        if(::callBar.isInitialized)callBar.stop()
         RabtaEvents.remove(this);uiHandler.removeCallbacks(connectionTick);uiHandler.removeCallbacks(searchTask);uiHandler.removeCallbacks(callSearchTask)
         super.onPause()
     }
@@ -164,6 +168,8 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
             orientation=LinearLayout.VERTICAL;setBackgroundColor(BG);isFocusableInTouchMode=true
         }
         setContentView(root)
+        callBar=CallBar(this)
+        root.addView(callBar.view,LinearLayout.LayoutParams(-1,-2))
         val header=LinearLayout(this).apply {
             gravity=Gravity.CENTER_VERTICAL;setPadding(dp(18),dp(8),dp(8),dp(4))
         }

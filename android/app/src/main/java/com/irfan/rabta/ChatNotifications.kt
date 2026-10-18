@@ -29,6 +29,7 @@ object ChatNotifications {
     const val READ = "com.irfan.rabta.notification.READ"
     const val MUTE = "com.irfan.rabta.notification.MUTE"
     const val DECLINE = "com.irfan.rabta.notification.DECLINE"
+    const val HANG_UP = "com.irfan.rabta.notification.HANG_UP"
     const val KEY_REPLY = "reply"
     const val MISSED_CHANNEL = "rabta_missed_calls"
     private const val MUTE_MS = 8 * 60 * 60_000L
@@ -161,6 +162,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
     override fun onReceive(c: Context, intent: Intent) {
         Session.init(c)
         if (!Session.loggedIn) return
+        if (intent.action == ChatNotifications.HANG_UP) { if (VideoCall.active) VideoCall.hangUp() else VoiceCall.end(); return }
         val id = intent.getStringExtra("id").orEmpty().ifEmpty { return }
         val isGroup = intent.getBooleanExtra("isGroup", false)
         when (intent.action) {

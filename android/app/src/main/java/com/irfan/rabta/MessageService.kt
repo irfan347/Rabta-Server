@@ -69,9 +69,16 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
          * From an open call screen: Android keeps a call's microphone working with the screen locked only for a
          * foreground service of the microphone type that was given that type while the app was on screen.
          */
-        fun callStarted(ctx: Context, peerName: String, video: Boolean) {
-            try { ctx.startService(Intent(ctx, MessageService::class.java).setAction(CALL_STARTED).putExtra("peerName", peerName).putExtra("video", video)) } catch (_: Exception) {}
+        fun callStarted(ctx: Context, peerId: String, peerName: String, video: Boolean) {
+            try { ctx.startService(Intent(ctx, MessageService::class.java).setAction(CALL_STARTED).putExtra("peerId", peerId).putExtra("peerName", peerName).putExtra("video", video)) } catch (_: Exception) {}
         }
+        @Volatile private var running: MessageService? = null
+        /**
+         * Screen sharing in a video call: Android captures the screen only while this notice carries the
+         * screen-sharing type, so it is set here, at once, before capture starts. False if Android refused it.
+         */
+        fun sharingStarted(): Boolean = running?.sharing(true) == true
+        fun sharingEnded() { running?.sharing(false) }
         fun callEnded(ctx: Context) {
             try { ctx.startService(Intent(ctx, MessageService::class.java).setAction(CALL_ENDED)) } catch (_: Exception) {}
         }
@@ -93,6 +100,7 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
 
     override fun onCreate() {
         super.onCreate()
+        running = this
         Session.init(this)          // service may be restarted by Android without the app open
         channels(this)
         showConnection()
@@ -103,6 +111,7 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
     }
 
     override fun onDestroy() {
+        if (running === this) running = null
         cancelRinging();callHandler.removeCallbacks(repair);releaseCallWake()
         // Stopped on purpose (signing out): the swipe-away restart below must not undo it.
         runCatching { getSystemService(android.app.AlarmManager::class.java).cancel(restartAlarm()) }
@@ -115,8 +124,8 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            CALL_STARTED -> { inCall(intent.getStringExtra("peerName").orEmpty(), intent.getBooleanExtra("video", false)); return START_STICKY }
-            CALL_ENDED -> { releaseCallWake(); if (!showConnection()) runCatching { getSystemService(NotificationManager::class.java).notify(1, persistentNotification()) }; return START_STICKY }
+            CALL_STARTED -> { inCall(intent.getStringExtra("peerId").orEmpty(), intent.getStringExtra("peerName").orEmpty(), intent.getBooleanExtra("video", false)); return START_STICKY }
+            CALL_ENDED -> { callPeerId = ""; releaseCallWake(); if (!showConnection()) runCatching { getSystemService(NotificationManager::class.java).notify(1, persistentNotification()) }; return START_STICKY }
         }
         if (Session.loggedIn && !WsClient.connected) WsClient.connect(Session)
         if(intent?.action=="retry_nearby"){router?.pauseTransport();MeshBridge.status="Restarting Nearby…"}
@@ -147,18 +156,41 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
     } catch (_: Exception) { false }
 
     // ---------- calls ----------
-    private fun inCall(peerName: String, video: Boolean) {
-        val back = packageManager.getLaunchIntentForPackage(packageName)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
-        val notice = Notification.Builder(this, SERVICE_CHANNEL).setSmallIcon(R.drawable.ic_stat_rabta)
-            .setContentTitle(if (video) "Ongoing video call" else "Ongoing voice call")
-            .setContentText("${peerName.ifBlank { "Rabta contact" }.take(60)} · Tap to return to the call")
+    private var callPeerId = ""
+    private var callPeerName = ""
+    private var callVideo = false
+    /** "Ongoing voice call": tap returns to the call (this chat's call screen, or the video call), Hang up ends it. */
+    private fun callNotice(): Notification {
+        val back = (if (callVideo) Intent(this, VideoCallActivity::class.java)
+            else Intent(this, ChatActivity::class.java).putExtra("peerId", callPeerId).putExtra("peerName", callPeerName).putExtra("showCall", true))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val hangUp = PendingIntent.getBroadcast(this, 3, Intent(this, NotificationActionReceiver::class.java).setAction(ChatNotifications.HANG_UP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        return Notification.Builder(this, SERVICE_CHANNEL).setSmallIcon(R.drawable.ic_stat_rabta)
+            .setContentTitle(if (callVideo) "Ongoing video call" else "Ongoing voice call")
+            .setContentText("${callPeerName.ifBlank { "Rabta contact" }.take(60)} · Tap to return to the call")
             .setCategory(Notification.CATEGORY_CALL).setOngoing(true)
-            .apply { if (back != null) setContentIntent(PendingIntent.getActivity(this@MessageService, 1, back, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)) }
+            .setContentIntent(PendingIntent.getActivity(this, 1, back, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
+            .addAction(Notification.Action.Builder(android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_stat_rabta), "Hang up", hangUp).build())
             .build()
-        try {
-            if (Build.VERSION.SDK_INT >= 30) startForeground(1, notice, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
-            else startForeground(1, notice)
-        } catch (_: Exception) { runCatching { getSystemService(NotificationManager::class.java).notify(1, notice) } }
+    }
+    /** The call's notice and foreground types: microphone for the call, and screen sharing while the screen is shared. */
+    private fun callForeground(sharing: Boolean): Boolean {
+        val notice = callNotice()
+        return try {
+            when {
+                Build.VERSION.SDK_INT >= 30 -> startForeground(1, notice, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+                    (if (sharing) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION else 0))
+                Build.VERSION.SDK_INT >= 29 && sharing -> startForeground(1, notice, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+                else -> startForeground(1, notice)
+            }
+            true
+        } catch (_: Exception) { runCatching { getSystemService(NotificationManager::class.java).notify(1, notice) }; false }
+    }
+    private fun sharing(on: Boolean): Boolean = if (callPeerId.isEmpty()) !on else callForeground(on)
+    private fun inCall(peerId: String, peerName: String, video: Boolean) {
+        callPeerId = peerId; callPeerName = peerName; callVideo = video
+        callForeground(false)
         // Keeps the phone from sleeping between audio frames once the screen is off.
         if (callWake == null) callWake = getSystemService(PowerManager::class.java)?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Rabta:call")?.apply { setReferenceCounted(false); acquire(4 * 60 * 60_000L) }
     }

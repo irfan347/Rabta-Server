@@ -1,4 +1,4 @@
 {
   "minVersionCode": 0,
-  "notes": "Message popups with Reply, Mark as read and Mute; Answer and Decline right on incoming calls; missed calls say voice or video, and calls now show inside the chat.\nStatus: full-screen text with your own colour and font, emoji in captions, and quick emoji replies that appear as a card in the chat.\nCalls keep going when your screen locks, and messages keep arriving after a restart or update."
+  "notes": "Calls keep going while you use your chats: tap the green bar to return. Video calls shrink to a small window, and you can share your screen.\nMessage popups with Reply, Mark as read and Mute; Answer and Decline right on incoming calls; missed calls say voice or video, and calls show inside the chat.\nStatus: full-screen text with your own colour and font, emoji in captions, and quick emoji replies that appear as a card in the chat."
 }

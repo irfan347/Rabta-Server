@@ -101,9 +101,6 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     private var historyVersion = 0
     private var recording = false
     private var recordingStarted = 0L
-    private var connectedAt = 0L
-    private var previousAudioMode = AudioManager.MODE_NORMAL
-    private var previousSpeaker = false
     private val recordingTick = object : Runnable {
         override fun run() {
             if (!recording) return
@@ -119,25 +116,18 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         val now=android.os.SystemClock.elapsedRealtime()
         return now-recordingStarted-pausedTotal-(if(recordingPaused) now-pausedAt else 0)
     }
-    private val callTick = object : Runnable {
-        override fun run() {
-            if (!inCall || connectedAt == 0L) return
-            callStatusTv.text="Connected · ${duration((android.os.SystemClock.elapsedRealtime()-connectedAt)/1000)}"
-            uiHandler.postDelayed(this,1000)
-        }
-    }
-    private val callTimeout = Runnable { if(inCall && connectedAt==0L) { endCall(outcome="no answer"); toast("Call ka jawab nahi mila") } }
+    private val callTick = Runnable { syncCall() }
     private val searchTask = Runnable { loadHistory(true) }
     private fun duration(seconds: Long) = "%d:%02d".format(seconds/60,seconds%60)
 
     private val uiHandler = Handler(Looper.getMainLooper())
     private lateinit var db: Db
-    private var netCall: InternetVoiceCall? = null
-    private var inCall = false
-    private var callAudioMuted = false
-    private var callSpeaker = false
     private var pendingInitiate = true
-    private var callId = -1L
+    /** The voice call screen is showing; the call itself is [VoiceCall], which goes on when this screen closes. */
+    private var callShown = false
+    private var resumed = false
+    private val callWatcher = CallWatcher { syncCall() }
+    private lateinit var callBar: CallBar
     private var lastTypingSent = 0L
 
     private val statusTick = object : Runnable {
@@ -154,12 +144,15 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         peerName = intent.getStringExtra("peerName") ?: "User"
         isGroup  = intent.getBooleanExtra("isGroup", false)
         db = Db.get(this)
-        searchQuery=savedInstanceState?.getString("searchQuery")?:intent.getStringExtra("searchQuery").orEmpty()
-        draftReplyId=savedInstanceState?.getString("replyId")
+        // Opening another chat in this screen recreates it: the last chat's draft and search stay with that chat.
+        val saved=savedInstanceState?.takeIf { (it.getString("statePeer") ?: peerId)==peerId }
+        searchQuery=saved?.getString("searchQuery")?:intent.getStringExtra("searchQuery").orEmpty()
+        draftReplyId=saved?.getString("replyId")
         buildUi()
-        input.setText(savedInstanceState?.getString("draft").orEmpty())
+        input.setText(saved?.getString("draft").orEmpty())
         RabtaEvents.add(this)
         loadHistory()
+        if (VoiceCall.with(peerId) && (intent.getBooleanExtra("showCall", false) || saved?.getBoolean("callShown") == true)) showCallScreen()
         if (intent.getBooleanExtra("autoAnswer", false)) uiHandler.post { startCall(false) }
         consumeCallRequest()
     }
@@ -168,6 +161,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         super.onNewIntent(newIntent)
         if(newIntent.getStringExtra("peerId")!=peerId) { setIntent(newIntent); recreate(); return }
         setIntent(newIntent)
+        if(newIntent.getBooleanExtra("showCall",false)) showCallScreen()
         if(newIntent.getBooleanExtra("autoAnswer",false)) startCall(false)
         consumeCallRequest()
     }
@@ -186,19 +180,24 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         super.onResume(); if (!::db.isInitialized) return
         openPeer = peerId; ChatNotifications.clear(this, peerId)
         uiHandler.post(statusTick); uiHandler.post(presenceTick); RabtaEvents.add(this)
+        resumed = true; VoiceCall.watch(callWatcher); callBar.start(); syncCall()
         if (!firstHistory) loadHistory()   // e.g. a video call just ended: its bubble joins the chat
         Thread { try { db.clearUnread(peerId) } catch (_: Exception) {} }.start()
         if (!isGroup) WsClient.sendRead(peerId, "all")
     }
-    override fun onPause() { voiceViews.forEach { it.stop() }; super.onPause(); openPeer = null; uiHandler.removeCallbacks(statusTick); uiHandler.removeCallbacks(presenceTick); if(recording) stopVoiceRecord(false) }
+    override fun onPause() {
+        voiceViews.forEach { it.stop() }; super.onPause(); openPeer = null; uiHandler.removeCallbacks(statusTick); uiHandler.removeCallbacks(presenceTick); if(recording) stopVoiceRecord(false)
+        resumed = false; if (::callBar.isInitialized) { VoiceCall.unwatch(callWatcher); callBar.stop(); uiHandler.removeCallbacks(callTick); earpiece(false) }
+    }
     override fun onDestroy() {
-        endCall(); if(recording) stopVoiceRecord(false); RabtaEvents.remove(this)
+        // The call is not this screen's: it goes on, and the green bar or its notice leads back to it.
+        if(recording) stopVoiceRecord(false); RabtaEvents.remove(this); VoiceCall.unwatch(callWatcher); earpiece(false)
         uiHandler.removeCallbacksAndMessages(null)
         super.onDestroy()
     }
 
     override fun onSaveInstanceState(state:Bundle) {
-        if(::input.isInitialized) { state.putString("draft",input.text.toString());state.putString("searchQuery",searchQuery);state.putString("replyId",replyTo?.id) }
+        if(::input.isInitialized) { state.putString("draft",input.text.toString());state.putString("searchQuery",searchQuery);state.putString("replyId",replyTo?.id);state.putBoolean("callShown",callShown);state.putString("statePeer",peerId) }
         super.onSaveInstanceState(state)
     }
 
@@ -302,6 +301,8 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         }
         headerBar=hdr
         root.addView(hdr)
+        callBar=CallBar(this,{ callShown && VoiceCall.with(peerId) }) { if(VoiceCall.with(peerId)) { showCallScreen();true } else false }
+        root.addView(callBar.view,LinearLayout.LayoutParams(-1,-2))
         // One slim line while offline (tap for the full connection details), not a block of text.
         offlineBanner=RabtaUi.text(this,"",12f,color=AppTheme.sub(this)).apply {
             minHeight=dp(36);gravity=Gravity.CENTER;setPadding(dp(16),dp(6),dp(16),dp(6));maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END
@@ -314,7 +315,12 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         // ── Call overlay ──
         callOverlay = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; background=GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,intArrayOf(0xFF182E2C.toInt(),DARK)); visibility=View.GONE }
         // Top: name + status
-        val callTop = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; gravity=Gravity.CENTER; setPadding(0,dp(32),0,0) }
+        // Like WhatsApp: the arrow (or Back) shows the chats again while the call goes on.
+        callOverlay.addView(LinearLayout(this).apply {
+            setPadding(dp(6),dp(8),dp(6),0)
+            addView(RabtaUi.iconButton(this@ChatActivity,"back","Minimize call") { hideCallScreen() }.apply { UiIcons.set(this,"back",Color.WHITE,label="Minimize call") })
+        })
+        val callTop = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; gravity=Gravity.CENTER; setPadding(0,dp(8),0,0) }
         callNameTv = TextView(this).apply { text=peerName; textSize=28f; typeface=Typeface.DEFAULT_BOLD; setTextColor(Color.WHITE); gravity=Gravity.CENTER }
         callStatusTv = TextView(this).apply { textSize=14f; setTextColor(0xBBFFFFFF.toInt()); gravity=Gravity.CENTER; setPadding(0,dp(6),0,0) }
         callTop.addView(callNameTv); callTop.addView(callStatusTv)
@@ -523,7 +529,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         emojiBtn.contentDescription=if(panel) "Keyboard" else "Emoji"
     }
     @Deprecated("Deprecated in Java")
-    override fun onBackPressed() { if(panelOpen()) hidePanel() else super.onBackPressed() }
+    override fun onBackPressed() { if(callShown) hideCallScreen() else if(panelOpen()) hidePanel() else super.onBackPressed() }
 
     private var captureUri:android.net.Uri?=null
     private fun takePhoto() {
@@ -809,7 +815,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             else -> L.t(this,"tap here for contact info")
         }
         statusTv.contentDescription=if(connected) statusTv.text else "Your connection: ${ConnectionStatus.text(this)}"
-        offlineBanner.visibility=if(connected||inCall) View.GONE else View.VISIBLE
+        offlineBanner.visibility=if(connected||callShown) View.GONE else View.VISIBLE
         offlineBanner.text=L.t(this,if(isGroup) "Waiting for network · Group messages need internet  ›" else "Waiting for network · Nearby text still works  ›")
         offlineBanner.contentDescription="${offlineBanner.text}. Tap for connection details"
     }
@@ -933,7 +939,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     }
 
     private fun startVoiceRecord() {
-        if(recording || inCall || !hasMic()) return
+        if(recording || VoiceCall.active || !hasMic()) return
         if(!WsClient.connected) { toast("Voice messages need internet");return }
         if(!MediaHelper.startRecording(this)) { toast("Recording shuru nahi hui"); return }
         recording=true; recordingLocked=false; recordingPaused=false; pausedTotal=0
@@ -983,55 +989,31 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
 
     // ── Voice Call ──
     private fun startCall(initiate: Boolean) {
-        if(inCall || isGroup) return
+        if(isGroup) return
+        val voiceId=if(initiate) "" else intent.getStringExtra("voiceCallId").orEmpty()
+        // Already on this call: just show it again.
+        if(VoiceCall.with(peerId) && (initiate || VoiceCall.id==voiceId)) { showCallScreen(); return }
+        if(initiate && (VoiceCall.active || VideoCall.active)) { toast("Finish your current call first"); return }
         if(WsClient.connected&&WsClient.protocol<2){toast("Calls aren't available right now. Try again later.");return}
         if(!hasMic()) { pendingInitiate=initiate; ActivityCompat.requestPermissions(this,arrayOf(Manifest.permission.RECORD_AUDIO),99); return }
         if(!WsClient.connected) { toast("Call ke liye internet chahiye"); return }
         if(recording) stopVoiceRecord(false)
         (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(input.windowToken,0)
-        inCall=true; connectedAt=0L; callAudioMuted=false; callSpeaker=false
-        updateCallControls()
-        val am=getSystemService(AUDIO_SERVICE) as AudioManager
-        previousAudioMode=am.mode; previousSpeaker=am.isSpeakerphoneOn
-        am.mode=AudioManager.MODE_IN_COMMUNICATION; am.isSpeakerphoneOn=false
-        // The screen may turn off or lock: the call keeps its microphone through MessageService, and at the ear
-        // the screen turns off like a phone call.
-        MessageService.callStarted(this,peerName,false); earpiece(true)
-        headerBar.visibility=View.GONE; (headerBar.parent as View).setBackgroundColor(DARK); RabtaUi.systemBars(this,true)
-        voiceViews.forEach { it.stop() };replyBar.visibility=View.GONE;offlineBanner.visibility=View.GONE
-        callOverlay.visibility=View.VISIBLE; chatScroll.visibility=View.GONE; composerBar.visibility=View.GONE; searchField.visibility=View.GONE
-        callStatusTv.text=if(initiate) "Calling…" else "Connecting…"
-        callId=db.logCallStart(peerId,peerName,if(initiate)"outgoing" else "incoming")
-        val voiceId=if(initiate) ByteArray(6).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02X".format(it) } else intent.getStringExtra("voiceCallId").orEmpty()
-        netCall=InternetVoiceCall(peerId,voiceId) { status ->
-            if(inCall) {
-                callStatusTv.text=status
-                if(status.startsWith("Connected") && connectedAt==0L) {
-                    connectedAt=android.os.SystemClock.elapsedRealtime(); uiHandler.removeCallbacks(callTimeout); uiHandler.post(callTick)
-                }
-            }
-        }
-        netCall?.start(initiate)
-        uiHandler.postDelayed(callTimeout,45000)
+        VoiceCall.start(this,peerId,peerName,initiate,voiceId)
+        showCallScreen()
     }
     private fun startVideoCall() {
         if(isGroup) return
+        if(VideoCall.active) { startActivity(Intent(this,VideoCallActivity::class.java)); return }   // back to the video call going on
+        if(VoiceCall.active && !VoiceCall.with(peerId)) { toast("Finish your current call first"); return }
         if(WsClient.connected&&WsClient.protocol<2){toast("Video calls aren't available right now. Try again later.");return}
-        if(inCall) endCall()
         if (!WsClient.connected) { toast("Video call ke liye internet chahiye"); return }
+        if(VoiceCall.active) VoiceCall.end()
         val cId = ByteArray(6).also{SecureRandom().nextBytes(it)}.joinToString(""){"%02X".format(it)}
         startActivity(Intent(this,VideoCallActivity::class.java).putExtra(VideoCallActivity.PEER_ID,peerId).putExtra(VideoCallActivity.PEER_NAME,peerName).putExtra(VideoCallActivity.IS_CALLER,true).putExtra(VideoCallActivity.CALL_ID,cId))
     }
-    private fun toggleMute(btn: TextView) {
-        callAudioMuted=!callAudioMuted; netCall?.muted=callAudioMuted
-        updateCallControls()
-    }
-    private fun toggleSpeaker(btn: TextView) {
-        callSpeaker=!callSpeaker
-        try { (getSystemService(AUDIO_SERVICE) as AudioManager).isSpeakerphoneOn=callSpeaker } catch (_:Exception) {}
-        earpiece(!callSpeaker)
-        updateCallControls()
-    }
+    private fun toggleMute(btn: TextView) { VoiceCall.toggleMute() }
+    private fun toggleSpeaker(btn: TextView) { VoiceCall.toggleSpeaker() }
     private var earpieceLock: android.os.PowerManager.WakeLock?=null
     /** Like a phone call: held to the ear, the proximity sensor turns the screen off instead of the phone locking. */
     private fun earpiece(on:Boolean) {
@@ -1041,24 +1023,44 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         earpieceLock=power.newWakeLock(android.os.PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK,"Rabta:earpiece").apply { setReferenceCounted(false); acquire(4*60*60_000L) }
     }
     private fun updateCallControls() {
-        UiIcons.set(muteControl,if(callAudioMuted) "muted" else "mic",label=if(callAudioMuted) "Unmute microphone" else "Mute microphone")
-        muteControl.background=oval(if(callAudioMuted) GREEN else GRAY_BTN); muteControl.isSelected=callAudioMuted
-        UiIcons.set(speakerControl,"speaker",label=if(callSpeaker) "Speaker on" else "Speaker off")
-        speakerControl.background=oval(if(callSpeaker) GREEN else GRAY_BTN); speakerControl.isSelected=callSpeaker
+        val muted=VoiceCall.muted;val speaker=VoiceCall.speaker
+        UiIcons.set(muteControl,if(muted) "muted" else "mic",label=if(muted) "Unmute microphone" else "Mute microphone")
+        muteControl.background=oval(if(muted) GREEN else GRAY_BTN); muteControl.isSelected=muted
+        UiIcons.set(speakerControl,"speaker",label=if(speaker) "Speaker on" else "Speaker off")
+        speakerControl.background=oval(if(speaker) GREEN else GRAY_BTN); speakerControl.isSelected=speaker
     }
-    private fun endCall(sendEnd:Boolean=true,outcome:String="cancelled") {
-        if(!inCall) return
-        inCall=false; netCall?.stop(sendEnd); netCall=null
-        MessageService.callEnded(this); earpiece(false)
-        uiHandler.removeCallbacks(callTick); uiHandler.removeCallbacks(callTimeout)
-        val seconds=if(connectedAt==0L) 0 else ((android.os.SystemClock.elapsedRealtime()-connectedAt)/1000).toInt()
-        if(callId>0) db.logCallEnd(callId,seconds); if(callId>0&&connectedAt==0L)db.callOutcome(callId,outcome)
-        callId=-1L; connectedAt=0L; loadHistory()
-        try { (getSystemService(AUDIO_SERVICE) as AudioManager).apply { isSpeakerphoneOn=previousSpeaker; mode=previousAudioMode } } catch (_:Exception) {}
+    /** The call screen for this chat's call; the chat stays underneath. */
+    private fun showCallScreen() {
+        if(!VoiceCall.with(peerId)) return
+        if(!callShown) {
+            callShown=true
+            if(panelOpen()) hidePanel()
+            headerBar.visibility=View.GONE; (headerBar.parent as View).setBackgroundColor(DARK); RabtaUi.systemBars(this,true)
+            voiceViews.forEach { it.stop() };replyBar.visibility=View.GONE;offlineBanner.visibility=View.GONE
+            callOverlay.visibility=View.VISIBLE; chatScroll.visibility=View.GONE; composerBar.visibility=View.GONE; searchField.visibility=View.GONE
+        }
+        syncCall()
+    }
+    /** Back to the chat; the call goes on and the green bar returns to it. */
+    private fun hideCallScreen() {
+        if(!callShown) return
+        callShown=false; earpiece(false); uiHandler.removeCallbacks(callTick)
         headerBar.visibility=View.VISIBLE; (headerBar.parent as View).setBackgroundColor(BEIGE); RabtaUi.systemBars(this,AppTheme.dark(this))
         callOverlay.visibility=View.GONE;updateStatus();if(replyTo!=null)replyBar.visibility=View.VISIBLE
         chatScroll.visibility=View.VISIBLE; composerBar.visibility=View.VISIBLE; searchField.visibility=if(searchQuery.isBlank()) View.GONE else View.VISIBLE
+        callBar.refresh()
     }
+    /** Shows [VoiceCall]'s state: its status or time, mute and speaker; the call ending closes the call screen. */
+    private fun syncCall() {
+        uiHandler.removeCallbacks(callTick)
+        if(callShown && !VoiceCall.with(peerId)) { hideCallScreen(); return }
+        if(!callShown) return
+        callStatusTv.text=if(VoiceCall.connectedAt>0 && VoiceCall.status.startsWith("Connected")) "Connected · ${duration(VoiceCall.seconds())}" else VoiceCall.status
+        updateCallControls()
+        earpiece(resumed && !VoiceCall.speaker)
+        if(resumed && VoiceCall.connectedAt>0) uiHandler.postDelayed(callTick,1000)
+    }
+    private fun endCall() { VoiceCall.end() }
 
     override fun onRequestPermissionsResult(r:Int, p:Array<out String>, g:IntArray) {
         val ok = g.isNotEmpty()&&g[0]==PackageManager.PERMISSION_GRANTED
@@ -1067,7 +1069,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
 
     // ── RabtaEvents ──
     override fun onConnected() { updateStatus(); loadPresence(); if(openPeer==peerId && !isGroup) WsClient.sendRead(peerId,"all") }
-    override fun onDisconnected() { updateStatus(); if(inCall) { endCall(false); toast("Call disconnected") } }
+    override fun onDisconnected() { updateStatus() }
     override fun onHistoryChanged(convId:String) { if(convId==peerId) loadHistory() }
     override fun onMessage(fromId:String,fromName:String,msgId:String,body:String,t:Long,msgType:String,groupId:String) {
         val match = if(isGroup) groupId==peerId else fromId==peerId; if (!match) return
@@ -1080,17 +1082,6 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     override fun onTyping(fromId:String) {
         if (fromId!=peerId||isGroup) return
         uiHandler.post { typingTv.visibility=View.VISIBLE; statusTv.visibility=View.GONE; uiHandler.removeCallbacks(typingHide); uiHandler.postDelayed(typingHide,3000) }
-    }
-    override fun onCallAudio(fromId:String,data:String,callId:String) {
-        if (fromId!=peerId || callId!=netCall?.id) return
-        // Audio alone must never auto-answer an incoming call.
-        if(inCall) netCall?.onAudio(data)
-    }
-    override fun onCallEnd(fromId:String,callId:String) { if(fromId==peerId && callId==netCall?.id) uiHandler.post{endCall(false,"ended before answer");toast("Call khatam")} }
-    override fun onCallState(fromId:String,callId:String,state:String) {
-        if(fromId!=peerId || callId!=netCall?.id) return
-        if(state=="busy") { endCall(false,"busy"); toast("Busy"); return }
-        netCall?.state(state)
     }
     override fun onVideoEnd(callId:String) {}
 }
