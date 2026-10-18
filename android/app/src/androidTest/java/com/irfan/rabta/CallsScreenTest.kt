@@ -9,7 +9,6 @@ import android.database.DatabaseErrorHandler
 import android.database.sqlite.SQLiteDatabase
 import android.view.View
 import android.view.ViewGroup
-import android.view.WindowManager
 import android.view.inspector.WindowInspector
 import android.widget.EditText
 import android.widget.TextView
@@ -175,10 +174,10 @@ class CallsScreenTest {
         }
     }
 
-    /** The reported bug: a call went to reconnecting once the phone locked mid-call. */
-    @Test fun voiceCallStaysAwakeAndKeepsItsMicrophoneWhenTheScreenLocks()=fixture { _ ->
+    /** The reported bug: a call went to reconnecting once the phone locked mid-call. The screen may go off; the call goes on. */
+    @Test fun voiceCallGoesOnWhileTheScreenIsOff()=fixture { _ ->
         inst.uiAutomation.executeShellCommand("pm grant ${ctx.packageName} android.permission.RECORD_AUDIO").use { android.os.ParcelFileDescriptor.AutoCloseInputStream(it).readBytes() }
-        val server=MockWebServer();val ended=CountDownLatch(1)
+        val server=MockWebServer();val ended=CountDownLatch(1);val frames=java.util.concurrent.atomic.AtomicInteger()
         server.dispatcher=object:Dispatcher() {
             override fun dispatch(request:RecordedRequest):MockResponse {
                 if(request.path!="/ws")return MockResponse().setResponseCode(404)
@@ -186,34 +185,50 @@ class CallsScreenTest {
                     override fun onOpen(ws:WebSocket,response:Response) { ws.send("{\"type\":\"ready\",\"id\":\"CA1100000001\",\"protocol\":2}") }
                     override fun onMessage(ws:WebSocket,raw:String) {
                         val o=JSONObject(raw);val id=o.optString("callId")
-                        // The other phone answers and talks; its first audio frame connects the call.
-                        if(o.optString("type")=="call_init") {
-                            ws.send(JSONObject().put("type","call_state").put("from","CA1100000002").put("callId",id).put("state","accepted").toString())
-                            ws.send(JSONObject().put("type","call_audio").put("from","CA1100000002").put("callId",id).put("data",android.util.Base64.encodeToString(ByteArray(640),android.util.Base64.NO_WRAP)).toString())
+                        when(o.optString("type")) {
+                            // The other phone answers and talks; its first audio frame connects the call.
+                            "call_init" -> {
+                                ws.send(JSONObject().put("type","call_state").put("from","CA1100000002").put("callId",id).put("state","accepted").toString())
+                                ws.send(JSONObject().put("type","call_audio").put("from","CA1100000002").put("callId",id).put("data",android.util.Base64.encodeToString(ByteArray(640),android.util.Base64.NO_WRAP)).toString())
+                            }
+                            "call_audio" -> frames.incrementAndGet()
+                            "call_end" -> ended.countDown()
                         }
-                        if(o.optString("type")=="call_end") ended.countDown()
                     }
                 })
             }
         }
         server.start()
         ui { Session.serverUrl=server.url("/").toString().trimEnd('/');WsClient.connect(Session) }
+        val power=ctx.getSystemService(android.os.PowerManager::class.java)
+        fun connectedShown(c:ChatActivity)=all(c.window.decorView).filterIsInstance<TextView>().any { it.isShown&&it.text.startsWith("Connected") }
         var chat:ChatActivity?=null
         try {
             waitUi { WsClient.connected&&WsClient.protocol>=2 }
             chat=inst.startActivitySync(Intent(ctx,ChatActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 .putExtra("peerId","CA1100000002").putExtra("peerName","Lock contact").putExtra("requestedCallKind","voice")) as ChatActivity
             val c=chat!!
-            waitUi { all(c.window.decorView).filterIsInstance<TextView>().any { it.isShown&&it.text.startsWith("Connected") } }
-            ui { assertTrue("The screen stays on during the call",c.window.attributes.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON!=0) }
+            waitUi { connectedShown(c) }
             waitUi { serviceNotice()=="Ongoing voice call" }
-            assertTrue("The phone is kept awake for the call",shell("dumpsys power").contains("Rabta:call"))
-            if(android.os.Build.VERSION.SDK_INT>=30) Regex("(?:types|foregroundServiceType)=(?:0x)?([0-9a-fA-F]+)").find(shell("dumpsys activity services ${ctx.packageName}"))?.let {
-                assertTrue("Microphone kept while locked (foreground type ${it.groupValues[1]})",it.groupValues[1].toLong(16) and 0x80L!=0L)
+            // Emulators without audio input record nothing even on screen; then only the call's state is checked.
+            val onScreen=frames.get();Thread.sleep(2000);val talking=frames.get()-onScreen>=25
+            try {
+                shell("input keyevent KEYCODE_SLEEP")
+                waitUi { !power.isInteractive }
+                val before=frames.get();Thread.sleep(3000)
+                if(talking) assertTrue("Microphone audio keeps going out with the screen off (${frames.get()-before} frames in 3 s)",frames.get()-before>=25)
+                assertEquals("The call was not ended",1L,ended.count)
+                assertEquals("Ongoing voice call",serviceNotice())
+                assertTrue("The phone is kept awake for the call",shell("dumpsys power").contains("Rabta:call"))
+                if(android.os.Build.VERSION.SDK_INT>=30) Regex("(?:types|foregroundServiceType)=(?:0x)?([0-9a-fA-F]+)").find(shell("dumpsys activity services ${ctx.packageName}"))?.let {
+                    assertTrue("Microphone kept while the screen is off (foreground type ${it.groupValues[1]})",it.groupValues[1].toLong(16) and 0x80L!=0L)
+                }
+            } finally {
+                shell("input keyevent KEYCODE_WAKEUP");shell("wm dismiss-keyguard");shell("input keyevent 82")
             }
+            waitUi { power.isInteractive&&connectedShown(c) }
             ui { all(c.window.decorView).first { it.contentDescription=="End" && it.isClickable }.performClick() }
             assertTrue("The other phone is told the call ended",ended.await(5,TimeUnit.SECONDS))
-            ui { assertEquals("The screen may sleep again",0,c.window.attributes.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
             waitUi { serviceNotice()=="Rabta" }
             assertFalse("The call no longer keeps the phone awake",shell("dumpsys power").contains("Rabta:call"))
         } finally {
