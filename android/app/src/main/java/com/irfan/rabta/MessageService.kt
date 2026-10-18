@@ -76,6 +76,8 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
 
     override fun onDestroy() {
         cancelRinging();callHandler.removeCallbacks(repair);releaseCallWake()
+        // Stopped on purpose (signing out): the swipe-away restart below must not undo it.
+        runCatching { getSystemService(android.app.AlarmManager::class.java).cancel(restartAlarm()) }
         getSystemService(NotificationManager::class.java).cancel(RADAR_NOTIF)
         if(networkRegistered)runCatching {(getSystemService(CONNECTIVITY_SERVICE) as android.net.ConnectivityManager).unregisterNetworkCallback(network)}
         RabtaEvents.remove(this)
@@ -94,11 +96,14 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
         return START_STICKY
     }
 
-    /** Some phones end Rabta when it is swiped away from recent apps; ask Android to start it again shortly after. */
+    private fun restartAlarm() = PendingIntent.getBroadcast(this, 0, Intent(this, StartReceiver::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+    /**
+     * Some phones end Rabta's process when it is swiped away from recent apps; ask Android to start it again shortly
+     * after. If the service is still running then, the alarm does nothing; if it is stopped normally, onDestroy cancels it.
+     */
     override fun onTaskRemoved(rootIntent: Intent?) {
         if (Session.loggedIn) runCatching {
-            val restart = PendingIntent.getBroadcast(this, 0, Intent(this, StartReceiver::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-            getSystemService(android.app.AlarmManager::class.java).set(android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + 5000, restart)
+            getSystemService(android.app.AlarmManager::class.java).set(android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + 5000, restartAlarm())
         }
         super.onTaskRemoved(rootIntent)
     }

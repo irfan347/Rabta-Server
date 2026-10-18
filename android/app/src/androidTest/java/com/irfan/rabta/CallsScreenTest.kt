@@ -200,8 +200,8 @@ class CallsScreenTest {
                 })
             }
         }
-        server.start()
-        ui { Session.serverUrl=server.url("/").toString().trimEnd('/');WsClient.connect(Session) }
+        server.start();val url=server.url("/").toString().trimEnd('/')
+        ui { Session.serverUrl=url;WsClient.connect(Session) }
         val power=ctx.getSystemService(android.os.PowerManager::class.java)
         fun connectedShown(c:ChatActivity)=all(c.window.decorView).filterIsInstance<TextView>().any { it.isShown&&it.text.startsWith("Connected") }
         var chat:ChatActivity?=null
