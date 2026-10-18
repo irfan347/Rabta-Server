@@ -15,6 +15,8 @@ object Session {
     var token: String get() = prefs().getString("token", "") ?: ""; set(v) { prefs().edit().putString("token", v).apply() }
     var serverUrl: String get() = prefs().getString("server", "") ?: ""; set(v) { prefs().edit().putString("server", v.trim().trimEnd('/')).apply() }
     var profilePic: String get() = prefs().getString("profile_pic", "") ?: ""; set(v) { prefs().edit().putString("profile_pic", v).apply() }
+    /** Whether the server has [profilePic], so contacts see it. */
+    var profilePicShared: Boolean get() = prefs().getBoolean("profile_pic_shared", false); set(v) { prefs().edit().putBoolean("profile_pic_shared", v).apply() }
 
     val loggedIn get() = id.isNotEmpty() && token.isNotEmpty() && serverUrl.isNotEmpty()
 

@@ -177,10 +177,23 @@ object WsClient {
     }
     fun uploadPhoto(srv: String, tok: String, b64: String, cb: (Boolean,String) -> Unit) =
         post(srv, "/api/me/photo", JSONObject().put("photo", b64).toString(), tok) { ok, msg, _ -> cb(ok, msg) }
-    fun fetchPhoto(srv: String, tok: String, userId: String, cb: (String?) -> Unit) {
-        http.newCall(Request.Builder().url(srv.trimEnd('/')+"/api/user/photo/$userId").header("Authorization","Bearer $tok").build()).enqueue(object:Callback{
+    /** A profile photo reply: [photo] is "" when the person has none; [unchanged] means it still matches the tag sent. */
+    class PhotoAnswer(val photo: String, val tag: String, val unchanged: Boolean)
+    /** [cb] gets null when the server could not answer. [tag] from an earlier answer turns an unchanged photo into a tiny reply. */
+    fun fetchPhoto(srv: String, tok: String, userId: String, tag: String = "", cb: (PhotoAnswer?) -> Unit) {
+        val rq = Request.Builder().url(srv.trimEnd('/')+"/api/user/photo/$userId").header("Authorization","Bearer $tok")
+        if (tag.isNotEmpty()) rq.header("If-None-Match", tag)
+        http.newCall(rq.build()).enqueue(object:Callback{
             override fun onFailure(c: Call, e: IOException) { handler.post { cb(null) } }
-            override fun onResponse(c: Call, r: Response) { val b=r.body?.string()?: ""; val o=try{JSONObject(b)}catch(_:Exception){JSONObject()}; handler.post { cb(o.optString("photo","").ifEmpty { null }) } }
+            override fun onResponse(c: Call, r: Response) {
+                val answer = r.use { when {
+                    r.code == 304 -> PhotoAnswer("", tag, true)
+                    r.code == 404 -> PhotoAnswer("", "", false)
+                    r.isSuccessful -> try { PhotoAnswer(JSONObject(r.body?.string() ?: "").optString("photo", ""), r.header("ETag").orEmpty(), false) } catch (_: Exception) { null }
+                    else -> null
+                } }
+                handler.post { cb(answer) }
+            }
         })
     }
     fun createGroup(srv: String, tok: String, name: String, members: List<String>, cb: (Boolean,String,JSONObject?)->Unit) =
