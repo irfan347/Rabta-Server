@@ -89,6 +89,19 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
     override fun onBackPressed() { hangUp() }
     override fun onDestroy() { RabtaEvents.remove(this); cleanup(); super.onDestroy() }
 
+    private var callActive = false
+    private var cameraPaused = false
+    // Android takes the camera from a call screen that is locked or in the background: pause the video there and
+    // resume it on return, while the voice keeps going through MessageService's microphone mode.
+    override fun onStop() {
+        super.onStop()
+        if (capturer != null && !isFinishing) try { capturer?.stopCapture(); cameraPaused = true } catch (_: Exception) {}
+    }
+    override fun onStart() {
+        super.onStart()
+        if (cameraPaused) { cameraPaused = false; try { capturer?.startCapture(640, 480, 24) } catch (_: Exception) {} }
+    }
+
     private fun hasPerms() = checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED &&
         checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
@@ -146,6 +159,7 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
         previousAudioMode=am.mode; previousSpeaker=am.isSpeakerphoneOn
         am.mode=android.media.AudioManager.MODE_IN_COMMUNICATION; am.isSpeakerphoneOn=true
         RabtaEvents.add(this)
+        MessageService.callStarted(this, peerName, true); callActive = true
         initWebRtc()
         statusTv.text="Preparing connection…"
         Thread {
@@ -291,6 +305,7 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
     }
 
     private fun cleanup() {
+        if (callActive) { callActive = false; MessageService.callEnded(this) }
         if(historyId>0){val db=Db.get(this);if(connectedAt>0)db.logCallEnd(historyId,((android.os.SystemClock.elapsedRealtime()-connectedAt)/1000).toInt())else db.callOutcome(historyId,outcome+" · video");historyId=-1L}
         ringback.stop(); handler.removeCallbacks(ringTimeout)
         handler.removeCallbacks(durationTick)

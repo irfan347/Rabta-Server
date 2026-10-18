@@ -95,6 +95,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         if(::myAvatarView.isInitialized) myAvatarView.foreground=if(WsClient.connected) onlineDot() else null
     }
     private lateinit var connectionStrip: LinearLayout
+    private lateinit var backgroundStrip: LinearLayout
     private lateinit var searchToggle: TextView
     private lateinit var chatsBadge: TextView
     private var searchOpen=false
@@ -130,6 +131,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         when(activeTab) { 1->nearbyPanel.resume();3->loadCalls();else->loadConvs() }
         if(activeTab==0) loadMoments(force=true)
         AppUpdate.check(this)
+        backgroundStrip.visibility=if(BackgroundRun.shouldOffer(this)) View.VISIBLE else View.GONE;BackgroundRun.followUp(this)
     }
     override fun onPause() {
         resumed=false;if(::nearbyPanel.isInitialized)nearbyPanel.pause()
@@ -189,6 +191,20 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         connectionStrip.addView(connectionTv,LinearLayout.LayoutParams(0,-2,1f))
         root.addView(connectionStrip,LinearLayout.LayoutParams(-1,-2).apply { setMargins(dp(16),0,dp(16),dp(6)) })
         updateConnection()
+        // Without a push service, Android's battery rules decide whether messages still arrive once Rabta is closed.
+        backgroundStrip=LinearLayout(this).apply {
+            gravity=Gravity.CENTER_VERTICAL;setPadding(dp(14),dp(2),dp(2),dp(2))
+            background=RabtaUi.shape(this@ConversationListActivity,AppTheme.raised(this@ConversationListActivity),12)
+        }
+        backgroundStrip.addView(RabtaUi.text(this,"Messages may stop when Rabta is closed",12f,color=SUB).apply {maxLines=2},LinearLayout.LayoutParams(0,-2,1f))
+        backgroundStrip.addView(RabtaUi.text(this,"Allow",13f,true,AppTheme.accent(this)).apply {
+            gravity=Gravity.CENTER;minWidth=dp(56);minHeight=dp(44);setPadding(dp(10),0,dp(10),0);isFocusable=true
+            background=RabtaUi.ripple(this@ConversationListActivity,Color.TRANSPARENT,12);contentDescription="Allow Rabta to run in the background"
+            setOnClickListener { BackgroundRun.allow(this@ConversationListActivity) }
+        })
+        backgroundStrip.addView(RabtaUi.iconButton(this,"close","Dismiss") { BackgroundRun.dismiss(this);backgroundStrip.visibility=View.GONE })
+        backgroundStrip.visibility=if(BackgroundRun.shouldOffer(this)) View.VISIBLE else View.GONE
+        root.addView(backgroundStrip,LinearLayout.LayoutParams(-1,-2).apply { setMargins(dp(16),0,dp(16),dp(6)) })
         // Spaces has no NOVA reference screen, so it keeps a compact title; the other tabs open straight into content.
         pageTitle=RabtaUi.text(this,"Spaces",22f,true).apply {
             setPadding(dp(16),dp(6),dp(16),dp(8))

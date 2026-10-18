@@ -1,5 +1,7 @@
 package com.irfan.rabta
 
+import android.app.Notification
+import android.app.NotificationManager
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
@@ -7,6 +9,7 @@ import android.database.DatabaseErrorHandler
 import android.database.sqlite.SQLiteDatabase
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.view.inspector.WindowInspector
 import android.widget.EditText
 import android.widget.TextView
@@ -73,6 +76,9 @@ class CallsScreenTest {
     private fun nav(a:ConversationListActivity,label:String)=all(a.window.decorView).first { it is ViewGroup && it.contentDescription==label }
     private fun text(a:ConversationListActivity,value:String)=all(a.window.decorView).filterIsInstance<TextView>().any { it.isShown&&it.text.toString()==value }
     private fun search(a:ConversationListActivity)=all(a.window.decorView).filterIsInstance<EditText>().first { it.contentDescription=="Search calls" }
+    private fun shell(command:String)=android.os.ParcelFileDescriptor.AutoCloseInputStream(inst.uiAutomation.executeShellCommand(command)).use { it.readBytes().toString(Charsets.UTF_8) }
+    /** Title of MessageService's own notification, which turns into the ongoing-call notice during calls. */
+    private fun serviceNotice()=ctx.getSystemService(NotificationManager::class.java).activeNotifications.firstOrNull { it.id==1 }?.notification?.extras?.getString(Notification.EXTRA_TITLE)
 
     @Test fun emptyHistoryHidesSearchAndUsesRealCallPicker()=fixture { db ->
         db.upsertConversation("CA1100000002","Available contact","",1,false)
@@ -166,6 +172,78 @@ class CallsScreenTest {
         } finally {
             ui { chat?.finish();a.finish();WsClient.disconnect();MessageService.stop(ctx) }
             inst.removeMonitor(monitor);server.shutdown()
+        }
+    }
+
+    /** The reported bug: a call went to reconnecting once the phone locked mid-call. */
+    @Test fun voiceCallStaysAwakeAndKeepsItsMicrophoneWhenTheScreenLocks()=fixture { _ ->
+        inst.uiAutomation.executeShellCommand("pm grant ${ctx.packageName} android.permission.RECORD_AUDIO").use { android.os.ParcelFileDescriptor.AutoCloseInputStream(it).readBytes() }
+        val server=MockWebServer();val ended=CountDownLatch(1)
+        server.dispatcher=object:Dispatcher() {
+            override fun dispatch(request:RecordedRequest):MockResponse {
+                if(request.path!="/ws")return MockResponse().setResponseCode(404)
+                return MockResponse().withWebSocketUpgrade(object:WebSocketListener() {
+                    override fun onOpen(ws:WebSocket,response:Response) { ws.send("{\"type\":\"ready\",\"id\":\"CA1100000001\",\"protocol\":2}") }
+                    override fun onMessage(ws:WebSocket,raw:String) {
+                        val o=JSONObject(raw);val id=o.optString("callId")
+                        // The other phone answers and talks; its first audio frame connects the call.
+                        if(o.optString("type")=="call_init") {
+                            ws.send(JSONObject().put("type","call_state").put("from","CA1100000002").put("callId",id).put("state","accepted").toString())
+                            ws.send(JSONObject().put("type","call_audio").put("from","CA1100000002").put("callId",id).put("data",android.util.Base64.encodeToString(ByteArray(640),android.util.Base64.NO_WRAP)).toString())
+                        }
+                        if(o.optString("type")=="call_end") ended.countDown()
+                    }
+                })
+            }
+        }
+        server.start()
+        ui { Session.serverUrl=server.url("/").toString().trimEnd('/');WsClient.connect(Session) }
+        var chat:ChatActivity?=null
+        try {
+            waitUi { WsClient.connected&&WsClient.protocol>=2 }
+            chat=inst.startActivitySync(Intent(ctx,ChatActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra("peerId","CA1100000002").putExtra("peerName","Lock contact").putExtra("requestedCallKind","voice")) as ChatActivity
+            val c=chat!!
+            waitUi { all(c.window.decorView).filterIsInstance<TextView>().any { it.isShown&&it.text.startsWith("Connected") } }
+            ui { assertTrue("The screen stays on during the call",c.window.attributes.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON!=0) }
+            waitUi { serviceNotice()=="Ongoing voice call" }
+            assertTrue("The phone is kept awake for the call",shell("dumpsys power").contains("Rabta:call"))
+            if(android.os.Build.VERSION.SDK_INT>=30) Regex("(?:types|foregroundServiceType)=(?:0x)?([0-9a-fA-F]+)").find(shell("dumpsys activity services ${ctx.packageName}"))?.let {
+                assertTrue("Microphone kept while locked (foreground type ${it.groupValues[1]})",it.groupValues[1].toLong(16) and 0x80L!=0L)
+            }
+            ui { all(c.window.decorView).first { it.contentDescription=="End" && it.isClickable }.performClick() }
+            assertTrue("The other phone is told the call ended",ended.await(5,TimeUnit.SECONDS))
+            ui { assertEquals("The screen may sleep again",0,c.window.attributes.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+            waitUi { serviceNotice()=="Rabta" }
+            assertFalse("The call no longer keeps the phone awake",shell("dumpsys power").contains("Rabta:call"))
+        } finally {
+            ui { chat?.finish();WsClient.disconnect();MessageService.stop(ctx) }
+            server.shutdown()
+        }
+    }
+
+    @Test fun messageServiceStartsAgainAfterRestartOrUpdate() {
+        for(action in listOf(Intent.ACTION_BOOT_COMPLETED,Intent.ACTION_MY_PACKAGE_REPLACED)) {
+            val receivers=ctx.packageManager.queryBroadcastReceivers(Intent(action).setPackage(ctx.packageName),0)
+            assertTrue("$action starts Rabta's message service",receivers.any { it.activityInfo.name==StartReceiver::class.java.name })
+        }
+    }
+
+    @Test fun chatsOfferBackgroundRunUntilDismissed()=fixture { _ ->
+        val prefs=ctx.getSharedPreferences("background_run",0);val saved=prefs.all
+        prefs.edit().clear().commit()
+        try {
+            org.junit.Assume.assumeFalse("This emulator already lets Rabta run in the background",BackgroundRun.allowed(ctx))
+            val a=launch()
+            try {
+                waitUi { text(a,"Messages may stop when Rabta is closed") }
+                ui { assertTrue(all(a.window.decorView).any { it.isShown&&it.contentDescription=="Allow Rabta to run in the background" }) }
+                ui { all(a.window.decorView).first { it.isShown&&it.contentDescription=="Dismiss" }.performClick() }
+                waitUi { !text(a,"Messages may stop when Rabta is closed") }
+                assertFalse("Dismissed for good; Settings keeps the controls",BackgroundRun.shouldOffer(ctx))
+            } finally { ui { a.finish() } }
+        } finally {
+            prefs.edit().clear().apply { saved.forEach { (k,v) -> if(v is Boolean) putBoolean(k,v) } }.commit()
         }
     }
 }

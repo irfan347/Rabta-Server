@@ -8,8 +8,11 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
+import android.os.SystemClock
 
 /** Background service: keeps WebSocket alive and shows notifications. */
 class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
@@ -34,6 +37,18 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
         fun stop(ctx: Context) {
             try { ctx.stopService(Intent(ctx, MessageService::class.java)) } catch (_: Exception) {}
         }
+        /**
+         * From an open call screen: Android keeps a call's microphone working with the screen locked only for a
+         * foreground service of the microphone type that was given that type while the app was on screen.
+         */
+        fun callStarted(ctx: Context, peerName: String, video: Boolean) {
+            try { ctx.startService(Intent(ctx, MessageService::class.java).setAction(CALL_STARTED).putExtra("peerName", peerName).putExtra("video", video)) } catch (_: Exception) {}
+        }
+        fun callEnded(ctx: Context) {
+            try { ctx.startService(Intent(ctx, MessageService::class.java).setAction(CALL_ENDED)) } catch (_: Exception) {}
+        }
+        private const val CALL_STARTED = "call_started"
+        private const val CALL_ENDED = "call_ended"
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -46,12 +61,13 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
     private val repair=object:Runnable { override fun run(){startMeshIfAllowed();callHandler.postDelayed(this,15000)} }
     private val network=object:android.net.ConnectivityManager.NetworkCallback(){override fun onAvailable(n:android.net.Network){callHandler.post {if(Session.loggedIn&&!WsClient.connected)WsClient.retry()}}}
     private var networkRegistered=false
+    private var callWake: PowerManager.WakeLock? = null
 
     override fun onCreate() {
         super.onCreate()
         Session.init(this)          // service may be restarted by Android without the app open
         createChannels()
-        startForeground(1, persistentNotification())
+        showConnection()
         RabtaEvents.add(this)
         if (Session.loggedIn) WsClient.connect(Session)
         startMeshIfAllowed();callHandler.postDelayed(repair,15000)
@@ -59,7 +75,7 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
     }
 
     override fun onDestroy() {
-        cancelRinging();callHandler.removeCallbacks(repair)
+        cancelRinging();callHandler.removeCallbacks(repair);releaseCallWake()
         getSystemService(NotificationManager::class.java).cancel(RADAR_NOTIF)
         if(networkRegistered)runCatching {(getSystemService(CONNECTIVITY_SERVICE) as android.net.ConnectivityManager).unregisterNetworkCallback(network)}
         RabtaEvents.remove(this)
@@ -68,11 +84,52 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            CALL_STARTED -> { inCall(intent.getStringExtra("peerName").orEmpty(), intent.getBooleanExtra("video", false)); return START_STICKY }
+            CALL_ENDED -> { releaseCallWake(); if (!showConnection()) runCatching { getSystemService(NotificationManager::class.java).notify(1, persistentNotification()) }; return START_STICKY }
+        }
         if (Session.loggedIn && !WsClient.connected) WsClient.connect(Session)
         if(intent?.action=="retry_nearby"){router?.pauseTransport();MeshBridge.status="Restarting Nearby…"}
         startMeshIfAllowed()        // e.g. after the user granted Bluetooth permission
         return START_STICKY
     }
+
+    /** Some phones end Rabta when it is swiped away from recent apps; ask Android to start it again shortly after. */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        if (Session.loggedIn) runCatching {
+            val restart = PendingIntent.getBroadcast(this, 0, Intent(this, StartReceiver::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            getSystemService(android.app.AlarmManager::class.java).set(android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + 5000, restart)
+        }
+        super.onTaskRemoved(rootIntent)
+    }
+
+    /**
+     * The usual connection notice. Android may refuse it when it restarts this service in the background; the
+     * service then still runs for a while and fetches waiting messages instead of crashing.
+     */
+    private fun showConnection(): Boolean = try {
+        if (Build.VERSION.SDK_INT >= 29) startForeground(1, persistentNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+        else startForeground(1, persistentNotification())
+        true
+    } catch (_: Exception) { false }
+
+    // ---------- calls ----------
+    private fun inCall(peerName: String, video: Boolean) {
+        val back = packageManager.getLaunchIntentForPackage(packageName)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        val notice = Notification.Builder(this, SERVICE_CHANNEL).setSmallIcon(R.drawable.ic_stat_rabta)
+            .setContentTitle(if (video) "Ongoing video call" else "Ongoing voice call")
+            .setContentText("${peerName.ifBlank { "Rabta contact" }.take(60)} · Tap to return to the call")
+            .setCategory(Notification.CATEGORY_CALL).setOngoing(true)
+            .apply { if (back != null) setContentIntent(PendingIntent.getActivity(this@MessageService, 1, back, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)) }
+            .build()
+        try {
+            if (Build.VERSION.SDK_INT >= 30) startForeground(1, notice, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+            else startForeground(1, notice)
+        } catch (_: Exception) { runCatching { getSystemService(NotificationManager::class.java).notify(1, notice) } }
+        // Keeps the phone from sleeping between audio frames once the screen is off.
+        if (callWake == null) callWake = getSystemService(PowerManager::class.java)?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Rabta:call")?.apply { setReferenceCounted(false); acquire(4 * 60 * 60_000L) }
+    }
+    private fun releaseCallWake() { callWake?.takeIf { it.isHeld }?.release(); callWake = null }
 
     // ---------- offline mesh ----------
     private fun startMeshIfAllowed() {
