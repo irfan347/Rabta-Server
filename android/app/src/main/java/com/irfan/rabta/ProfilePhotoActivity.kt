@@ -62,7 +62,7 @@ object ProfilePhoto {
     fun save(a: Activity, bitmap: Bitmap, done: () -> Unit) {
         val owner = Session.id
         Thread {
-            val square = Bitmap.createScaledBitmap(bitmap, SIZE, SIZE * bitmap.height / maxOf(1, bitmap.width), true)
+            val square = Bitmap.createScaledBitmap(bitmap, SIZE, maxOf(1, SIZE * bitmap.height / maxOf(1, bitmap.width)), true)
             val out = ByteArrayOutputStream(); var quality = 88
             do { out.reset(); square.compress(Bitmap.CompressFormat.JPEG, quality, out); quality -= 8 } while (out.size() > 200 * 1024 && quality > 40)
             val encoded = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
@@ -139,7 +139,9 @@ class ProfilePhotoActivity : ThemedActivity() {
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             background = RabtaUi.shape(this@ProfilePhotoActivity, 0x33FFFFFF, 999)
         }, LinearLayout.LayoutParams(dp(52), dp(52)))
-        addView(RabtaUi.text(this@ProfilePhotoActivity, label, 13f, true, Color.WHITE).apply { setPadding(0, dp(6), 0, 0); importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO })
+        addView(RabtaUi.text(this@ProfilePhotoActivity, label, 13f, true, Color.WHITE).apply {
+            gravity = Gravity.CENTER; maxLines = 1; setPadding(0, dp(6), 0, 0); importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        })
     }
 
     private fun show() {
