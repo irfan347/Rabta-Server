@@ -76,6 +76,8 @@ class CallsScreenTest {
     private fun text(a:ConversationListActivity,value:String)=all(a.window.decorView).filterIsInstance<TextView>().any { it.isShown&&it.text.toString()==value }
     private fun search(a:ConversationListActivity)=all(a.window.decorView).filterIsInstance<EditText>().first { it.contentDescription=="Search calls" }
     private fun shell(command:String)=android.os.ParcelFileDescriptor.AutoCloseInputStream(inst.uiAutomation.executeShellCommand(command)).use { it.readBytes().toString(Charsets.UTF_8) }
+    /** Wake locks held right now; newer Android also logs released ones further down the same dump. */
+    private fun heldWakeLocks()=shell("dumpsys power").let { dump -> val start=dump.indexOf("Wake Locks: size=");if(start<0)"" else dump.substring(start,dump.indexOf("\n\n",start).takeIf { it>0 } ?: dump.length) }
     /** Title of MessageService's own notification, which turns into the ongoing-call notice during calls. */
     private fun serviceNotice()=ctx.getSystemService(NotificationManager::class.java).activeNotifications.firstOrNull { it.id==1 }?.notification?.extras?.getString(Notification.EXTRA_TITLE)
 
@@ -219,7 +221,7 @@ class CallsScreenTest {
                 if(talking) assertTrue("Microphone audio keeps going out with the screen off (${frames.get()-before} frames in 3 s)",frames.get()-before>=25)
                 assertEquals("The call was not ended",1L,ended.count)
                 assertEquals("Ongoing voice call",serviceNotice())
-                assertTrue("The phone is kept awake for the call",shell("dumpsys power").contains("Rabta:call"))
+                assertTrue("The phone is kept awake for the call",heldWakeLocks().contains("Rabta:call"))
                 if(android.os.Build.VERSION.SDK_INT>=30) Regex("(?:types|foregroundServiceType)=(?:0x)?([0-9a-fA-F]+)").find(shell("dumpsys activity services ${ctx.packageName}"))?.let {
                     assertTrue("Microphone kept while the screen is off (foreground type ${it.groupValues[1]})",it.groupValues[1].toLong(16) and 0x80L!=0L)
                 }
@@ -230,7 +232,7 @@ class CallsScreenTest {
             ui { all(c.window.decorView).first { it.contentDescription=="End" && it.isClickable }.performClick() }
             assertTrue("The other phone is told the call ended",ended.await(5,TimeUnit.SECONDS))
             waitUi { serviceNotice()=="Rabta" }
-            assertFalse("The call no longer keeps the phone awake",shell("dumpsys power").contains("Rabta:call"))
+            assertFalse("The call no longer keeps the phone awake",heldWakeLocks().contains("Rabta:call"))
         } finally {
             ui { chat?.finish();WsClient.disconnect();MessageService.stop(ctx) }
             server.shutdown()
