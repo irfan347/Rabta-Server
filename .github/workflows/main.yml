@@ -163,14 +163,19 @@ jobs:
         env:
           KEYSTORE_B64: ${{ secrets.RABTA_RELEASE_KEYSTORE_B64 }}
           KEYSTORE_PASSWORD: ${{ secrets.RABTA_RELEASE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RABTA_RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RABTA_RELEASE_KEY_PASSWORD }}
         run: |
           if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
             echo "No release signing secrets: the public APK is not built or published."
             exit 0
           fi
-          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/rabta-release.jks"
+          # Pasted Base64 may carry spaces or line breaks.
+          printf '%s' "$KEYSTORE_B64" | tr -d ' \r\n' | base64 -d > "$RUNNER_TEMP/rabta-release.jks"
           echo "RABTA_RELEASE_KEYSTORE=$RUNNER_TEMP/rabta-release.jks" >> "$GITHUB_ENV"
           echo "RABTA_RELEASE_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "RABTA_RELEASE_KEY_ALIAS=${KEY_ALIAS:-rabta}" >> "$GITHUB_ENV"
+          if [ -n "$KEY_PASSWORD" ]; then echo "RABTA_RELEASE_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"; fi
           echo "Release signing key restored."
       - name: Build and test APK
         env:

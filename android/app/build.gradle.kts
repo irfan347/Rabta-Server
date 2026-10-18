@@ -31,8 +31,8 @@ android {
         if (releaseKeystore != null) create("rabtaRelease") {
             storeFile = releaseKeystore
             storePassword = System.getenv("RABTA_RELEASE_KEYSTORE_PASSWORD")
-            keyAlias = System.getenv("RABTA_RELEASE_KEY_ALIAS") ?: "rabta"
-            keyPassword = System.getenv("RABTA_RELEASE_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("RABTA_RELEASE_KEY_ALIAS")?.takeIf { it.isNotBlank() } ?: "rabta"
+            keyPassword = System.getenv("RABTA_RELEASE_KEY_PASSWORD")?.takeIf { it.isNotBlank() } ?: System.getenv("RABTA_RELEASE_KEYSTORE_PASSWORD")
         }
     }
     buildTypes {
