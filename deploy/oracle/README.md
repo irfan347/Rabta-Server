@@ -40,9 +40,10 @@ ports 80 and 443 in the VM's firewall. The repository must still be public for t
 ## 4. Move the data (about 10 minutes offline)
 
 1. Render → the Rabta-Server service → Settings → **Suspend**, so nothing new arrives there.
-2. On the VM: `sudo bash /opt/rabta/deploy/oracle/migrate-db.sh`. Paste the Render database's **External Database
-   URL** (Render → the PostgreSQL database → Connections). It is not shown or saved. The script refuses to write over
-   data, copies every table and compares each table's row count with Render's.
+2. On the VM: `sudo bash /opt/rabta/deploy/oracle/migrate-db.sh`. Paste the `DATABASE_URL` from Render's
+   Environment (Rabta's database is on Neon; the script switches to Neon's direct connection itself). It is not shown
+   or saved. The script refuses to write over data, copies every table and compares each table's row count with the
+   old database. Neon keeps its copy untouched.
 3. `sudo nano /etc/rabta.env`: paste `TOKEN_SECRET` exactly as Render has it, plus `ADMIN_KEY`, `TURN_URL` and
    `TURN_SECRET` if Render has them. Save, then `sudo systemctl start rabta`.
 4. Open `https://api.your-domain.com/health`. It should show `"db":true` and the number of accounts.

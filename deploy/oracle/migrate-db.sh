@@ -4,9 +4,9 @@
 #
 #   sudo bash /opt/rabta/deploy/oracle/migrate-db.sh
 #
-# It asks for the old database's URL. On Render, use the database's *External* Database URL (Connections), not the
-# internal one. The URL is not printed or stored. Suspend the old server first, so nothing new arrives there while
-# the copy is made.
+# It asks for the old database's URL: the DATABASE_URL the old server uses (Neon), or for a Render database its
+# *External* Database URL. The URL is not printed or stored. Suspend the old server first, so nothing new arrives
+# there while the copy is made.
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "Run it with sudo."; exit 1; }
 . /etc/rabta.env
@@ -14,6 +14,8 @@ set -euo pipefail
 read -r -s -p "Old database URL: " OLD; echo
 [ -n "$OLD" ] || { echo "No URL given."; exit 1; }
 case "$OLD" in *sslmode=*) ;; *\?*) OLD="$OLD&sslmode=require" ;; *) OLD="$OLD?sslmode=require" ;; esac
+# Neon: pg_dump needs the direct connection, not the pooled one ("-pooler" in the host name).
+OLD="${OLD/-pooler./.}"
 
 # Exact row count of every table in a database (0 when it has none).
 rows() {
