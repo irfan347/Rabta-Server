@@ -31,6 +31,8 @@ class EmojiPanel(
     private val sendSticker: (String) -> Unit,
     private val importSticker: () -> Unit,
     private val searchChanged: (Boolean) -> Unit,
+    /** Text fields such as a status caption take emoji only: no GIF or sticker tabs. */
+    private val emojiOnly: Boolean = false,
 ) : LinearLayout(a) {
     private sealed class Row
     private class Header(val title: String, val category: Int) : Row()
@@ -65,6 +67,7 @@ class EmojiPanel(
         listOf("emoji" to "Emoji", "gif" to "GIF", "sticker" to "Stickers").forEachIndexed { i, (name, label) ->
             tabs.addView(UiIcons.image(a, name, sub, 22, label).apply { isFocusable = true; setOnClickListener { select(i) } }, LayoutParams(0, dp(36), 1f))
         }
+        if (emojiOnly) for (i in 1 until tabs.childCount) tabs.getChildAt(i).visibility = View.GONE
         top.addView(tabs, LayoutParams(0, dp(42), 1f).apply { marginStart = dp(8); marginEnd = dp(8) })
         top.addView(icon("backspace", "Delete") { backspace() }, LayoutParams(dp(48), dp(44)))
         addView(top, LayoutParams(-1, -2))

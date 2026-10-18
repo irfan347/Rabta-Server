@@ -74,7 +74,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
     private var momentsVersion=0
     private var momentsLoadedAt=0L
     private val filterItems=mutableListOf<TextView>()
-    private var activeFilter=0 // All, Unread, Groups, Nearby
+    private var activeFilter=0 // All, Unread, Groups, Nearby, Contacts
     private var searchQuery = ""
     private var loadVersion = 0
     private val searchTask = Runnable { loadConvs() }
@@ -96,6 +96,8 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
     }
     private lateinit var connectionStrip: LinearLayout
     private lateinit var backgroundStrip: LinearLayout
+    /** Green "Tap to return to call" while a call goes on behind the chats. */
+    private lateinit var callBar: CallBar
     private lateinit var searchToggle: TextView
     private lateinit var chatsBadge: TextView
     private var searchOpen=false
@@ -111,7 +113,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         if (!Session.loggedIn) { go(AuthActivity::class.java); return }
         db = Db.get(this)
         activeTab=savedInstanceState?.getInt("destination",0)?:0
-        activeFilter=savedInstanceState?.getInt("chatFilter",0)?.coerceIn(0,3)?:0
+        activeFilter=savedInstanceState?.getInt("chatFilter",0)?.coerceIn(0,4)?:0
         queries[0]=savedInstanceState?.getString("chatQuery").orEmpty()
         queries[2]=savedInstanceState?.getString("spaceQuery").orEmpty()
         callQuery=savedInstanceState?.getString("callQuery").orEmpty()
@@ -132,9 +134,11 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         if(activeTab==0) loadMoments(force=true)
         AppUpdate.check(this)
         backgroundStrip.visibility=if(BackgroundRun.shouldOffer(this)) View.VISIBLE else View.GONE;BackgroundRun.followUp(this)
+        callBar.start()
     }
     override fun onPause() {
         resumed=false;if(::nearbyPanel.isInitialized)nearbyPanel.pause()
+        if(::callBar.isInitialized)callBar.stop()
         RabtaEvents.remove(this);uiHandler.removeCallbacks(connectionTick);uiHandler.removeCallbacks(searchTask);uiHandler.removeCallbacks(callSearchTask)
         super.onPause()
     }
@@ -164,6 +168,8 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
             orientation=LinearLayout.VERTICAL;setBackgroundColor(BG);isFocusableInTouchMode=true
         }
         setContentView(root)
+        callBar=CallBar(this)
+        root.addView(callBar.view,LinearLayout.LayoutParams(-1,-2))
         val header=LinearLayout(this).apply {
             gravity=Gravity.CENTER_VERTICAL;setPadding(dp(18),dp(8),dp(8),dp(4))
         }
@@ -258,9 +264,11 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
             orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL;contentDescription="Chat filters"
             setPadding(dp(4),0,dp(4),0);background=RabtaUi.shape(this@ConversationListActivity,AppTheme.surface(this@ConversationListActivity),24)
         }
-        listOf("All","Unread","Groups","Nearby").forEachIndexed { index,label ->
+        listOf("All","Unread","Groups","Nearby","Contacts").forEachIndexed { index,label ->
             val chip=RabtaUi.text(this,label,13f,true,SUB).apply {
                 gravity=Gravity.CENTER;minHeight=dp(48);isFocusable=true;maxLines=1
+                // Five filters share the row: on narrow phones or large text a label shrinks instead of being cut.
+                setAutoSizeTextTypeUniformWithConfiguration(9,13,1,android.util.TypedValue.COMPLEX_UNIT_SP)
                 contentDescription="$label filter";isSelected=index==activeFilter
                 setOnClickListener { activeFilter=index;updateChatFilters();loadConvs() }
             }
@@ -472,6 +480,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
     // ── Conversations ──
     private fun loadConvs() {
         if(activeTab!=0&&activeTab!=2)return
+        if(activeTab==0&&activeFilter==4) { loadContacts();return }
         val query=searchQuery;val destination=activeTab;val filter=activeFilter;val version=++loadVersion
         val target=if(destination==2) spacesList else convList
         if(target.childCount==0)target.addView(RabtaUi.loading(this,"Loading conversations…"))
@@ -521,6 +530,82 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         }.start()
     }
 
+    /** Contacts: everyone you have connected with, kept when their chat is cleared or deleted. Tap to write to them. */
+    private fun loadContacts() {
+        val query=searchQuery.trim();val version=++loadVersion
+        if(convList.childCount==0)convList.addView(RabtaUi.loading(this,"Loading contacts…"))
+        Thread {
+            val result=runCatching {
+                db.contacts().filter { it.peerId!=Session.id&&!Privacy.blocked(this,it.peerId) }
+                    .filter { query.isEmpty()||it.name.contains(query,true)||it.username.contains(query.removePrefix("@"),true)||it.peerId.contains(query,true) }
+            }
+            uiHandler.post {
+                if(isDestroyed||isFinishing||version!=loadVersion||activeTab!=0||activeFilter!=4)return@post
+                convList.removeAllViews()
+                result.onFailure {
+                    convList.addView(RabtaUi.empty(this,"chats","Could not load contacts","Your contacts are still on this phone.","Retry") { loadConvs() })
+                }.onSuccess { list ->
+                    if(query.isEmpty()) convList.addView(LinearLayout(this).apply {
+                        gravity=Gravity.CENTER_VERTICAL;setPadding(dp(4),dp(10),dp(4),dp(10));isFocusable=true;contentDescription="Add contact"
+                        background=RabtaUi.ripple(this@ConversationListActivity,Color.TRANSPARENT,16);setOnClickListener { showNewChat() }
+                        addView(TextView(this@ConversationListActivity).apply { UiIcons.set(this,"plus",AppTheme.onPrimary(this@ConversationListActivity),24,label="Add contact");gravity=Gravity.CENTER;background=pill(AppTheme.primary(this@ConversationListActivity)) },LinearLayout.LayoutParams(dp(50),dp(50)))
+                        addView(RabtaUi.text(this@ConversationListActivity,"Add contact",16f,true,TXT).apply { setPadding(dp(14),0,0,0);importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO })
+                    })
+                    if(list.isEmpty()) convList.addView(if(query.isNotBlank()) RabtaUi.empty(this,"search","No matches","Try a different name or username.","Clear search") { searchField.setText("") }
+                        else RabtaUi.empty(this,"chats","No contacts yet","People you connect with by username, QR code or nearby are saved here."))
+                    else list.forEach { convList.addView(contactRow(it)) }
+                }
+            }
+        }.start()
+    }
+
+    private fun contactRow(c: Db.Contact): View {
+        val row=LinearLayout(this).apply {
+            gravity=Gravity.CENTER_VERTICAL;setPadding(dp(4),dp(10),dp(4),dp(10));isClickable=true;isFocusable=true
+            background=RabtaUi.ripple(this@ConversationListActivity,Color.TRANSPARENT,16)
+            contentDescription="${c.name}${if(c.username.isNotBlank()) ", @${c.username}" else ""}. Tap to message, hold for more"
+            setOnClickListener { open(c.peerId,c.name) }
+            setOnLongClickListener { contactActions(c);true }
+        }
+        val av=FrameLayout(this)
+        av.addView(initials(c.name,dp(50)),FrameLayout.LayoutParams(dp(50),dp(50)))
+        ProfileHelper.loadIfNeeded(c.peerId,Session.serverUrl,Session.token) { bmp ->
+            if(bmp!=null) uiHandler.post { av.addView(ImageView(this).apply { setImageBitmap(bmp);scaleType=ImageView.ScaleType.CENTER_CROP;clipToOutline=true;background=pill(0xFF607D8B.toInt()) },FrameLayout.LayoutParams(dp(50),dp(50))) }
+        }
+        row.addView(av)
+        val mid=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;setPadding(dp(14),0,dp(8),0) }
+        mid.addView(RabtaUi.text(this,c.name,16f,true,TXT).apply { maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END })
+        mid.addView(RabtaUi.text(this,if(c.username.isNotBlank()) "@${c.username}" else "Rabta contact",14f,color=SUB).apply { maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END;setPadding(0,dp(2),0,0) })
+        row.addView(mid,LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
+        return row
+    }
+
+    private fun contactActions(c: Db.Contact) = RabtaUi.sheet(this,c.name,listOf(
+        RabtaUi.SheetAction("Message") { open(c.peerId,c.name) },
+        RabtaUi.SheetAction("Voice call") { callContact(c.peerId,c.name) },
+        RabtaUi.SheetAction("Video call") { callContact(c.peerId,c.name,true) },
+        RabtaUi.SheetAction("Delete contact","Your chat with ${c.name}, if any, stays") {
+            android.app.AlertDialog.Builder(this).setTitle("Delete ${c.name}?").setMessage("${c.name} is deleted from your contacts. Your chat with them, if any, stays in Chats.")
+                .setNegativeButton("Cancel",null).setPositiveButton("Delete") { _,_ -> Thread { runCatching { db.removeContact(c.peerId) };uiHandler.post { loadConvs() } }.start() }.show()
+        },
+    ))
+
+    /** Hold a chat: clear its messages, or delete the chat; either way the person stays in Contacts. */
+    private fun chatActions(c: Db.Conversation) = RabtaUi.sheet(this,c.peerName,listOf(
+        RabtaUi.SheetAction("Clear chat","Remove the messages; the chat stays") {
+            android.app.AlertDialog.Builder(this).setTitle("Clear this chat?").setMessage("All messages with ${c.peerName} are removed from this phone. The chat stays in your list.")
+                .setNegativeButton("Cancel",null).setPositiveButton("Clear chat") { _,_ -> chatChanged(c.peerId) { db.clearChat(it) } }.show()
+        },
+        RabtaUi.SheetAction("Delete chat",if(c.isGroup) "Remove the chat and its messages from this phone" else "${c.peerName} stays in your contacts") {
+            android.app.AlertDialog.Builder(this).setTitle("Delete this chat?").setMessage("The chat with ${c.peerName} and its messages are removed from this phone."+if(c.isGroup) "" else " ${c.peerName} stays in your contacts.")
+                .setNegativeButton("Cancel",null).setPositiveButton("Delete chat") { _,_ -> chatChanged(c.peerId) { db.deleteChat(it) } }.show()
+        },
+    ))
+    private fun chatChanged(convId: String, change: (String) -> Unit) {
+        ChatNotifications.clear(this,convId)
+        Thread { runCatching { change(convId) };RabtaEvents.postHistoryChanged(convId);uiHandler.post { loadConvs() } }.start()
+    }
+
     private fun convRow(c: Db.Conversation, last: Pair<Boolean,String>? = null): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
@@ -528,6 +613,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
             layoutParams=LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(0) }
             isClickable = true; isFocusable = true
             setOnClickListener { open(c.peerId, c.peerName, c.isGroup) }
+            setOnLongClickListener { chatActions(c);true }
         }
         // Avatar: group icon or profile pic
         val av = FrameLayout(this)
@@ -785,7 +871,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         hideKeyboard()
         Thread {
             val result=runCatching {
-                (db.searchConversations("").filter { !it.isGroup }.map { it.peerId to it.peerName }+
+                (db.contacts().map { it.peerId to it.name }+db.searchConversations("").filter { !it.isGroup }.map { it.peerId to it.peerName }+
                     db.calls(Int.MAX_VALUE).map { it.peerId to it.peerName }).distinctBy { it.first }
                     .filter { it.first!=Session.id && !Privacy.blocked(this,it.first) }
                     .sortedBy { it.second.lowercase(java.util.Locale.ROOT) }
@@ -834,7 +920,11 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
     }
 
     private fun showNewChat(forCall:Boolean=false) {
-        fun selected(id:String,name:String) { if(forCall)callContact(id,name) else open(id,name) }
+        // Found once by username or Rabta ID, the person is saved in Contacts, even before the first message.
+        fun selected(id:String,name:String,username:String="") {
+            if(id!=Session.id) Thread { runCatching { db.saveContact(id,name,username) } }.start()
+            if(forCall)callContact(id,name) else open(id,name)
+        }
         RabtaUi.inputSheet(this,if(forCall) "Start a call" else "New chat","@username or Rabta ID","Find") { raw,status,dlg ->
             val un=raw.lowercase()
             if(un.isEmpty()) { status.text="Enter a username or Rabta ID";status.setTextColor(AppTheme.error(this));return@inputSheet }
@@ -843,7 +933,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
             WsClient.findUser(Session.serverUrl,un,Session.token) { ok,msg,data ->
                 if(ok&&data!=null) {
                     val pid=data.optString("id");val pn=data.optString("name").ifEmpty { data.optString("username") }
-                    if(pid.isNotEmpty()) { dlg.dismiss();selected(pid,pn) }
+                    if(pid.isNotEmpty()) { dlg.dismiss();selected(pid,pn,data.optString("username")) }
                     else { status.text="No account was found";status.setTextColor(AppTheme.error(this)) }
                 } else { status.text=msg;status.setTextColor(AppTheme.error(this)) }
             }

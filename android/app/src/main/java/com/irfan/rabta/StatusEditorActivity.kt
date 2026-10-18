@@ -39,6 +39,7 @@ class StatusEditorActivity : ThemedActivity() {
     private lateinit var drawTools: LinearLayout
     private lateinit var bottom: LinearLayout
     private lateinit var caption: EditText
+    private lateinit var emoji: EmojiField
     private lateinit var audiencePill: TextView
     private lateinit var palette: LinearLayout
     private var canvasView: StatusCanvasView? = null
@@ -94,13 +95,18 @@ class StatusEditorActivity : ThemedActivity() {
             background = RabtaUi.shape(this@StatusEditorActivity, 0x33FFFFFF, 999)
             setOnClickListener { Toast.makeText(this@StatusEditorActivity, "Restyle with AI: coming soon", Toast.LENGTH_SHORT).show() }
         }, LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = dp(12) })
+        // Caption with an emoji button, like WhatsApp's.
+        val captionBar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; background = RabtaUi.shape(this@StatusEditorActivity, 0xFF1F2A33.toInt(), 26); setPadding(dp(4), 0, 0, 0) }
+        val emojiButton = UiIcons.image(this, "emoji", Color.WHITE, 24, "Emoji").apply { background = RabtaUi.ripple(this@StatusEditorActivity, Color.TRANSPARENT, 999) }
+        captionBar.addView(emojiButton, LinearLayout.LayoutParams(dp(44), dp(44)))
         caption = EditText(this).apply {
             hint = "Add a caption…"; setHintTextColor(0xB3FFFFFF.toInt()); setTextColor(Color.WHITE); textSize = 16f; maxLines = 4
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
             filters = arrayOf(android.text.InputFilter.LengthFilter(700)); contentDescription = "Caption"
-            background = RabtaUi.shape(this@StatusEditorActivity, 0xFF1F2A33.toInt(), 26); setPadding(dp(18), dp(12), dp(18), dp(12)); minHeight = dp(50)
+            background = null; setPadding(dp(6), dp(12), dp(18), dp(12)); minHeight = dp(50)
         }
-        bottom.addView(caption, LinearLayout.LayoutParams(-1, -2))
+        captionBar.addView(caption, LinearLayout.LayoutParams(0, -2, 1f))
+        bottom.addView(captionBar, LinearLayout.LayoutParams(-1, -2))
         val sendRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(12), 0, 0) }
         audiencePill = RabtaUi.text(this, "", 14f, true, Color.WHITE).apply {
             gravity = Gravity.CENTER_VERTICAL; minHeight = dp(44); setPadding(dp(14), 0, dp(16), 0); isFocusable = true; compoundDrawablePadding = dp(8)
@@ -114,6 +120,7 @@ class StatusEditorActivity : ThemedActivity() {
             isFocusable = true; background = RabtaUi.ripple(this@StatusEditorActivity, AppTheme.primary(this@StatusEditorActivity), 999); setOnClickListener { send() }
         }, LinearLayout.LayoutParams(dp(58), dp(58)))
         bottom.addView(sendRow)
+        emoji = EmojiField(this, caption, bottom, emojiButton, Color.WHITE)
         showAudience()
 
         if (kind == "image") loadImage() else loadVideo()
@@ -122,6 +129,10 @@ class StatusEditorActivity : ThemedActivity() {
         root.addView(bottom, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
         setContentView(root)
     }
+
+    override fun onKeyboardVisibilityChanged(visible: Boolean) { if (visible && ::emoji.isInitialized) emoji.keyboardShown() }
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() { if (::emoji.isInitialized && emoji.open) emoji.hide() else super.onBackPressed() }
 
     private fun showAudience() { audiencePill.text = StatusPost.audienceLabel(audience); audiencePill.contentDescription = "${audiencePill.text}. Change who can see" }
 

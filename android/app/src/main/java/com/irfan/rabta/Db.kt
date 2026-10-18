@@ -6,11 +6,13 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
 /** [account] is set only by [get]; a Db constructed directly (isolated test fixtures) keeps the legacy file name. */
-class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(ctx, fileFor(account), null, 5) {
+class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(ctx, fileFor(account), null, 6) {
 
     data class Conversation(val peerId: String, val peerName: String, val lastMsg: String, val lastTime: Long, val unread: Int, val isGroup: Boolean = false)
     data class Message(val id: String, val convId: String, val fromId: String, val fromName: String, val body: String, val sentAt: Long, val mine: Boolean, val status: String, val msgType: String)
     data class Group(val id: String, val name: String, val members: List<String>)
+    /** Someone you have connected with; kept when their chat is cleared or deleted. */
+    data class Contact(val peerId: String, val name: String, val username: String, val addedAt: Long) { val peerName get() = name }
 
     override fun onCreate(db: SQLiteDatabase) = createAll(db)
     override fun onUpgrade(db: SQLiteDatabase, o: Int, n: Int) {
@@ -23,6 +25,8 @@ class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(
         db.execSQL("CREATE TABLE IF NOT EXISTS calls(id INTEGER PRIMARY KEY AUTOINCREMENT, peer_id TEXT, peer_name TEXT, type TEXT, duration INTEGER DEFAULT 0, started_at INTEGER)")
         }
         createAll(db)
+        // Additive: everyone you already chat with one-to-one becomes a contact; chats and messages are untouched.
+        if (o < 6) db.execSQL("INSERT OR IGNORE INTO contacts(peer_id,name,added_at) SELECT peer_id,peer_name,last_time FROM conversations WHERE is_group=0")
     }
 
     private fun createAll(db: SQLiteDatabase) {
@@ -32,6 +36,7 @@ class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_msg_conv ON messages(conv_id, sent_at)")
         db.execSQL("CREATE TABLE IF NOT EXISTS groups(id TEXT PRIMARY KEY, name TEXT, members TEXT)")
         db.execSQL("CREATE TABLE IF NOT EXISTS calls(id INTEGER PRIMARY KEY AUTOINCREMENT, peer_id TEXT, peer_name TEXT, type TEXT, duration INTEGER DEFAULT 0, started_at INTEGER)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS contacts(peer_id TEXT PRIMARY KEY, name TEXT, username TEXT DEFAULT '', added_at INTEGER DEFAULT 0)")
     }
 
     companion object {
@@ -75,9 +80,51 @@ class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(
 
     fun upsertConversation(peerId: String, peerName: String, lastMsg: String, time: Long, incUnread: Boolean, isGroup: Boolean = false) {
         val cv = ContentValues().apply { put("peer_id",peerId);put("peer_name",peerName);put("last_msg",lastMsg.take(100));put("last_time",time);put("is_group", if(isGroup) 1 else 0) }
-        writableDatabase.insertWithOnConflict("conversations", null, cv, SQLiteDatabase.CONFLICT_IGNORE)
+        val started = writableDatabase.insertWithOnConflict("conversations", null, cv, SQLiteDatabase.CONFLICT_IGNORE) != -1L
         writableDatabase.execSQL("UPDATE conversations SET peer_name=?,last_msg=?,last_time=?,unread=unread+?,is_group=? WHERE peer_id=?",
             arrayOf(peerName, lastMsg.take(100), time, if (incUnread) 1 else 0, if (isGroup) 1 else 0, peerId))
+        // A new one-to-one chat saves its person as a contact, so deleting the chat later keeps them. Later messages
+        // only keep the contact's name current: a contact you deleted stays deleted.
+        if (!isGroup) {
+            if (started) saveContact(peerId, peerName)
+            else if (peerName.isNotBlank() && peerName != peerId) writableDatabase.execSQL("UPDATE contacts SET name=? WHERE peer_id=?", arrayOf(peerName, peerId))
+        }
+    }
+
+    /** Saves [peerId] as a contact; a real name or username replaces what was known, a bare ID never does. */
+    fun saveContact(peerId: String, name: String, username: String = "") {
+        val db = writableDatabase
+        db.insertWithOnConflict("contacts", null, ContentValues().apply { put("peer_id",peerId);put("name",name.ifBlank { peerId });put("username",username);put("added_at",System.currentTimeMillis()) }, SQLiteDatabase.CONFLICT_IGNORE)
+        if (name.isNotBlank() && name != peerId) db.execSQL("UPDATE contacts SET name=? WHERE peer_id=?", arrayOf(name, peerId))
+        if (username.isNotBlank()) db.execSQL("UPDATE contacts SET username=? WHERE peer_id=?", arrayOf(username, peerId))
+    }
+
+    fun contacts(): List<Contact> = readableDatabase.rawQuery("SELECT peer_id,name,username,added_at FROM contacts ORDER BY lower(name)", null).use { c ->
+        generateSequence { if (c.moveToNext()) Contact(c.getString(0), c.getString(1) ?: c.getString(0), c.getString(2) ?: "", c.getLong(3)) else null }.toList()
+    }
+
+    fun removeContact(peerId: String) = writableDatabase.execSQL("DELETE FROM contacts WHERE peer_id=?", arrayOf(peerId))
+
+    /** Clear chat: its messages leave this phone, the chat stays in the list (empty). */
+    fun clearChat(convId: String) = writableDatabase.run {
+        beginTransaction()
+        try {
+            execSQL("DELETE FROM message_meta WHERE id IN (SELECT id FROM messages WHERE conv_id=?)", arrayOf(convId))
+            execSQL("DELETE FROM messages WHERE conv_id=?", arrayOf(convId))
+            execSQL("UPDATE conversations SET last_msg='',unread=0 WHERE peer_id=?", arrayOf(convId))
+            setTransactionSuccessful()
+        } finally { endTransaction() }
+    }
+
+    /** Delete chat: the chat and its messages leave this phone; the contact and the call history stay. */
+    fun deleteChat(convId: String) = writableDatabase.run {
+        beginTransaction()
+        try {
+            execSQL("DELETE FROM message_meta WHERE id IN (SELECT id FROM messages WHERE conv_id=?)", arrayOf(convId))
+            execSQL("DELETE FROM messages WHERE conv_id=?", arrayOf(convId))
+            execSQL("DELETE FROM conversations WHERE peer_id=?", arrayOf(convId))
+            setTransactionSuccessful()
+        } finally { endTransaction() }
     }
 
     fun clearUnread(peerId: String) = writableDatabase.execSQL("UPDATE conversations SET unread=0 WHERE peer_id=?", arrayOf(peerId))
@@ -204,6 +251,10 @@ class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(
     fun deleteCall(id:Long)=writableDatabase.execSQL("DELETE FROM calls WHERE id=?",arrayOf(id))
     fun callOutcome(id:Long,outcome:String)=writableDatabase.execSQL("UPDATE calls SET type=? WHERE id=?",arrayOf(outcome,id))
     fun logCallEnd(callId: Long, durationSec: Int) = writableDatabase.execSQL("UPDATE calls SET duration=? WHERE id=?", arrayOf(durationSec, callId))
+    /** One contact's calls, oldest first, for the chat timeline. */
+    fun callsWith(peerId: String): List<CallRecord> = readableDatabase.rawQuery("SELECT id,peer_id,peer_name,type,duration,started_at FROM calls WHERE peer_id=? ORDER BY started_at", arrayOf(peerId)).use { c ->
+        generateSequence { if (c.moveToNext()) CallRecord(c.getLong(0),c.getString(1),c.getString(2),c.getString(3),c.getInt(4),c.getLong(5)) else null }.toList()
+    }
     fun calls(limit: Int = 100): List<CallRecord> {
         val list = mutableListOf<CallRecord>()
         readableDatabase.rawQuery("SELECT id,peer_id,peer_name,type,duration,started_at FROM calls ORDER BY started_at DESC LIMIT ?", arrayOf(limit.toString())).use { c ->

@@ -77,6 +77,8 @@ module.exports=function install({app,authId,users,getPool}) {
     // Optional caption on photo/video updates; older clients simply never send it.
     const caption=kind==='text'?'':String(req.body.caption||'').trim();ensure(caption.length<=700,'Caption must be up to 700 characters');
     const s={id:id(),owner:me,kind,body,audience,created:Date.now(),expires:Date.now()+LIFE,viewers:[],viewedAt:{}};if(caption)s.caption=caption;
+    // Optional look of a text update (colour and font from the full-screen composer); older clients never send it.
+    if(kind==='text'){const bg=String(req.body.bg||''),font=String(req.body.font||'');if(/^#[0-9A-Fa-f]{6}$/.test(bg))s.bg=bg;if(['sans','serif','mono','script','bold'].includes(font))s.font=font;}
     if(kind!=='text')for(const to of audience)await grant(body,me,to,s.expires);
     await persist('status',s.id,s);statuses.set(s.id,s);res.json({id:s.id,expires:s.expires});
   }));

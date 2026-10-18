@@ -5,19 +5,19 @@ const fs=require('node:fs');
 const path=require('node:path');
 
 async function fixture(database=false) {
-  const routes=new Map(); let connect; const queries=[]; const timers=new Set();
+  const routes=new Map(); let connect; const queries=[]; const timers=new Set(); const intervals=[];
   const setTimeout=(fn,ms)=>{const t={fn,ms,unref(){}};timers.add(t);return t;};const clearTimeout=t=>timers.delete(t);
   const app={use(){},post(p,f){routes.set('POST '+p,f)},get(p,f){routes.set('GET '+p,f)},delete(p,f){routes.set('DELETE '+p,f)}};
   const express=()=>app; express.json=()=>()=>{};
   class WebSocketServer { on(event,cb){if(event==='connection')connect=cb;} }
   let failing=null,responder=null; // SQL that should throw / custom rows, for storage tests
   class Pool { async query(sql,args){ queries.push([sql,args]); if(failing?.test(sql)) throw new Error('db unavailable'); return {rows:responder?.(sql,args)||[]}; } }
-  const context=vm.createContext({require(name){if(name==='./features')return require('../features');if(name==='./account')return require('../account');if(name==='express')return express;if(name==='ws')return {WebSocketServer};if(name==='http')return {createServer(){return {listen(){}}}};if(name==='pg')return {Pool};return require(name)},setTimeout,clearTimeout,process:{env:database?{DATABASE_URL:'test'}:{}},console,Buffer,URL});
+  const context=vm.createContext({require(name){if(name==='./features')return require('../features');if(name==='./account')return require('../account');if(name==='express')return express;if(name==='ws')return {WebSocketServer};if(name==='http')return {createServer(){return {listen(){}}}};if(name==='pg')return {Pool};return require(name)},setTimeout,clearTimeout,setInterval:fn=>{intervals.push(fn);return {unref(){}};},process:{env:database?{DATABASE_URL:'test'}:{}},console,Buffer,URL});
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../index.js'),'utf8'),context);
   const register=async name=>{let value;await routes.get('POST /api/register')({body:{username:name,pin:'123456',name}},{json(v){value=v},status(){return this}});return value;};
   const alice=await register('alice'),bob=await register('bob'),eve=await register('eve');
-  function socket(user,{broken=false}={}){const handlers={},messages=[];const ws={readyState:1,send(s,cb){if(broken)return cb?.(new Error('socket write failed'));messages.push(JSON.parse(s));cb?.()},close(){this.readyState=3;handlers.close?.()},on(e,f){handlers[e]=f}};connect(ws,{headers:{authorization:'Bearer '+user.token},url:'/ws'});return {messages,send:async m=>handlers.message(Buffer.from(JSON.stringify(m))),ws};}
-  return {socket,alice,bob,eve,queries,routes,register,failSql:re=>{failing=re},onSql:fn=>{responder=fn},expire:()=>{for(const t of [...timers])t.fn();}};
+  function socket(user,{broken=false}={}){const handlers={},messages=[];const ws={readyState:1,pings:0,send(s,cb){if(broken)return cb?.(new Error('socket write failed'));messages.push(JSON.parse(s));cb?.()},close(){this.readyState=3;handlers.close?.()},terminate(){this.close()},ping(){this.pings++},on(e,f){handlers[e]=f}};connect(ws,{headers:{authorization:'Bearer '+user.token},url:'/ws'});return {messages,send:async m=>handlers.message(Buffer.from(JSON.stringify(m))),pong:()=>handlers.pong?.(),ws};}
+  return {socket,alice,bob,eve,queries,routes,register,failSql:re=>{failing=re},onSql:fn=>{responder=fn},expire:()=>{for(const t of [...timers])t.fn();},beat:()=>intervals.forEach(fn=>fn())};
 }
 test('large offline attachment survives intact and retries do not duplicate',async()=>{
   const f=await fixture();const a=f.socket(f.alice);const body='x'.repeat(500000);
@@ -189,4 +189,16 @@ test('contact lookup by account ID needs sign-in and hides blocked contacts',asy
   assert.equal((await call(f.alice.token,'FFFFFFFFFFFF')).code,404);
   await f.routes.get('POST /api/block')({headers:{authorization:'Bearer '+f.bob.token},body:{target:f.alice.id},params:{},query:{}},{status(){return this},json(){},setHeader(){}});
   assert.equal((await call(f.alice.token,f.bob.id)).code,404);
+});
+
+test('heartbeat closes sockets whose phone stopped answering, so their messages wait on the server',async()=>{
+  const f=await fixture();const a=f.socket(f.alice),b=f.socket(f.bob),e=f.socket(f.eve);
+  f.beat();assert.equal(a.ws.pings,1);assert.equal(b.ws.pings,1);
+  b.pong();await e.send({type:'ping'});          // Bob's phone answers the ping, Eve's sends something; Alice's is gone
+  f.beat();
+  assert.equal(a.ws.readyState,3,'silent socket closed');assert.equal(b.ws.readyState,1);assert.equal(e.ws.readyState,1);
+  await b.send({type:'msg',id:'AAAAAA000111',to:f.alice.id,body:'are you there',msgType:'text'});
+  assert.equal(b.messages.filter(m=>m.type==='ack').at(-1).status,'stored');
+  const again=f.socket(f.alice);assert.ok(again.messages.some(m=>m.type==='msg'&&m.body==='are you there'),'delivered on reconnect');
+  assert.equal(e.messages.filter(m=>m.type==='pong').length,1);
 });

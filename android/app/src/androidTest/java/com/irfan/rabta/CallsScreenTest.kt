@@ -67,7 +67,7 @@ class CallsScreenTest {
         }
         ctx.getSharedPreferences("appearance",0).edit().putString("mode","Dark").putString("language","en").putFloat("scale",1f).commit()
         try { run(db) } finally {
-            ui { WsClient.disconnect();MessageService.stop(ctx);field.set(null,previous) }
+            ui { VoiceCall.end(false);VideoCall.end();WsClient.disconnect();MessageService.stop(ctx);field.set(null,previous) }
             inst.waitForIdleSync();db.close();ctx.deleteDatabase(name)
         }
     }
@@ -235,6 +235,159 @@ class CallsScreenTest {
             assertFalse("The call no longer keeps the phone awake",heldWakeLocks().contains("Rabta:call"))
         } finally {
             ui { chat?.finish();WsClient.disconnect();MessageService.stop(ctx) }
+            server.shutdown()
+        }
+    }
+
+    /** A mock server whose other phone answers a voice call at once and talks; [ended] counts the hang-ups it is sent. */
+    private fun answeringServer(ended:CountDownLatch,offered:CountDownLatch?=null)=MockWebServer().apply {
+        dispatcher=object:Dispatcher() {
+            override fun dispatch(request:RecordedRequest):MockResponse {
+                if(request.path!="/ws")return MockResponse().setResponseCode(404)
+                return MockResponse().withWebSocketUpgrade(object:WebSocketListener() {
+                    override fun onOpen(ws:WebSocket,response:Response) { ws.send("{\"type\":\"ready\",\"id\":\"CA1100000001\",\"protocol\":2}") }
+                    override fun onMessage(ws:WebSocket,raw:String) {
+                        val o=JSONObject(raw);val id=o.optString("callId")
+                        when(o.optString("type")) {
+                            "call_init" -> {
+                                ws.send(JSONObject().put("type","call_state").put("from","CA1100000002").put("callId",id).put("state","accepted").toString())
+                                ws.send(JSONObject().put("type","call_audio").put("from","CA1100000002").put("callId",id).put("data",android.util.Base64.encodeToString(ByteArray(640),android.util.Base64.NO_WRAP)).toString())
+                            }
+                            "video_offer" -> offered?.countDown()
+                            "call_end","video_end" -> ended.countDown()
+                        }
+                    }
+                })
+            }
+        }
+    }
+    private fun shows(a:android.app.Activity,words:String)=all(a.window.decorView).filterIsInstance<TextView>().any { it.isShown&&it.text.toString().contains(words) }
+
+    /** The reported bug: going back to the chats or opening another chat ended the call. It goes on, and the green bar returns to it. */
+    @Test fun voiceCallGoesOnWhileYouUseOtherChats()=fixture { _ ->
+        val ended=CountDownLatch(1);val server=answeringServer(ended)
+        server.start();val url=server.url("/").toString().trimEnd('/')
+        ui { Session.serverUrl=url;WsClient.connect(Session) }
+        var chat:ChatActivity?=null;var other:ChatActivity?=null;var back:android.app.Activity?=null
+        try {
+            waitUi { WsClient.connected&&WsClient.protocol>=2 }
+            chat=inst.startActivitySync(Intent(ctx,ChatActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra("peerId","CA1100000002").putExtra("peerName","Busy contact").putExtra("requestedCallKind","voice")) as ChatActivity
+            val c=chat!!
+            waitUi { VoiceCall.connectedAt>0&&shows(c,"Connected") }
+            // Back on the call screen shows the chat underneath, with the green bar; back again closes the chat.
+            ui { c.onBackPressed() }
+            waitUi { shows(c,"Tap to return to call")&&!shows(c,"Connected") }
+            ui { c.onBackPressed() }
+            waitUi { c.isFinishing||c.isDestroyed }
+            Thread.sleep(500)
+            assertTrue("The call goes on without its chat",VoiceCall.active)
+            assertEquals("Nobody hung up",1L,ended.count)
+            // Another chat shows the call going on; its bar leads back to the call screen.
+            other=inst.startActivitySync(Intent(ctx,ChatActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra("peerId","CA1100000003").putExtra("peerName","Other contact")) as ChatActivity
+            val o=other!!
+            waitUi { shows(o,"Busy contact")&&shows(o,"Tap to return to call") }
+            ui { all(o.window.decorView).first { it.isShown&&it.contentDescription?.toString()?.startsWith("Ongoing call with")==true }.performClick() }
+            // Whichever screen shows the call now: the call screen with its time and End.
+            waitUi {
+                back=WindowInspector.getGlobalWindowViews().flatMap { all(it) }.firstOrNull { it.isShown&&it.contentDescription=="End" }?.context as? android.app.Activity
+                back?.let { shows(it,"Connected") }==true
+            }
+            val b=back!!
+            assertTrue("The call screen belongs to the call's chat",b is ChatActivity&&b.intent.getStringExtra("peerId")=="CA1100000002")
+            assertEquals("Still one call, never hung up",1L,ended.count)
+            // The ongoing call's notice can hang up from anywhere.
+            val notice=ctx.getSystemService(NotificationManager::class.java).activeNotifications.first { it.id==1 }.notification
+            assertEquals("Ongoing voice call",notice.extras.getString(Notification.EXTRA_TITLE))
+            notice.actions.first { it.title.toString()=="Hang up" }.actionIntent.send()
+            assertTrue("Hang up tells the other phone",ended.await(5,TimeUnit.SECONDS))
+            waitUi { !VoiceCall.active&&!shows(b,"Tap to return to call")&&!shows(b,"Connected") }
+        } finally {
+            ui { back?.finish();other?.finish();chat?.finish();VoiceCall.end(false);WsClient.disconnect();MessageService.stop(ctx) }
+            server.shutdown()
+        }
+    }
+
+    /** Back turns a video call into a small window that goes on; with that window closed, the chats lead back to it. */
+    @Test fun videoCallGoesOnInASmallWindowAndBehindTheChats()=fixture { _ ->
+        listOf("CAMERA","RECORD_AUDIO").forEach { shell("pm grant ${ctx.packageName} android.permission.$it") }
+        val ended=CountDownLatch(1);val offered=CountDownLatch(1);val server=answeringServer(ended,offered)
+        server.start();val url=server.url("/").toString().trimEnd('/')
+        ui { Session.serverUrl=url;WsClient.connect(Session) }
+        var video:VideoCallActivity?=null;var again:android.app.Activity?=null;var list:ConversationListActivity?=null
+        try {
+            waitUi { WsClient.connected&&WsClient.protocol>=2 }
+            video=inst.startActivitySync(Intent(ctx,VideoCallActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra(VideoCallActivity.PEER_ID,"CA1100000002").putExtra(VideoCallActivity.PEER_NAME,"Video contact")
+                .putExtra(VideoCallActivity.IS_CALLER,true).putExtra(VideoCallActivity.CALL_ID,"BBBBBB000001")) as VideoCallActivity
+            val v=video!!
+            waitUi { VideoCall.active }
+            assertTrue("The video offer goes out",offered.await(20,TimeUnit.SECONDS))
+            waitUi { serviceNotice()=="Ongoing video call" }
+            // Asking for the screen-sharing type without Android's consent (refused on Android 14 and up) breaks nothing.
+            ui { MessageService.sharingStarted();MessageService.sharingEnded() }
+            assertEquals("Ongoing video call",serviceNotice())
+            assertTrue(VideoCall.active)
+            org.junit.Assume.assumeTrue("This emulator offers picture-in-picture",ctx.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE))
+            ui { v.onBackPressed() }
+            waitUi { v.isInPictureInPictureMode }
+            assertTrue("The call goes on in the small window",VideoCall.active)
+            assertEquals("Nobody hung up",1L,ended.count)
+            // The window closed: the call still goes on, and the chats show the green bar back to it.
+            ui { v.finish() }
+            waitUi { v.isDestroyed }
+            list=launch()
+            val l=list!!
+            waitUi { shows(l,"Tap to return to call")&&shows(l,"Video contact") }
+            assertTrue(VideoCall.active)
+            val monitor=inst.addMonitor(VideoCallActivity::class.java.name,null,false)
+            try {
+                ui { all(l.window.decorView).first { it.isShown&&it.contentDescription?.toString()?.startsWith("Ongoing call with")==true }.performClick() }
+                again=inst.waitForMonitorWithTimeout(monitor,5000)
+            } finally { inst.removeMonitor(monitor) }
+            val a=again!!
+            waitUi { all(a.window.decorView).any { it.isShown&&it.contentDescription=="End call" } }
+            ui { all(a.window.decorView).first { it.isShown&&it.contentDescription=="End call" }.performClick() }
+            assertTrue("End tells the other phone",ended.await(5,TimeUnit.SECONDS))
+            waitUi { !VideoCall.active&&(a.isFinishing||a.isDestroyed) }
+        } finally {
+            ui { again?.finish();list?.finish();video?.finish();VideoCall.end();WsClient.disconnect();MessageService.stop(ctx) }
+            server.shutdown()
+        }
+    }
+
+    /**
+     * The reported bug: with Rabta closed its connection died unnoticed (no messages, no calls), and opening Rabta took
+     * a minute to reconnect. The keep-alive alarm (and opening Rabta) now checks the connection and replaces a dead one.
+     */
+    @Test fun keepAliveReplacesAConnectionThatStoppedAnswering()=fixture { _ ->
+        val opened=java.util.concurrent.atomic.AtomicInteger();val answering=java.util.concurrent.atomic.AtomicBoolean(true)
+        val server=MockWebServer()
+        server.dispatcher=object:Dispatcher() {
+            override fun dispatch(request:RecordedRequest):MockResponse {
+                if(request.path!="/ws")return MockResponse().setResponseCode(404)
+                return MockResponse().withWebSocketUpgrade(object:WebSocketListener() {
+                    override fun onOpen(ws:WebSocket,response:Response) { opened.incrementAndGet();ws.send("{\"type\":\"ready\",\"id\":\"CA1100000001\",\"protocol\":2,\"receipts\":true}") }
+                    override fun onMessage(ws:WebSocket,raw:String) { if(JSONObject(raw).optString("type")=="ping"&&answering.get()) ws.send("{\"type\":\"pong\"}") }
+                })
+            }
+        }
+        server.start();val url=server.url("/").toString().trimEnd('/')
+        ui { Session.serverUrl=url;WsClient.connect(Session) }
+        fun keepAlive()=ctx.sendBroadcast(Intent(ctx,StartReceiver::class.java).setAction(MessageService.KEEP_ALIVE))
+        fun waitFor(ms:Long,check:()->Boolean) { val until=System.currentTimeMillis()+ms;while(!check()) { if(System.currentTimeMillis()>until) fail("Connection did not reach the expected state");Thread.sleep(100) } }
+        try {
+            waitUi { WsClient.connected }
+            assertEquals(1,opened.get())
+            // Quiet for a while, but alive: the check gets its answer and the connection is kept.
+            Thread.sleep(21_000);keepAlive();Thread.sleep(8_000)
+            assertEquals("A connection that answers is kept",1,opened.get());assertTrue(WsClient.connected)
+            // The connection stops answering (its network died while the phone slept): the next check replaces it.
+            answering.set(false);Thread.sleep(21_000);keepAlive()
+            waitFor(20_000) { opened.get()==2&&WsClient.connected }
+        } finally {
+            ui { WsClient.disconnect();MessageService.stop(ctx) }
             server.shutdown()
         }
     }

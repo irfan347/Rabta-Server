@@ -156,7 +156,7 @@ class SettingsActivity : ThemedActivity() {
         addView(row)
     }
 
-    private fun blockedContacts() = Db.get(this).conversations().filter { Privacy.blocked(this, it.peerId) }
+    private fun blockedContacts() = Db.get(this).contacts().filter { Privacy.blocked(this, it.peerId) }
     private fun showBlockedContacts() {
         val blocked = blockedContacts()
         if (blocked.isEmpty()) { themedInfo("Blocked contacts", "You have no blocked contacts."); return }

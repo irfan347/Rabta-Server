@@ -19,7 +19,7 @@ import org.json.JSONObject
 object StatusPost {
     private fun prefs(c: Context) = c.getSharedPreferences("status_prefs_${Session.id}", 0)
 
-    fun contacts(c: Context) = Db.get(c).conversations().filter { !it.isGroup && !Privacy.blocked(c, it.peerId) }
+    fun contacts(c: Context) = Db.get(c).contacts().filter { it.peerId != Session.id && !Privacy.blocked(c, it.peerId) }
 
     /** The viewers chosen last time, still limited to current, unblocked contacts. Empty until the user picks. */
     fun audience(c: Context): List<String> {
@@ -45,10 +45,12 @@ object StatusPost {
     }
 
     /** Uploads the media (resumable), publishes the update, and keeps the local copy as this phone's preview. Blocking. */
-    fun publish(c: Context, kind: String, body: String, caption: String, ids: List<String>, changed: () -> Unit = {}): JSONObject {
+    fun publish(c: Context, kind: String, body: String, caption: String, ids: List<String>, look: JSONObject? = null, changed: () -> Unit = {}): JSONObject {
         val remote = if (kind == "text") body else Transfers.upload(c, body, UPLOAD, changed)
         val request = JSONObject().put("kind", kind).put("body", remote).put("audience", JSONArray(ids))
         if (caption.isNotBlank() && kind != "text") request.put("caption", caption.trim())
+        // A text update's colour and font; servers before this field simply ignore it.
+        if (kind == "text" && look != null) request.put("bg", look.optString("bg")).put("font", look.optString("font"))
         val result = FeatureApi.request("/api/status", "POST", request)
         // Your own update opens from the file already on this phone instead of downloading it again.
         if (kind != "text") runCatching { c.getSharedPreferences("downloads_${Session.id}", 0).edit().putString(JSONObject(remote).getString("remote"), body).apply() }
@@ -76,7 +78,7 @@ object StatusPost {
         val views = status.optJSONArray("views")
         val list = if (views != null) (0 until views.length()).map { views.getJSONObject(it) }.sortedByDescending { it.optLong("at") }
             else status.optJSONArray("viewers")?.let { v -> (0 until v.length()).map { JSONObject().put("id", v.optString(it)) } }.orEmpty()
-        val names = Db.get(a).conversations().associate { it.peerId to it.peerName }
+        val names = Db.get(a).contacts().associate { it.peerId to it.name }
         val dialog = android.app.Dialog(a)
         dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
         val root = LinearLayout(a).apply {

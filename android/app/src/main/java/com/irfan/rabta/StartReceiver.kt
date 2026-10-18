@@ -11,8 +11,9 @@ import android.content.Intent
 class StartReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         // No action: Rabta's own restart alarm (see MessageService.onTaskRemoved).
-        if (intent.action !in setOf(null, Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED)) return
+        if (intent.action !in setOf(null, MessageService.KEEP_ALIVE, Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED)) return
         Session.init(context)
-        if (Session.loggedIn) MessageService.start(context)
+        if (!Session.loggedIn) return
+        if (intent.action == MessageService.KEEP_ALIVE) MessageService.keepAlive(context) else MessageService.start(context)
     }
 }

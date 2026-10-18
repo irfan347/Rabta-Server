@@ -41,40 +41,19 @@ class StatusActivity : ThemedActivity() {
     override fun onPause() {foreground=false;generation++;handler.removeCallbacksAndMessages(null);super.onPause()}
     override fun onDestroy() {generation++;handler.removeCallbacksAndMessages(null);super.onDestroy()}
 
-    private fun composeText() {
-        val input = EditText(this).apply {
-            hint = "What would you like to share?"; minLines = 3; maxLines = 7; gravity = Gravity.TOP
-            filters = arrayOf(android.text.InputFilter.LengthFilter(700))
-            setTextColor(AppTheme.text(this@StatusActivity)); setHintTextColor(AppTheme.sub(this@StatusActivity))
-            background = RabtaUi.shape(this@StatusActivity, AppTheme.raised(this@StatusActivity), 16)
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-        }
-        val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(24), 0, dp(24), 0); addView(input) }
-        AlertDialog.Builder(this).setTitle("Text status").setView(content).setNegativeButton("Cancel", null)
-            .setPositiveButton("Continue", null).create().also { dialog ->
-                dialog.setOnShowListener {
-                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                        val text = input.text.toString().trim()
-                        if (text.isEmpty()) { input.error = "Write something first"; return@setOnClickListener }
-                        dialog.dismiss(); audience(text)
-                    }
-                }
-                dialog.show()
-            }
-    }
-
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (resultCode != RESULT_OK) return
         when (requestCode) {
             // Picked on the Add status screen: text opens the composer; photos and videos open the editor first.
             ADD -> when (val kind = data?.getStringExtra("kind")) {
-                "text" -> composeText()
+                "text" -> startActivityForResult(Intent(this, TextStatusActivity::class.java), EDIT)
                 "image", "video" -> data.data?.let { edit(kind, it) }
             }
             EDIT -> {
                 val kind = data?.getStringExtra("kind") ?: return; val body = data.getStringExtra("body") ?: return
-                share(kind, body, data.getStringExtra("caption").orEmpty(), data.getStringArrayExtra("audience")?.toList().orEmpty())
+                val look = if (kind == "text") org.json.JSONObject().put("bg", data.getStringExtra("bg").orEmpty()).put("font", data.getStringExtra("font").orEmpty()) else null
+                share(kind, body, data.getStringExtra("caption").orEmpty(), data.getStringArrayExtra("audience")?.toList().orEmpty(), look)
             }
             31, 32 -> data?.data?.let { edit(if (requestCode == 31) "image" else "video", it) }
         }
@@ -83,29 +62,14 @@ class StatusActivity : ThemedActivity() {
         startActivityForResult(Intent(this, StatusEditorActivity::class.java).putExtra("kind", kind).setData(uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), EDIT)
     }
 
-    /** Text updates still ask who can see them each time; the choice is remembered for the photo editor. */
-    private fun audience(text: String) {
-        val contacts = StatusPost.contacts(this)
-        if (contacts.isEmpty()) { themedMessage("No available contacts", "Add a contact before sharing a status. Blocked contacts cannot be selected."); return }
-        val selected = BooleanArray(contacts.size)
-        AlertDialog.Builder(this).setTitle("Choose viewers")
-            .setMultiChoiceItems(contacts.map { it.peerName }.toTypedArray(), selected) { _, index, checked -> selected[index] = checked }
-            .setNegativeButton("Cancel", null).setPositiveButton("Share") { _, _ ->
-                val ids = contacts.filterIndexed { index, _ -> selected[index] }.map { it.peerId }
-                if (ids.isEmpty()) { themedMessage("Choose at least one viewer", "A status is only shared with contacts you select."); return@setPositiveButton }
-                StatusPost.saveAudience(this, ids)
-                share("text", text, "", ids)
-            }.show()
-    }
-
-    private fun share(kind: String, body: String, caption: String, ids: List<String>) {
+    private fun share(kind: String, body: String, caption: String, ids: List<String>, look: org.json.JSONObject? = null) {
         if (posting) { themedMessage("Please wait", "Your previous update is still being shared."); return }
         if (ids.isEmpty()) { themedMessage("Choose at least one viewer", "A status is only shared with contacts you select."); return }
         posting = true; sharing = 0; renderCards(lastItems)
         feed.addView(RabtaUi.loading(this, "Sharing status…"), 0)
         Thread {
             val result = runCatching {
-                StatusPost.publish(this, kind, body, caption, ids) {
+                StatusPost.publish(this, kind, body, caption, ids, look) {
                     val p = Transfers.progress[StatusPost.UPLOAD]
                     runOnUiThread { if (p != null && p != sharing) { sharing = p; showSharing() } }
                 }
@@ -238,7 +202,7 @@ class StatusActivity : ThemedActivity() {
         return if(kind=="text") RabtaUi.text(this,status.optString("body"),14f,true,android.graphics.Color.WHITE).apply {
             gravity=Gravity.CENTER;maxLines=6;ellipsize=android.text.TextUtils.TruncateAt.END
             setPadding(dp(10),dp(52),dp(10),dp(40))
-            setBackgroundColor(StatusViewerActivity.textColor(status.optString("id")))
+            setBackgroundColor(StatusLook.background(status)); typeface = StatusLook.typeface(status.optString("font"))
             importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
             setOnClickListener {open()}
         } else StatusMediaPreview(this,status.getString("body"),kind,status.getLong("expires")) {open()}

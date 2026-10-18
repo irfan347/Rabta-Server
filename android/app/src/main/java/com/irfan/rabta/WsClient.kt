@@ -3,6 +3,7 @@ package com.irfan.rabta
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -12,8 +13,10 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 object WsClient {
+    // A connect that has not answered in 20 s is stuck (often a network Android had blocked while Rabta slept); a
+    // fresh attempt is quicker than waiting longer.
     private val http = OkHttpClient.Builder()
-        .connectTimeout(90, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS)
+        .connectTimeout(20, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS)
         .pingInterval(25, TimeUnit.SECONDS).build()
     private val handler = Handler(Looper.getMainLooper())
     private var ws: WebSocket? = null
@@ -27,9 +30,33 @@ object WsClient {
     private var identity=""
     private var retryTask:Runnable?=null
     private var readyTimeout:Runnable?=null
+    private var probe:Runnable?=null
+    @Volatile private var lastHeard=0L      // elapsedRealtime of the server's last frame
+    // Servers that announce receipts (every current Rabta server) answer {"type":"ping"}; others are not checked.
+    @Volatile private var answersPing=false
+    private var attemptStarted=0L
+    /** Told once the connection is known good again, so a keep-alive wake lock can end early. */
+    @Volatile var settled:(()->Unit)?=null
     private fun main(work:()->Unit) { if(Looper.myLooper()==Looper.getMainLooper())work() else handler.post {work()} }
     private fun announce(value:String) { status=value;RabtaEvents.postDisconnected() }
-    private fun cancelTimers(){retryTask?.let {handler.removeCallbacks(it)};readyTimeout?.let {handler.removeCallbacks(it)};retryTask=null;readyTimeout=null}
+    private fun cancelTimers(){retryTask?.let {handler.removeCallbacks(it)};readyTimeout?.let {handler.removeCallbacks(it)};probe?.let {handler.removeCallbacks(it)};retryTask=null;readyTimeout=null;probe=null}
+
+    /**
+     * Rabta came on screen, the network changed or the keep-alive alarm fired. A phone that slept or changed network
+     * keeps a socket that only looks connected, and its reconnect timer stops while it sleeps: connect now instead of
+     * after a backoff, and make sure a connection that looks fine still answers, or replace it.
+     */
+    fun wake() = main {
+        if(!Session.loggedIn||authRequired||Session.serverUrl.isBlank())return@main
+        val now=SystemClock.elapsedRealtime()
+        // Not connected: a waiting backoff or a stuck attempt is replaced by a fresh one (never after a deliberate disconnect).
+        if(!connected) { if(shouldConnect&&(ws==null||now-attemptStarted>5000)) retry(); return@main }
+        if(now-lastHeard<20_000||!answersPing) { settled?.invoke(); return@main }
+        if(probe!=null)return@main
+        val attempt=generation
+        if(ws?.send("{\"type\":\"ping\"}")!=true) { lost(attempt,"Reconnecting…");return@main }
+        probe=Runnable { probe=null; if(attempt==generation&&lastHeard<now) lost(attempt,"Reconnecting…") }.also { handler.postDelayed(it,6000) }
+    }
 
     fun connect(session: Session) = main {
         if(session.serverUrl.isBlank()||session.token.isBlank())return@main
@@ -55,6 +82,7 @@ object WsClient {
     private fun doConnect() {
         if(!shouldConnect||authRequired)return
         val attempt=++generation
+        attemptStarted=SystemClock.elapsedRealtime()
         announce("Connecting to server…")
         try {
             val url=Session.serverUrl.trimEnd('/').replace("https://","wss://").replace("http://","ws://")+"/ws"
@@ -68,11 +96,13 @@ object WsClient {
                 }
                 override fun onMessage(socket:WebSocket,text:String)=main {
                     if(attempt!=generation)return@main
+                    lastHeard=SystemClock.elapsedRealtime()   // any frame, the server's "pong" too, proves the socket alive
+                    probe?.let { handler.removeCallbacks(it);probe=null;settled?.invoke() }
                     val o=runCatching {JSONObject(text)}.getOrNull()?:return@main
                     if(o.optString("type")=="ready") {
                         if(o.optString("id")!=expectedId){lost(attempt,"Sign in again",true);return@main}
                         readyTimeout?.let {handler.removeCallbacks(it)};readyTimeout=null
-                        protocol=o.optInt("protocol",1);connected=true;status="Online";reconnectDelay=2000L;RabtaEvents.postConnected()
+                        protocol=o.optInt("protocol",1);answersPing=o.optBoolean("receipts");connected=true;status="Online";reconnectDelay=2000L;RabtaEvents.postConnected();settled?.invoke()
                     } else if(connected)handle(o)
                 }
                 override fun onClosing(socket:WebSocket,code:Int,reason:String)=main {
