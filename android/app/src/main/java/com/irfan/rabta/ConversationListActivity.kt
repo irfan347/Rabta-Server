@@ -90,8 +90,8 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
             val color=if(MeshBridge.peersConnected>0) AppTheme.teal(this) else AppTheme.violet(this)
             connectionDot.background=pill(color)
         }
-        // NOVA keeps the header clean: the strip appears only while the server is not online.
-        if(::connectionStrip.isInitialized) connectionStrip.visibility=if(WsClient.connected) View.GONE else View.VISIBLE
+        // NOVA keeps the header clean: the strip appears only while the server is not online, not for a quick reconnect.
+        if(::connectionStrip.isInitialized) connectionStrip.visibility=if(WsClient.showsOffline()) View.VISIBLE else View.GONE
         if(::myAvatarView.isInitialized) myAvatarView.foreground=if(WsClient.connected) onlineDot() else null
     }
     private lateinit var connectionStrip: LinearLayout

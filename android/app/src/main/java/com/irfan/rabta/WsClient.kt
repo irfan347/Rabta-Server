@@ -41,21 +41,29 @@ object WsClient {
     private fun announce(value:String) { status=value;RabtaEvents.postDisconnected() }
     private fun cancelTimers(){retryTask?.let {handler.removeCallbacks(it)};readyTimeout?.let {handler.removeCallbacks(it)};probe?.let {handler.removeCallbacks(it)};retryTask=null;readyTimeout=null;probe=null}
 
+    /** How long a reconnect may take before screens say Rabta is offline: a quick one, as when Rabta opens, goes unseen. */
+    const val QUIET_MS = 2000L
+    @Volatile private var quietUntil = 0L
+    private fun quiet() { quietUntil = SystemClock.elapsedRealtime() + QUIET_MS }
+    /** Whether screens should say Rabta is offline or connecting; not while a reconnect is in its first [QUIET_MS]. */
+    fun showsOffline() = !connected && SystemClock.elapsedRealtime() >= quietUntil
+
     /**
-     * Rabta came on screen, the network changed or the keep-alive alarm fired. A phone that slept or changed network
-     * keeps a socket that only looks connected, and its reconnect timer stops while it sleeps: connect now instead of
-     * after a backoff, and make sure a connection that looks fine still answers, or replace it.
+     * Rabta came on screen ([onScreen]), the network changed or the keep-alive alarm fired. A phone that slept or
+     * changed network keeps a socket that only looks connected, and its reconnect timer stops while it sleeps: connect
+     * now instead of after a backoff, and make sure a connection that looks fine still answers, or replace it. Someone
+     * looking at Rabta waits for that check, so it is shorter then.
      */
-    fun wake() = main {
+    fun wake(onScreen: Boolean = false) = main {
         if(!Session.loggedIn||authRequired||Session.serverUrl.isBlank())return@main
         val now=SystemClock.elapsedRealtime()
         // Not connected: a waiting backoff or a stuck attempt is replaced by a fresh one (never after a deliberate disconnect).
-        if(!connected) { if(shouldConnect&&(ws==null||now-attemptStarted>5000)) retry(); return@main }
+        if(!connected) { if(onScreen) quiet(); if(shouldConnect&&(ws==null||now-attemptStarted>5000)) retry(); return@main }
         if(now-lastHeard<20_000||!answersPing) { settled?.invoke(); return@main }
         if(probe!=null)return@main
         val attempt=generation
-        if(ws?.send("{\"type\":\"ping\"}")!=true) { lost(attempt,"Reconnecting…");return@main }
-        probe=Runnable { probe=null; if(attempt==generation&&lastHeard<now) lost(attempt,"Reconnecting…") }.also { handler.postDelayed(it,6000) }
+        if(ws?.send("{\"type\":\"ping\"}")!=true) { lost(attempt,"Reconnecting…",atOnce=true);return@main }
+        probe=Runnable { probe=null; if(attempt==generation&&lastHeard<now) lost(attempt,"Reconnecting…",atOnce=true) }.also { handler.postDelayed(it,if(onScreen) 3000 else 6000) }
     }
 
     fun connect(session: Session) = main {
@@ -63,7 +71,7 @@ object WsClient {
         val next=session.serverUrl+"|"+session.id+"|"+session.token
         if(identity!=next){generation++;cancelTimers();ws?.cancel();ws=null;connected=false;authRequired=false;identity=next;shouldConnect=false}
         if(shouldConnect||authRequired)return@main
-        shouldConnect=true;reconnectDelay=2000L;doConnect()
+        shouldConnect=true;reconnectDelay=2000L;quiet();doConnect()
     }
     fun retry() = main {
         if(!Session.loggedIn)return@main
@@ -71,11 +79,13 @@ object WsClient {
         generation++;cancelTimers();ws?.cancel();ws=null;connected=false;shouldConnect=false
         connect(Session)
     }
-    private fun lost(attempt:Long,value:String,auth:Boolean=false) {
+    /** [atOnce]: the socket stopped answering while the network works, so a new one is made now, not after the backoff. */
+    private fun lost(attempt:Long,value:String,auth:Boolean=false,atOnce:Boolean=false) {
         if(attempt!=generation)return
+        if(connected) quiet()
         generation++;cancelTimers();connected=false;ws?.cancel();ws=null;authRequired=auth;announce(value)
         if(shouldConnect&&!auth) {
-            val delay=reconnectDelay;reconnectDelay=(reconnectDelay*1.5).toLong().coerceAtMost(30000)
+            val delay=if(atOnce) 0L else reconnectDelay.also { reconnectDelay=(it*1.5).toLong().coerceAtMost(30000) }
             retryTask=Runnable { retryTask=null;doConnect() }.also {handler.postDelayed(it,delay)}
         }
     }
