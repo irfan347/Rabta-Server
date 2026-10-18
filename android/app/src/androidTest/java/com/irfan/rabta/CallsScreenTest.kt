@@ -288,13 +288,14 @@ class CallsScreenTest {
                 .putExtra("peerId","CA1100000003").putExtra("peerName","Other contact")) as ChatActivity
             val o=other!!
             waitUi { shows(o,"Busy contact")&&shows(o,"Tap to return to call") }
-            val monitor=inst.addMonitor(ChatActivity::class.java.name,null,false)
-            try {
-                ui { all(o.window.decorView).first { it.isShown&&it.contentDescription?.toString()?.startsWith("Ongoing call with")==true }.performClick() }
-                back=inst.waitForMonitorWithTimeout(monitor,5000)
-            } finally { inst.removeMonitor(monitor) }
-            val b=back as ChatActivity
-            waitUi { shows(b,"Connected")&&all(b.window.decorView).any { it.isShown&&it.contentDescription=="End" } }
+            ui { all(o.window.decorView).first { it.isShown&&it.contentDescription?.toString()?.startsWith("Ongoing call with")==true }.performClick() }
+            // Whichever screen shows the call now: the call screen with its time and End.
+            waitUi {
+                back=WindowInspector.getGlobalWindowViews().flatMap { all(it) }.firstOrNull { it.isShown&&it.contentDescription=="End" }?.context as? android.app.Activity
+                back?.let { shows(it,"Connected") }==true
+            }
+            val b=back!!
+            assertTrue("The call screen belongs to the call's chat",b is ChatActivity&&b.intent.getStringExtra("peerId")=="CA1100000002")
             assertEquals("Still one call, never hung up",1L,ended.count)
             // The ongoing call's notice can hang up from anywhere.
             val notice=ctx.getSystemService(NotificationManager::class.java).activeNotifications.first { it.id==1 }.notification

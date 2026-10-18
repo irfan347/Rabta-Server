@@ -159,7 +159,9 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
 
     override fun onNewIntent(newIntent: Intent) {
         super.onNewIntent(newIntent)
-        if(newIntent.getStringExtra("peerId")!=peerId) { setIntent(newIntent); recreate(); return }
+        // Another chat (a notification, the call bar): it opens as a fresh screen in this one's place, carrying nothing
+        // over. Recreating this screen instead was unreliable on Android 10 and could bring back the previous chat.
+        if(newIntent.getStringExtra("peerId")!=peerId) { finish(); startActivity(Intent(newIntent).setFlags(0)); overridePendingTransition(0,0); return }
         setIntent(newIntent)
         if(newIntent.getBooleanExtra("showCall",false)) showCallScreen()
         if(newIntent.getBooleanExtra("autoAnswer",false)) startCall(false)
