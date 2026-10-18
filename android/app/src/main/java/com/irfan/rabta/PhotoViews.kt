@@ -115,8 +115,9 @@ class CropView(c: Context) : View(c) {
         val s = b.width / image.width()
         val x = ((crop.left - image.left) * s).toInt().coerceIn(0, b.width - 1)
         val y = ((crop.top - image.top) * s).toInt().coerceIn(0, b.height - 1)
-        val w = (crop.width() * s).toInt().coerceIn(1, b.width - x)
-        val h = (if (square) w else (crop.height() * s).toInt()).coerceIn(1, b.height - y)
+        var w = (crop.width() * s).toInt().coerceIn(1, b.width - x)
+        var h = (crop.height() * s).toInt().coerceIn(1, b.height - y)
+        if (square) { w = minOf(w, h); h = w }
         return Bitmap.createBitmap(b, x, y, w, h)
     }
     private fun reset() {
@@ -127,6 +128,7 @@ class CropView(c: Context) : View(c) {
         Matrix().apply { setRectToRect(RectF(image), RectF(pad, pad, width - pad, height - pad), Matrix.ScaleToFit.CENTER) }.mapRect(image)
         if (square) { val side = minOf(image.width(), image.height()); crop.set(image.centerX() - side / 2, image.centerY() - side / 2, image.centerX() + side / 2, image.centerY() + side / 2) }
         else crop.set(image)
+        crop.intersect(image) // centring a frame as wide as the photo can overshoot its edges by a rounding error
         invalidate()
     }
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) { super.onSizeChanged(w, h, ow, oh); reset() }
@@ -175,8 +177,8 @@ class CropView(c: Context) : View(c) {
                 val dx = x - lastX; val dy = y - lastY; lastX = x; lastY = y
                 when (mode) {
                     1 -> {
-                        val mx = dx.coerceIn(image.left - crop.left, image.right - crop.right)
-                        val my = dy.coerceIn(image.top - crop.top, image.bottom - crop.bottom)
+                        val mx = dx.clamp(image.left - crop.left, image.right - crop.right, 0f)
+                        val my = dy.clamp(image.top - crop.top, image.bottom - crop.bottom, 0f)
                         crop.offset(mx, my)
                     }
                     2, 3, 4, 5 -> {
@@ -186,11 +188,11 @@ class CropView(c: Context) : View(c) {
                             val ax = if (left) crop.right else crop.left; val ay = if (top) crop.bottom else crop.top
                             val want = maxOf(if (left) ax - x else x - ax, if (top) ay - y else y - ay)
                             val room = minOf(if (left) ax - image.left else image.right - ax, if (top) ay - image.top else image.bottom - ay)
-                            val side = want.coerceIn(min, room)
+                            val side = want.clamp(min, room, room)
                             crop.set(if (left) ax - side else ax, if (top) ay - side else ay, if (left) ax else ax + side, if (top) ay else ay + side)
                         } else {
-                            if (left) crop.left = (crop.left + dx).coerceIn(image.left, crop.right - min) else crop.right = (crop.right + dx).coerceIn(crop.left + min, image.right)
-                            if (top) crop.top = (crop.top + dy).coerceIn(image.top, crop.bottom - min) else crop.bottom = (crop.bottom + dy).coerceIn(crop.top + min, image.bottom)
+                            if (left) crop.left = (crop.left + dx).clamp(image.left, crop.right - min, crop.left) else crop.right = (crop.right + dx).clamp(crop.left + min, image.right, crop.right)
+                            if (top) crop.top = (crop.top + dy).clamp(image.top, crop.bottom - min, crop.top) else crop.bottom = (crop.bottom + dy).clamp(crop.top + min, image.bottom, crop.bottom)
                         }
                     }
                 }
@@ -201,6 +203,8 @@ class CropView(c: Context) : View(c) {
         return false
     }
     private fun near(x: Float, y: Float, px: Float, py: Float, r: Float) = Math.abs(x - px) <= r && Math.abs(y - py) <= r
+    /** coerceIn that cannot throw: when the frame fills the photo, rounding can leave the range a hair inside out. */
+    private fun Float.clamp(lo: Float, hi: Float, otherwise: Float) = if (lo > hi) otherwise else coerceIn(lo, hi)
 }
 
 /** Full-screen crop step shared by the profile photo and the status editor. */
