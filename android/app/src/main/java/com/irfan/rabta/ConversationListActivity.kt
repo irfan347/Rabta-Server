@@ -584,9 +584,9 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         RabtaUi.SheetAction("Message") { open(c.peerId,c.name) },
         RabtaUi.SheetAction("Voice call") { callContact(c.peerId,c.name) },
         RabtaUi.SheetAction("Video call") { callContact(c.peerId,c.name,true) },
-        RabtaUi.SheetAction("Remove from contacts","Your chat with ${c.name}, if any, stays") {
-            android.app.AlertDialog.Builder(this).setTitle("Remove ${c.name}?").setMessage("${c.name} leaves your contacts. A new message from them adds them back.")
-                .setNegativeButton("Cancel",null).setPositiveButton("Remove") { _,_ -> Thread { runCatching { db.removeContact(c.peerId) };uiHandler.post { loadConvs() } }.start() }.show()
+        RabtaUi.SheetAction("Delete contact","Your chat with ${c.name}, if any, stays") {
+            android.app.AlertDialog.Builder(this).setTitle("Delete ${c.name}?").setMessage("${c.name} is deleted from your contacts. Your chat with them, if any, stays in Chats.")
+                .setNegativeButton("Cancel",null).setPositiveButton("Delete") { _,_ -> Thread { runCatching { db.removeContact(c.peerId) };uiHandler.post { loadConvs() } }.start() }.show()
         },
     ))
 

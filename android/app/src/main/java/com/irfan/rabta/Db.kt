@@ -80,11 +80,15 @@ class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(
 
     fun upsertConversation(peerId: String, peerName: String, lastMsg: String, time: Long, incUnread: Boolean, isGroup: Boolean = false) {
         val cv = ContentValues().apply { put("peer_id",peerId);put("peer_name",peerName);put("last_msg",lastMsg.take(100));put("last_time",time);put("is_group", if(isGroup) 1 else 0) }
-        writableDatabase.insertWithOnConflict("conversations", null, cv, SQLiteDatabase.CONFLICT_IGNORE)
+        val started = writableDatabase.insertWithOnConflict("conversations", null, cv, SQLiteDatabase.CONFLICT_IGNORE) != -1L
         writableDatabase.execSQL("UPDATE conversations SET peer_name=?,last_msg=?,last_time=?,unread=unread+?,is_group=? WHERE peer_id=?",
             arrayOf(peerName, lastMsg.take(100), time, if (incUnread) 1 else 0, if (isGroup) 1 else 0, peerId))
-        // Whoever you chat with one-to-one is saved as a contact, so deleting the chat later keeps them.
-        if (!isGroup) saveContact(peerId, peerName)
+        // A new one-to-one chat saves its person as a contact, so deleting the chat later keeps them. Later messages
+        // only keep the contact's name current: a contact you deleted stays deleted.
+        if (!isGroup) {
+            if (started) saveContact(peerId, peerName)
+            else if (peerName.isNotBlank() && peerName != peerId) writableDatabase.execSQL("UPDATE contacts SET name=? WHERE peer_id=?", arrayOf(peerName, peerId))
+        }
     }
 
     /** Saves [peerId] as a contact; a real name or username replaces what was known, a bare ID never does. */

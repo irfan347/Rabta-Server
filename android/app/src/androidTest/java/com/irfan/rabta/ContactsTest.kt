@@ -99,7 +99,26 @@ class ContactsTest {
             assertTrue("The person stays a contact", db.contacts().any { it.peerId == friend })
             ui { windows().first { it.contentDescription == "Contacts filter" }.performClick() }
             waitUi("Still in Contacts") { shown("Saved friend") && shown("Only contact") }
+
+            // Delete contact: gone from Contacts.
+            hold("Only contact"); tap("Delete contact"); tap("Delete", exact = true)
+            waitUi("The deleted contact is gone") { db.contacts().none { it.peerId == other } && !shown("Only contact") && shown("Saved friend") }
         } finally { ui { list.finish() } }
+    }
+
+    /** A contact you delete stays deleted while their chat goes on; a new chat with them saves them again. */
+    @Test fun deletedContactStaysDeletedUntilANewChat() = fixture { db ->
+        val peer = "CT1100000005"; val now = System.currentTimeMillis()
+        db.upsertConversation(peer, "Chatty", "First", now, true)
+        assertTrue("A new chat saves its person", db.contacts().any { it.peerId == peer })
+        db.removeContact(peer)
+        db.upsertConversation(peer, "Chatty", "Another message", now + 1, true)
+        assertTrue("More messages in the same chat do not bring a deleted contact back", db.contacts().none { it.peerId == peer })
+        db.deleteChat(peer)
+        db.upsertConversation(peer, "Chatty again", "Hello after a while", now + 2, true)
+        assertEquals("A new chat saves them again, with their current name", "Chatty again", db.contacts().single { it.peerId == peer }.name)
+        db.upsertConversation(peer, "Renamed", "Name changed", now + 3, true)
+        assertEquals("An existing contact keeps the current name", "Renamed", db.contacts().single { it.peerId == peer }.name)
     }
 
     /** Updating keeps every chat: people already chatted with one-to-one become contacts, groups do not. */
