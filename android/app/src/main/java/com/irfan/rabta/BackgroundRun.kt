@@ -68,6 +68,16 @@ object BackgroundRun {
         request(a)
     }
 
+    /**
+     * The chats screen asks by itself, once, so nobody has to find this setting before messages and calls can reach
+     * them while Rabta is closed. Android lets no app allow itself: the person taps Allow. The strip and Settings stay.
+     */
+    fun askOnce(a: Activity) {
+        if (allowed(a) || prefs(a).getBoolean("asked", false)) return
+        prefs(a).edit().putBoolean("asked", true).apply()
+        allow(a)
+    }
+
     /** Chats screen resume: on phones with their own auto-start control, that step follows Android's question. */
     fun followUp(a: Activity) {
         if (!prefs(a).getBoolean("auto_start_pending", false)) return
