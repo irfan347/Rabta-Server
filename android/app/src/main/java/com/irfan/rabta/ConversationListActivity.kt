@@ -125,7 +125,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
     override fun onResume() {
         super.onResume();if(!::connectionTv.isInitialized)return
         AccountUi.ensureTrustedPhone(this)
-        resumed=true;refreshAvatar();ProfilePhoto.restore { if(!isDestroyed) refreshAvatar() };MessageService.start(this);RabtaEvents.add(this)
+        resumed=true;refreshAvatar();ProfilePhoto.sync { if(!isDestroyed) refreshAvatar() };MessageService.start(this);RabtaEvents.add(this)
         uiHandler.removeCallbacks(connectionTick);uiHandler.post(connectionTick)
         when(activeTab) { 1->nearbyPanel.resume();3->loadCalls();else->loadConvs() }
         if(activeTab==0) loadMoments(force=true)
@@ -899,6 +899,6 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         uiHandler.postDelayed({ loadConvs() }, 400)
     }
     override fun onHistoryChanged(convId: String) { loadConvs() }
-    override fun onConnected() { updateConnection();uiHandler.post { ProfilePhoto.restore { if(!isDestroyed) refreshAvatar() } } }
+    override fun onConnected() { updateConnection();uiHandler.post { ProfilePhoto.sync { if(!isDestroyed) refreshAvatar() } } }
     override fun onDisconnected() { updateConnection() }
 }

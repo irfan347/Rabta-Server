@@ -28,22 +28,75 @@ object ProfilePhoto {
 
     fun current(): Bitmap? = Session.profilePic.takeIf { it.isNotEmpty() }?.let { MediaHelper.base64ToBitmap(it) }
 
-    private var lastRestore = 0L
+    private var lastSync = 0L
+    private var uploading = 0
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+
     /**
-     * Signing out clears this phone's copy of your photo, but the server keeps it. When the phone has none,
-     * fetch it back (at most every 20 s, so a sleeping server is retried without hammering it). Main thread.
+     * Keeps this phone's photo and the server's copy in step, at most every 20 s so a sleeping server is retried
+     * without hammering it. Main thread.
+     * - Signing out clears this phone's copy, but the server keeps it: fetch it back.
+     * - A photo the server never got (chosen offline, or before photos were shared at all) is shared now.
      */
-    fun restore(done: () -> Unit) {
-        if (!Session.loggedIn || Session.profilePic.isNotEmpty()) return
+    fun sync(done: () -> Unit) {
+        if (!Session.loggedIn) return
         val now = android.os.SystemClock.elapsedRealtime()
-        if (now - lastRestore < 20_000) return
-        lastRestore = now
+        if (now - lastSync < 20_000) return
+        lastSync = now
         val owner = Session.id
-        WsClient.fetchPhoto(Session.serverUrl, Session.token, owner) { b64 ->
+        if (Session.profilePic.isNotEmpty()) { if (!Session.profilePicShared) share(owner); return }
+        WsClient.fetchPhoto(Session.serverUrl, Session.token, owner) { answer ->
+            val b64 = answer?.photo
             if (b64.isNullOrEmpty() || Session.id != owner || Session.profilePic.isNotEmpty()) return@fetchPhoto
             val bitmap = MediaHelper.base64ToBitmap(b64) ?: return@fetchPhoto
-            Session.profilePic = b64; ProfileHelper.set(owner, bitmap); done()
+            Session.profilePic = b64; Session.profilePicShared = true; ProfileHelper.set(owner, bitmap); done()
         }
+    }
+
+    private fun share(owner: String) {
+        if (uploading > 0) return
+        val local = Session.profilePic
+        uploading++
+        Thread {
+            val photo = shareable(local)
+            main.post {
+                uploading--
+                if (photo != null && Session.id == owner && Session.profilePic == local) upload(owner, local, photo) { _, _ -> }
+            }
+        }.start()
+    }
+
+    /** Sends [photo], the server's copy of this phone's [local] one. Main thread. */
+    private fun upload(owner: String, local: String, photo: String, cb: (Boolean, String) -> Unit) {
+        uploading++; Session.profilePicShared = false
+        WsClient.uploadPhoto(Session.serverUrl, Session.token, photo) { ok, msg ->
+            uploading--
+            if (ok && Session.id == owner) when (Session.profilePic) {
+                local -> Session.profilePicShared = true
+                "" -> WsClient.uploadPhoto(Session.serverUrl, Session.token, "") { _, _ -> }   // removed meanwhile: keep it removed
+                else -> Session.profilePicShared = false                                         // changed meanwhile: share the new one next
+            }
+            cb(ok, msg)
+        }
+    }
+
+    /** A [SIZE]px JPEG well under the server limit, as base64. Background thread. */
+    private fun encode(bitmap: Bitmap): String {
+        val square = Bitmap.createScaledBitmap(bitmap, SIZE, maxOf(1, SIZE * bitmap.height / maxOf(1, bitmap.width)), true)
+        val out = ByteArrayOutputStream(); var quality = 88
+        do { out.reset(); square.compress(Bitmap.CompressFormat.JPEG, quality, out); quality -= 8 } while (out.size() > 200 * 1024 && quality > 40)
+        return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+    }
+
+    private val PNG = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+
+    /** [b64] as the server accepts it: JPEG or PNG up to 256 KB on one base64 line; older or larger photos are re-encoded. */
+    private fun shareable(b64: String): String? {
+        val bytes = try { Base64.decode(b64, Base64.DEFAULT) } catch (_: IllegalArgumentException) { return null }
+        val jpeg = bytes.size > 2 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte()
+        val png = bytes.size > 8 && bytes.copyOf(8).contentEquals(PNG)
+        if ((jpeg || png) && bytes.size <= 256 * 1024) return Base64.encodeToString(bytes, Base64.NO_WRAP)
+        return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.let(::encode)
     }
 
     /** Opens the picked photo in the circle crop, then saves the result. */
@@ -62,15 +115,12 @@ object ProfilePhoto {
     fun save(a: Activity, bitmap: Bitmap, done: () -> Unit) {
         val owner = Session.id
         Thread {
-            val square = Bitmap.createScaledBitmap(bitmap, SIZE, maxOf(1, SIZE * bitmap.height / maxOf(1, bitmap.width)), true)
-            val out = ByteArrayOutputStream(); var quality = 88
-            do { out.reset(); square.compress(Bitmap.CompressFormat.JPEG, quality, out); quality -= 8 } while (out.size() > 200 * 1024 && quality > 40)
-            val encoded = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+            val encoded = encode(bitmap)
             a.runOnUiThread {
                 if (Session.id != owner) return@runOnUiThread
                 Session.profilePic = encoded; ProfileHelper.set(owner, MediaHelper.base64ToBitmap(encoded)); done()
                 Toast.makeText(a, "Updating photo…", Toast.LENGTH_SHORT).show()
-                WsClient.uploadPhoto(Session.serverUrl, Session.token, encoded) { ok, msg ->
+                upload(owner, encoded, encoded) { ok, msg ->
                     if (!a.isDestroyed) Toast.makeText(a, if (ok) "Profile photo updated" else "Photo saved on this phone, but it could not be shared: $msg", Toast.LENGTH_LONG).show()
                 }
             }
@@ -81,9 +131,14 @@ object ProfilePhoto {
         AlertDialog.Builder(a).setTitle("Remove profile photo?").setMessage("Your contacts will see your initials instead.")
             .setNegativeButton("Cancel", null).setPositiveButton("Remove") { _, _ ->
                 val owner = Session.id
+                uploading++
                 WsClient.uploadPhoto(Session.serverUrl, Session.token, "") { ok, msg ->
-                    if (a.isDestroyed || Session.id != owner) return@uploadPhoto
-                    if (ok) { Session.profilePic = ""; ProfileHelper.set(owner, null); done(); Toast.makeText(a, "Profile photo removed", Toast.LENGTH_SHORT).show() }
+                    uploading--
+                    if (Session.id != owner) return@uploadPhoto
+                    // Forget the photo even if this screen has closed, or it would be shared again later.
+                    if (ok) { Session.profilePic = ""; ProfileHelper.set(owner, null) }
+                    if (a.isDestroyed) return@uploadPhoto
+                    if (ok) { done(); Toast.makeText(a, "Profile photo removed", Toast.LENGTH_SHORT).show() }
                     else Toast.makeText(a, "Could not remove the photo: $msg", Toast.LENGTH_LONG).show()
                 }
             }.show()
@@ -145,7 +200,7 @@ class ProfilePhotoActivity : ThemedActivity() {
     }
 
     private fun show() {
-        if (own) ProfilePhoto.restore { if (!isDestroyed) show() }
+        if (own) ProfilePhoto.sync { if (!isDestroyed) show() }
         val bitmap = if (own) ProfilePhoto.current() else ProfileHelper.get(peerId)
         photo.setImageBitmap(bitmap)
         empty.visibility = if (bitmap == null) View.VISIBLE else View.GONE
