@@ -277,6 +277,7 @@ jobs:
           grep -q "package: name='com.irfan.rabta'" "$out/badging.txt"
           grep -q "application-label:'Rabta'" "$out/badging.txt"
           if grep -q "application-debuggable" "$out/badging.txt"; then echo "The public APK must not be debuggable."; exit 1; fi
+          if grep "native-code:" "$out/badging.txt" | grep -q "x86"; then echo "The public APK must not carry emulator (x86) libraries."; exit 1; fi
           # Debuggable test builds must never carry the public app's signature.
           digest() { grep -m1 "certificate SHA-256 digest" "$1" | awk '{print $NF}'; }
           "$tools/apksigner" verify --print-certs "$ANDROID_PROJECT_DIR/app/build/outputs/apk/device/app-device.apk" > "$out/test-signature.txt"
