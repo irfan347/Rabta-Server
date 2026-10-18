@@ -39,12 +39,24 @@ class MessageDeliveryTest {
         assertTrue(MessageDelivery.canTransition("relayed", "delivered"))
     }
     @Test fun legacyStoredValuesKeepWorkingAndShowAccurateLabels() {
-        assertEquals("✓ Relayed", MessageDelivery.label("sent"))
+        assertEquals("✓ Sent", MessageDelivery.label("sent"))
         assertEquals("Queued", MessageDelivery.label("mesh"))
         assertEquals("Queued", MessageDelivery.label("mesh_wait"))
         assertTrue(MessageDelivery.pending("mesh_wait"))
         assertFalse(MessageDelivery.pending("sent"))
         assertTrue(MessageDelivery.delivered("direct_delivered"))
         assertFalse(MessageDelivery.delivered("relayed"))
+    }
+    @Test fun ticksFollowTheRealStateLikeWhatsApp() {
+        assertEquals("clock", MessageDelivery.tickIcon("queued"))
+        assertEquals("clock", MessageDelivery.tickIcon("sending"))
+        assertEquals("clock", MessageDelivery.tickIcon("mesh_wait"))
+        assertEquals("check", MessageDelivery.tickIcon("relayed"))
+        assertEquals("check", MessageDelivery.tickIcon("sent"))
+        assertEquals("done_all", MessageDelivery.tickIcon("delivered"))
+        assertEquals("done_all", MessageDelivery.tickIcon("direct_delivered"))
+        assertEquals("done_all", MessageDelivery.tickIcon("read"))
+        assertEquals("error", MessageDelivery.tickIcon("failed"))
+        assertEquals("error", MessageDelivery.tickIcon("expired"))
     }
 }

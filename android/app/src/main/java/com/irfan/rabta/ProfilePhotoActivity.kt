@@ -1,0 +1,182 @@
+package com.irfan.rabta
+
+import android.Manifest
+import android.app.Activity
+import android.app.AlertDialog
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Color
+import android.net.Uri
+import android.os.Bundle
+import android.provider.MediaStore
+import android.util.Base64
+import android.view.Gravity
+import android.view.View
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
+import android.widget.Toast
+import androidx.core.content.FileProvider
+import java.io.ByteArrayOutputStream
+import java.io.File
+
+/** Picking, cropping, saving and removing your own profile photo; shared by Profile and the photo screen. */
+object ProfilePhoto {
+    /** Server limit is 256 KB; a 480px JPEG stays far below it while looking sharp in large avatars. */
+    private const val SIZE = 480
+
+    fun current(): Bitmap? = Session.profilePic.takeIf { it.isNotEmpty() }?.let { MediaHelper.base64ToBitmap(it) }
+
+    private var lastRestore = 0L
+    /**
+     * Signing out clears this phone's copy of your photo, but the server keeps it. When the phone has none,
+     * fetch it back (at most every 20 s, so a sleeping server is retried without hammering it). Main thread.
+     */
+    fun restore(done: () -> Unit) {
+        if (!Session.loggedIn || Session.profilePic.isNotEmpty()) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastRestore < 20_000) return
+        lastRestore = now
+        val owner = Session.id
+        WsClient.fetchPhoto(Session.serverUrl, Session.token, owner) { b64 ->
+            if (b64.isNullOrEmpty() || Session.id != owner || Session.profilePic.isNotEmpty()) return@fetchPhoto
+            val bitmap = MediaHelper.base64ToBitmap(b64) ?: return@fetchPhoto
+            Session.profilePic = b64; ProfileHelper.set(owner, bitmap); done()
+        }
+    }
+
+    /** Opens the picked photo in the circle crop, then saves the result. */
+    fun cropAndSave(a: Activity, uri: Uri, decoded: () -> Unit = {}, done: () -> Unit) {
+        Thread {
+            val bitmap = MediaHelper.decodeBitmap(a, uri, 1600)
+            decoded()
+            a.runOnUiThread {
+                if (a.isDestroyed || a.isFinishing) return@runOnUiThread
+                if (bitmap == null) { Toast.makeText(a, "Could not open that image", Toast.LENGTH_LONG).show(); return@runOnUiThread }
+                CropScreen.show(a, bitmap, true) { cropped -> save(a, cropped, done) }
+            }
+        }.start()
+    }
+
+    fun save(a: Activity, bitmap: Bitmap, done: () -> Unit) {
+        val owner = Session.id
+        Thread {
+            val square = Bitmap.createScaledBitmap(bitmap, SIZE, SIZE * bitmap.height / maxOf(1, bitmap.width), true)
+            val out = ByteArrayOutputStream(); var quality = 88
+            do { out.reset(); square.compress(Bitmap.CompressFormat.JPEG, quality, out); quality -= 8 } while (out.size() > 200 * 1024 && quality > 40)
+            val encoded = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+            a.runOnUiThread {
+                if (Session.id != owner) return@runOnUiThread
+                Session.profilePic = encoded; ProfileHelper.set(owner, MediaHelper.base64ToBitmap(encoded)); done()
+                Toast.makeText(a, "Updating photo…", Toast.LENGTH_SHORT).show()
+                WsClient.uploadPhoto(Session.serverUrl, Session.token, encoded) { ok, msg ->
+                    if (!a.isDestroyed) Toast.makeText(a, if (ok) "Profile photo updated" else "Photo saved on this phone, but it could not be shared: $msg", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
+
+    fun remove(a: Activity, done: () -> Unit) {
+        AlertDialog.Builder(a).setTitle("Remove profile photo?").setMessage("Your contacts will see your initials instead.")
+            .setNegativeButton("Cancel", null).setPositiveButton("Remove") { _, _ ->
+                val owner = Session.id
+                WsClient.uploadPhoto(Session.serverUrl, Session.token, "") { ok, msg ->
+                    if (a.isDestroyed || Session.id != owner) return@uploadPhoto
+                    if (ok) { Session.profilePic = ""; ProfileHelper.set(owner, null); done(); Toast.makeText(a, "Profile photo removed", Toast.LENGTH_SHORT).show() }
+                    else Toast.makeText(a, "Could not remove the photo: $msg", Toast.LENGTH_LONG).show()
+                }
+            }.show()
+    }
+}
+
+/**
+ * WhatsApp-style full-screen profile photo. Your own photo adds Gallery, Camera, Crop and Remove;
+ * a contact's photo is view-only.
+ */
+class ProfilePhotoActivity : ThemedActivity() {
+    private lateinit var photo: ZoomImageView
+    private lateinit var empty: TextView
+    private var own = true
+    private var peerId = ""
+    private var captureUri: Uri? = null
+    private fun dp(n: Int) = RabtaUi.dp(this, n)
+
+    override fun onCreate(state: Bundle?) {
+        super.onCreate(state)
+        peerId = intent.getStringExtra("peerId").orEmpty().ifBlank { Session.id }
+        own = peerId == Session.id
+        val name = if (own) "Profile photo" else intent.getStringExtra("peerName").orEmpty().ifBlank { "Profile photo" }
+        RabtaUi.systemBars(this, true)
+        val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+        photo = ZoomImageView(this).apply { contentDescription = if (own) "Your profile photo" else "$name profile photo" }
+        root.addView(photo, FrameLayout.LayoutParams(-1, -1))
+        empty = RabtaUi.text(this, "No profile photo", 16f, color = 0xFFB8C2CC.toInt()).apply { gravity = Gravity.CENTER; visibility = View.GONE }
+        root.addView(empty, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER))
+        val top = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(8), dp(8), dp(8), dp(8)) }
+        top.addView(RabtaUi.iconButton(this, "back", "Back") { finish() }.apply { UiIcons.set(this, "back", Color.WHITE, 24, "Back") })
+        top.addView(RabtaUi.text(this, name, 19f, true, Color.WHITE).apply { setPadding(dp(4), 0, 0, 0); maxLines = 1 }, LinearLayout.LayoutParams(0, -2, 1f))
+        root.addView(top, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
+        if (own) {
+            val actions = LinearLayout(this).apply {
+                gravity = Gravity.CENTER; setPadding(dp(12), dp(14), dp(12), dp(18))
+                background = android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xCC000000.toInt(), 0))
+            }
+            actions.addView(action("gallery", "Gallery") { pick() }, LinearLayout.LayoutParams(0, -2, 1f))
+            actions.addView(action("photo", "Camera") { camera() }, LinearLayout.LayoutParams(0, -2, 1f))
+            actions.addView(action("crop", "Crop") { ProfilePhoto.current()?.let { CropScreen.show(this, it, true) { c -> ProfilePhoto.save(this, c) { show() } } } ?: Toast.makeText(this, "Add a photo first", Toast.LENGTH_SHORT).show() }, LinearLayout.LayoutParams(0, -2, 1f))
+            actions.addView(action("trash", "Remove") { if (Session.profilePic.isEmpty()) Toast.makeText(this, "No photo to remove", Toast.LENGTH_SHORT).show() else ProfilePhoto.remove(this) { show() } }, LinearLayout.LayoutParams(0, -2, 1f))
+            root.addView(actions, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
+        }
+        setContentView(root)
+        show()
+    }
+
+    private fun action(icon: String, label: String, run: () -> Unit) = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; isFocusable = true; contentDescription = label; setOnClickListener { run() }
+        background = RabtaUi.ripple(this@ProfilePhotoActivity, Color.TRANSPARENT, 16); setPadding(0, dp(6), 0, dp(6))
+        addView(UiIcons.image(this@ProfilePhotoActivity, icon, Color.WHITE, 24, label).apply {
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            background = RabtaUi.shape(this@ProfilePhotoActivity, 0x33FFFFFF, 999)
+        }, LinearLayout.LayoutParams(dp(52), dp(52)))
+        addView(RabtaUi.text(this@ProfilePhotoActivity, label, 13f, true, Color.WHITE).apply { setPadding(0, dp(6), 0, 0); importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO })
+    }
+
+    private fun show() {
+        if (own) ProfilePhoto.restore { if (!isDestroyed) show() }
+        val bitmap = if (own) ProfilePhoto.current() else ProfileHelper.get(peerId)
+        photo.setImageBitmap(bitmap)
+        empty.visibility = if (bitmap == null) View.VISIBLE else View.GONE
+        setResult(RESULT_OK)
+    }
+
+    private fun pick() = startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE), PICK)
+    private fun camera() {
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) { requestPermissions(arrayOf(Manifest.permission.CAMERA), CAMERA); return }
+        val file = File(filesDir, "attachments/profile-${System.currentTimeMillis()}.jpg").also { it.parentFile?.mkdirs() }
+        val uri = FileProvider.getUriForFile(this, "$packageName.files", file); captureUri = uri
+        runCatching { startActivityForResult(Intent(MediaStore.ACTION_IMAGE_CAPTURE).putExtra(MediaStore.EXTRA_OUTPUT, uri).addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION), CAPTURE) }
+            .onFailure { Toast.makeText(this, "No camera app available", Toast.LENGTH_SHORT).show() }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        val shot = captureUri
+        if (requestCode == CAPTURE && shot != null) {
+            captureUri = null
+            if (resultCode == RESULT_OK) ProfilePhoto.cropAndSave(this, shot, { deleteCapture(shot) }) { show() } else deleteCapture(shot)
+            return
+        }
+        if (requestCode == PICK && resultCode == RESULT_OK) data?.data?.let { ProfilePhoto.cropAndSave(this, it) { show() } }
+    }
+    /** The camera's full-size original is only an input; the saved avatar is the cropped copy. */
+    private fun deleteCapture(uri: Uri) { runCatching { File(filesDir, "attachments/" + uri.lastPathSegment).delete() } }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == CAMERA) { if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) camera() else Toast.makeText(this, "Camera permission is needed to take a photo", Toast.LENGTH_SHORT).show() }
+    }
+
+    companion object { private const val PICK = 61; private const val CAPTURE = 62; private const val CAMERA = 63 }
+}

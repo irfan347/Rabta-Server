@@ -4,7 +4,7 @@ package com.irfan.rabta
  * AutoSwitch delivery states. A state only moves forward on verified evidence, so acknowledgements that
  * arrive late or out of order never undo a better state.
  *
- * Stored values written by earlier versions stay readable: "sent" (server accepted) is shown as Relayed,
+ * Stored values written by earlier versions stay readable: "sent" (server accepted) is shown as Sent,
  * "mesh"/"mesh_wait" (waiting in the Nearby queue) as Queued. History rows are not rewritten.
  */
 object MessageDelivery {
@@ -58,11 +58,19 @@ object MessageDelivery {
     fun retryable(status: String) = status in setOf(FAILED, EXPIRED, PAUSED, CANCELED)
     fun delivered(status: String) = rank(status) >= 2
 
+    /** Icon for the chat tick: clock while waiting, ✓ relayed, ✓✓ delivered or read (read is blue), error when it needs a retry. */
+    fun tickIcon(status: String): String = when {
+        rank(status) >= 2 -> "done_all"
+        rank(status) == 1 -> "check"
+        retryable(status) -> "error"
+        else -> "clock"
+    }
+
     fun label(status: String): String = when (status) {
         QUEUED, "mesh", "mesh_wait" -> "Queued"
         SENDING -> "Sending…"
-        RELAYED, "sent" -> "✓ Relayed"
-        DIRECT -> "✓✓ Direct delivered"
+        RELAYED, "sent" -> "✓ Sent"
+        DIRECT -> "✓✓ Delivered"
         DELIVERED -> "✓✓ Delivered"
         READ -> "✓✓ Read"
         EXPIRED -> "Expired · Tap to resend"

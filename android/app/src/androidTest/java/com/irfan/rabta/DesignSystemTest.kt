@@ -103,7 +103,10 @@ class DesignSystemTest {
                 ui { nav("Calls").performClick() }
                 waitUntil { nav("Calls").isSelected }
                 capture("23-calls-${mode.lowercase()}")
-                ui { all(a.window.decorView).first { it.contentDescription=="Status" }.performClick() }
+                ui { nav("Chats").performClick() }
+                waitUntil { nav("Chats").isSelected }
+                // Status is reached from the first Moments item.
+                ui { all(a.window.decorView).first { it.contentDescription=="My Moment. Status" }.performClick() }
                 waitUntil {
                     androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()
                         .getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED).any { it is StatusActivity }
@@ -112,9 +115,9 @@ class DesignSystemTest {
                 assertNotNull("Status is a real screen",status)
                 ui { status?.finish() }
                 inst.waitForIdleSync()
-                ui { all(a.window.decorView).first { it.contentDescription=="More options" }.performClick() }
-                capture("24-sheet-${mode.lowercase()}")
-                inst.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+                ui { all(a.window.decorView).first { it.contentDescription=="Search chats" }.performClick() }
+                waitUntil { all(a.window.decorView).filterIsInstance<EditText>().any { it.isShown && it.contentDescription=="Search names or messages" } }
+                capture("24-search-${mode.lowercase()}")
             } finally { ui { a.finish() };MessageService.stop(ctx) }
         }
     }
@@ -126,21 +129,25 @@ class DesignSystemTest {
     @Test fun colorsRetainContrastAndSystemFontScale() {
         val prefs=ctx.getSharedPreferences("appearance",0)
         val previousMode=AppTheme.mode(ctx);val previousScale=prefs.getFloat("scale",1f)
+        val previousTheme=AppTheme.themeKey(ctx);val previousAccent=AppTheme.accentKey(ctx)
         try {
-            for(mode in listOf("Dark","Light")) {
-                prefs.edit().putString("mode",mode).commit()
+            // Every theme, and every custom accent, keeps AA contrast in both modes.
+            val looks=AppTheme.palettes.map { it.key to null as String? }+AppTheme.accents.map { "custom" to it.key }
+            for((theme,accent) in looks) for(mode in listOf("Dark","Light")) {
+                prefs.edit().putString("mode",mode).commit();AppTheme.setTheme(ctx,theme,accent)
                 for(bg in listOf(AppTheme.bg(ctx),AppTheme.surface(ctx),AppTheme.raised(ctx),AppTheme.sent(ctx))) {
                     for(fg in listOf(AppTheme.text(ctx),AppTheme.sub(ctx),AppTheme.accent(ctx),AppTheme.teal(ctx),AppTheme.error(ctx))) {
-                        assertTrue("AA text contrast in $mode",ColorUtils.calculateContrast(fg,bg)>=4.5)
+                        assertTrue("AA text contrast in $theme/$accent $mode",ColorUtils.calculateContrast(fg,bg)>=4.5)
                     }
                 }
                 assertTrue(ColorUtils.calculateContrast(Color.WHITE,AppTheme.ACCENT)>=4.5)
-                assertTrue(ColorUtils.calculateContrast(AppTheme.onPrimary(ctx),AppTheme.primary(ctx))>=4.5)
+                assertTrue("Button label contrast in $theme/$accent",ColorUtils.calculateContrast(AppTheme.onPrimary(ctx),AppTheme.primary(ctx))>=4.5)
             }
+            AppTheme.setTheme(ctx,previousTheme,previousAccent)
             prefs.edit().putFloat("scale",1.15f).commit()
             val context=ctx.createConfigurationContext(Configuration(ctx.resources.configuration).apply { fontScale=1.4f })
             assertEquals(1.61f,L.context(context).resources.configuration.fontScale,0.01f)
-        } finally { prefs.edit().putString("mode",previousMode).putFloat("scale",previousScale).commit() }
+        } finally { prefs.edit().putString("mode",previousMode).putFloat("scale",previousScale).putString("theme",previousTheme).putString("accent",previousAccent).commit() }
     }
     @Test fun largeTextNavigationSurvivesRecreation() {
         prepare()

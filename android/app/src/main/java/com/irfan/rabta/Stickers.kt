@@ -32,7 +32,9 @@ object Stickers {
             @Deprecated("Deprecated") override fun getOpacity()=PixelFormat.TRANSLUCENT
         }
     }
-    private fun items(c:android.content.Context,key:String):List<String> = runCatching {
+    fun bundled()=labels.indices.map { "rbt:$it" }
+    fun label(body:String)=if(valid(body)) labels[body.removePrefix("rbt:").toInt()] else "Custom sticker"
+    fun items(c:android.content.Context,key:String):List<String> = runCatching {
         val a=org.json.JSONArray(c.getSharedPreferences("stickers",0).getString(key,"[]"))
         (0 until a.length()).map { a.getString(it) }
     }.getOrDefault(emptyList())

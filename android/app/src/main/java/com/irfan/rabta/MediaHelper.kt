@@ -16,11 +16,23 @@ object MediaHelper {
 
     /** Compress image from URI to base64 JPEG (max [maxPx], default 800px). */
     fun imageToBase64(ctx: Context, uri: Uri, maxPx: Int = 800, quality: Int = 75): String? {
+        val bmp = decodeBitmap(ctx, uri, maxPx) ?: return null
+        return try {
+            val out = ByteArrayOutputStream()
+            bmp.compress(Bitmap.CompressFormat.JPEG, quality, out)
+            Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** Decodes a picked photo upright (EXIF rotation applied) and no larger than [maxPx] on its long side. */
+    fun decodeBitmap(ctx: Context, uri: Uri, maxPx: Int = 1600): Bitmap? {
         return try {
             val bounds=BitmapFactory.Options().apply { inJustDecodeBounds=true }
             ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it,null,bounds); true } ?: return null
             var sample=1
-            while(maxOf(bounds.outWidth,bounds.outHeight)/sample>1600) sample*=2
+            while(maxOf(bounds.outWidth,bounds.outHeight)/sample>maxOf(1600,maxPx)) sample*=2
             val options=BitmapFactory.Options().apply { inSampleSize=sample }
             var bmp=ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it,null,options) } ?: return null
             // Correct orientation
@@ -40,9 +52,7 @@ object MediaHelper {
             // Scale down
             val scale = maxPx.toFloat() / maxOf(bmp.width, bmp.height)
             if (scale < 1f) bmp = Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt(), (bmp.height * scale).toInt(), true)
-            val out = ByteArrayOutputStream()
-            bmp.compress(Bitmap.CompressFormat.JPEG, quality, out)
-            Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+            bmp
         } catch (_: Exception) {
             null
         }
@@ -98,6 +108,12 @@ object MediaHelper {
         } catch (_: Exception) { null }
         finally { try { device.release() } catch (_:Exception) {}; file?.delete() }
     }
+
+    /** Pause and resume keep one recording file (MediaRecorder, API 24+). */
+    @Synchronized fun pauseRecording() = runCatching { recorder!!.pause() }.isSuccess
+    @Synchronized fun resumeRecording() = runCatching { recorder!!.resume() }.isSuccess
+    /** Peak input level since the last call, 0..32767; 0 when not recording. */
+    @Synchronized fun recordingLevel() = runCatching { recorder?.maxAmplitude ?: 0 }.getOrDefault(0)
 
     @Synchronized fun cancelRecording() {
         try { recorder?.stop() } catch (_: Exception) {}

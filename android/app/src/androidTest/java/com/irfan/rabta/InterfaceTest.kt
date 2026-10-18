@@ -91,7 +91,7 @@ class InterfaceTest {
         inst.removeMonitor(monitor)
         db.star("000000000002")
         val starred=launch(StarredActivity::class.java); screenshot("10-starred-dark");inst.runOnMainSync { assertTrue(views(starred.window.decorView).filterIsInstance<TextView>().any { it.text.contains("Chai pe") });starred.finish() }
-        val status=launch(StatusActivity::class.java);Thread.sleep(2500);screenshot("11-status-dark");inst.runOnMainSync { assertTrue(views(status.window.decorView).filterIsInstance<TextView>().any { it.text=="Text status" });status.finish() }
+        val status=launch(StatusActivity::class.java);Thread.sleep(2500);screenshot("11-status-dark");inst.runOnMainSync { assertTrue("Status offers Add status",views(status.window.decorView).filterIsInstance<TextView>().any { it.text=="Add status" });status.finish() }
         ctx.getSharedPreferences("appearance",0).edit().putString("language","ur").putFloat("scale",1.15f).commit()
         val urdu=launch(SettingsActivity::class.java);screenshot("12-settings-urdu");inst.runOnMainSync { assertTrue(views(urdu.window.decorView).filterIsInstance<TextView>().any { it.text=="ترتیبات" });urdu.finish() }
         ctx.getSharedPreferences("appearance",0).edit().putString("language","en").putFloat("scale",1f).commit()

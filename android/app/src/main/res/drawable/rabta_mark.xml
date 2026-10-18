@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Rabta mark cropped tightly for headers and wordmarks (same paths as ic_launcher_fg). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="22dp" android:height="23dp" android:viewportWidth="44" android:viewportHeight="46">
+    <group android:translateX="-34" android:translateY="-32">
+        <path android:pathData="M35,45.5 A12.5,12.5 0 0 1 47.5,33 H59.5 A12.5,12.5 0 0 1 72,45.5 V45.5 A12.5,12.5 0 0 1 59.5,58 H44 V71.5 A4.5,4.5 0 0 1 35,71.5 Z M44.6,45.5 A2.4,2.4 0 1 0 49.4,45.5 A2.4,2.4 0 1 0 44.6,45.5 Z M52.6,45.5 A2.4,2.4 0 1 0 57.4,45.5 A2.4,2.4 0 1 0 52.6,45.5 Z M60.6,45.5 A2.4,2.4 0 1 0 65.4,45.5 A2.4,2.4 0 1 0 60.6,45.5 Z" android:fillType="evenOdd">
+            <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="34" android:startY="30" android:endX="78" android:endY="80"><item android:offset="0" android:color="#FFE5FF9E"/><item android:offset="0.45" android:color="#FFBFFF76"/><item android:offset="1" android:color="#FF98F650"/></gradient></aapt:attr>
+        </path>
+        <path android:pathData="M54.5,55 L72.8,72.6" android:strokeWidth="9" android:strokeLineCap="round">
+            <aapt:attr name="android:strokeColor"><gradient android:type="linear" android:startX="34" android:startY="30" android:endX="78" android:endY="80"><item android:offset="0" android:color="#FFE5FF9E"/><item android:offset="0.45" android:color="#FFBFFF76"/><item android:offset="1" android:color="#FF98F650"/></gradient></aapt:attr>
+        </path>
+    </group>
+</vector>

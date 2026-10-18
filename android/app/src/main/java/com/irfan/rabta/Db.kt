@@ -111,6 +111,18 @@ class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(
         "SELECT status,COUNT(*) FROM messages WHERE mine=1 AND from_id=? GROUP BY status",arrayOf(account)
     ).use { c -> buildMap { while(c.moveToNext())put(c.getString(0),c.getInt(1)) } }
     fun starred()=selected("id IN (SELECT id FROM message_meta WHERE starred=1)")
+    /** The newest message's direction and delivery state, for the chat list's ticks. */
+    fun lastMessageState(convId:String):Pair<Boolean,String>? = readableDatabase.rawQuery(
+        "SELECT mine,status FROM messages WHERE conv_id=? ORDER BY sent_at DESC LIMIT 1",arrayOf(convId)
+    ).use { if(it.moveToFirst()) (it.getInt(0)==1) to (it.getString(1)?:"") else null }
+    /** Photos, videos and files shared in one conversation, newest first. */
+    fun media(convId:String,limit:Int=60):List<Message> { val out=mutableListOf<Message>()
+        readableDatabase.rawQuery("SELECT id,conv_id,from_id,from_name,body,sent_at,mine,status,msg_type FROM messages WHERE conv_id=? AND msg_type IN ('image','video','file') ORDER BY sent_at DESC LIMIT ?",arrayOf(convId,limit.toString())).use { c ->
+            while(c.moveToNext())out.add(Message(c.getString(0),c.getString(1),c.getString(2),c.getString(3)?:"",c.getString(4),c.getLong(5),c.getInt(6)==1,c.getString(7),c.getString(8)))
+        }
+        return out
+    }
+    fun mediaCount(convId:String)=readableDatabase.rawQuery("SELECT COUNT(*) FROM messages WHERE conv_id=? AND msg_type IN ('image','video','file')",arrayOf(convId)).use { if(it.moveToFirst()) it.getInt(0) else 0 }
 
     fun hasMessage(id:String)=readableDatabase.rawQuery("SELECT 1 FROM messages WHERE id=?",arrayOf(id)).use { it.moveToFirst() }
 

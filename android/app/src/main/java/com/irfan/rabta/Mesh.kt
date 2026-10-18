@@ -75,14 +75,13 @@ class Mesh(private val ctx: Context, private val cb: Listener,clientFactory:(()-
         selfId=userId;advName=name.ifBlank { "Rabta user" }.take(24)+SEP+userId
         starting=true;val attempt=++epoch;var advertising=false;var discovering=false
         val callbacks=lifecycleFor(attempt);lifecycle=callbacks
-        cb.onStatus("Starting Bluetooth / Wi-Fi discovery…")
+        cb.onStatus("Starting Nearby…")
         fun failed(error:Exception) {
             if(attempt!=epoch)return
             epoch++;starting=false;active=false;retryAt=android.os.SystemClock.elapsedRealtime()+10000
             runCatching {client.stopAdvertising();client.stopDiscovery();client.stopAllEndpoints()}
             connected.clear();userIdOf.clear();pendingNames.clear();found.clear();attempts.clear();radar.clear()
-            val code=(error as? com.google.android.gms.common.api.ApiException)?.statusCode
-            cb.onStatus("Nearby could not start${if(code!=null) " (code $code)" else ""} — retrying; check permissions and radios")
+            cb.onStatus("Nearby could not start — retrying; check Bluetooth, Wi-Fi and permissions")
         }
         fun ready() {if(attempt==epoch&&advertising&&discovering){starting=false;active=true;cb.onStatus("Nearby searching — keep both phones open")} }
         try {
@@ -107,7 +106,7 @@ class Mesh(private val ctx: Context, private val cb: Listener,clientFactory:(()-
         if(!attempts.begin(endpointId,now())){radar.failed(endpointId);return false}
         val generation=epoch
         try { client.requestConnection(advName,endpointId,callbacks).addOnFailureListener {
-            if(current(generation)){attempts.failed(endpointId);pendingNames.remove(endpointId);radar.failed(endpointId);cb.onStatus("Radar request failed or was declined — try again after the cooldown")}
+            if(current(generation)){attempts.failed(endpointId);pendingNames.remove(endpointId);radar.failed(endpointId);cb.onStatus("Request not accepted — try again in a moment")}
         } }catch(_:Exception){attempts.failed(endpointId);radar.failed(endpointId);cb.onStatus("Nearby connection unavailable — check permissions");return false}
         cb.onStatus("Connection request sent — waiting for approval");return true
     }
@@ -117,7 +116,7 @@ class Mesh(private val ctx: Context, private val cb: Listener,clientFactory:(()-
     }
     private fun acceptApproved(endpointId:String,generation:Int) {
         try { client.acceptConnection(endpointId,payloadFor(generation)).addOnFailureListener {
-            if(current(generation)){attempts.failed(endpointId);pendingNames.remove(endpointId);radar.failed(endpointId);cb.onStatus("Radar approval could not connect — retry after the cooldown")}
+            if(current(generation)){attempts.failed(endpointId);pendingNames.remove(endpointId);radar.failed(endpointId);cb.onStatus("Couldn't connect — try again in a moment")}
         } }catch(_:Exception){attempts.failed(endpointId);pendingNames.remove(endpointId);radar.failed(endpointId);cb.onStatus("Nearby permission changed — check permissions")}
     }
     override fun rejectConnection(endpointId:String) {
@@ -143,8 +142,8 @@ class Mesh(private val ctx: Context, private val cb: Listener,clientFactory:(()-
         val generation=epoch
         try {
             client.sendPayload(targets,Payload.fromBytes(("M"+json).toByteArray(Charsets.UTF_8)))
-                .addOnFailureListener { if(current(generation))cb.onStatus("Nearby transfer failed — encrypted queue will retry") }
-        }catch(_:Exception){if(current(generation))cb.onStatus("Nearby transfer unavailable — encrypted queue retained")}
+                .addOnFailureListener { if(current(generation))cb.onStatus("Nearby sending failed — will retry") }
+        }catch(_:Exception){if(current(generation))cb.onStatus("Nearby sending paused — will retry")}
     }
 
     override fun sendDrop(endpointId:String,message:String):Boolean {

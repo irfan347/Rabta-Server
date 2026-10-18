@@ -57,4 +57,81 @@
         <item name="android:textAllCaps">false</item>
         <item name="android:fontFamily">sans-serif-medium</item>
     </style>
+    <!-- Theme presets chosen in Appearance; NOVA is Theme.Rabta.Dark / Theme.Rabta.Light. Custom keeps neutral dialog buttons. -->
+    <style name="Theme.Rabta.Dark.Ocean" parent="Theme.Rabta.Dark">
+        <item name="android:colorAccent">#5FD3F3</item>
+        <item name="android:colorControlActivated">#5FD3F3</item>
+        <item name="android:colorBackground">#061018</item>
+        <item name="android:alertDialogTheme">@style/Theme.Rabta.Dialog.Dark.Ocean</item>
+    </style>
+    <style name="Theme.Rabta.Light.Ocean" parent="Theme.Rabta.Light">
+        <item name="android:colorAccent">#0A6A86</item>
+        <item name="android:colorControlActivated">#0A6A86</item>
+        <item name="android:colorBackground">#F2F7FA</item>
+        <item name="android:alertDialogTheme">@style/Theme.Rabta.Dialog.Light.Ocean</item>
+    </style>
+    <style name="Theme.Rabta.Dialog.Dark.Ocean" parent="Theme.Rabta.Dialog.Dark">
+        <item name="android:windowBackground">@drawable/rabta_dialog_dark_ocean</item>
+        <item name="android:colorAccent">#5FD3F3</item>
+    </style>
+    <style name="Theme.Rabta.Dialog.Light.Ocean" parent="Theme.Rabta.Dialog.Light">
+        <item name="android:colorAccent">#0A6A86</item>
+    </style>
+    <style name="Theme.Rabta.Dark.Royal" parent="Theme.Rabta.Dark">
+        <item name="android:colorAccent">#C2A8FF</item>
+        <item name="android:colorControlActivated">#C2A8FF</item>
+        <item name="android:colorBackground">#0C0A15</item>
+        <item name="android:alertDialogTheme">@style/Theme.Rabta.Dialog.Dark.Royal</item>
+    </style>
+    <style name="Theme.Rabta.Light.Royal" parent="Theme.Rabta.Light">
+        <item name="android:colorAccent">#5B3FC4</item>
+        <item name="android:colorControlActivated">#5B3FC4</item>
+        <item name="android:colorBackground">#F6F4FB</item>
+        <item name="android:alertDialogTheme">@style/Theme.Rabta.Dialog.Light.Royal</item>
+    </style>
+    <style name="Theme.Rabta.Dialog.Dark.Royal" parent="Theme.Rabta.Dialog.Dark">
+        <item name="android:windowBackground">@drawable/rabta_dialog_dark_royal</item>
+        <item name="android:colorAccent">#C2A8FF</item>
+    </style>
+    <style name="Theme.Rabta.Dialog.Light.Royal" parent="Theme.Rabta.Dialog.Light">
+        <item name="android:colorAccent">#5B3FC4</item>
+    </style>
+    <style name="Theme.Rabta.Dark.Emerald" parent="Theme.Rabta.Dark">
+        <item name="android:colorAccent">#3DDC97</item>
+        <item name="android:colorControlActivated">#3DDC97</item>
+        <item name="android:colorBackground">#0B1411</item>
+        <item name="android:alertDialogTheme">@style/Theme.Rabta.Dialog.Dark.Emerald</item>
+    </style>
+    <style name="Theme.Rabta.Light.Emerald" parent="Theme.Rabta.Light">
+        <item name="android:colorAccent">#0B6E4F</item>
+        <item name="android:colorControlActivated">#0B6E4F</item>
+        <item name="android:colorBackground">#F1F4F1</item>
+        <item name="android:alertDialogTheme">@style/Theme.Rabta.Dialog.Light.Emerald</item>
+    </style>
+    <style name="Theme.Rabta.Dialog.Dark.Emerald" parent="Theme.Rabta.Dialog.Dark">
+        <item name="android:windowBackground">@drawable/rabta_dialog_dark_emerald</item>
+        <item name="android:colorAccent">#3DDC97</item>
+    </style>
+    <style name="Theme.Rabta.Dialog.Light.Emerald" parent="Theme.Rabta.Dialog.Light">
+        <item name="android:colorAccent">#0B6E4F</item>
+    </style>
+    <style name="Theme.Rabta.Dark.Custom" parent="Theme.Rabta.Dark">
+        <item name="android:colorAccent">#E8EAED</item>
+        <item name="android:colorControlActivated">#E8EAED</item>
+        <item name="android:colorBackground">#0E0F12</item>
+        <item name="android:alertDialogTheme">@style/Theme.Rabta.Dialog.Dark.Custom</item>
+    </style>
+    <style name="Theme.Rabta.Light.Custom" parent="Theme.Rabta.Light">
+        <item name="android:colorAccent">#202328</item>
+        <item name="android:colorControlActivated">#202328</item>
+        <item name="android:colorBackground">#F5F5F7</item>
+        <item name="android:alertDialogTheme">@style/Theme.Rabta.Dialog.Light.Custom</item>
+    </style>
+    <style name="Theme.Rabta.Dialog.Dark.Custom" parent="Theme.Rabta.Dialog.Dark">
+        <item name="android:windowBackground">@drawable/rabta_dialog_dark_custom</item>
+        <item name="android:colorAccent">#E8EAED</item>
+    </style>
+    <style name="Theme.Rabta.Dialog.Light.Custom" parent="Theme.Rabta.Dialog.Light">
+        <item name="android:colorAccent">#202328</item>
+    </style>
 </resources>

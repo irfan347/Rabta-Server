@@ -37,5 +37,29 @@ object RabtaBrand {
         return row
     }
 
+    /**
+     * Header lockup: the Rabta mark in a small rounded tile, then "Rabta". Mark, tile and text follow the chosen
+     * theme, so nothing clashes; the whole mark is always visible (no cropping at the screen edge).
+     */
+    fun wordmark(context: Context, markDp: Int, textSizeSp: Float): LinearLayout = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; contentDescription = "Rabta"
+        val tile = android.widget.FrameLayout(context).apply {
+            importantForAccessibility = android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(AppTheme.surface(context)); cornerRadius = dp(context, 10).toFloat(); setStroke(dp(context, 1), AppTheme.line(context))
+            }
+            addView(ImageView(context).apply {
+                setImageResource(R.drawable.rabta_mark); scaleType = ImageView.ScaleType.FIT_CENTER; setColorFilter(AppTheme.accent(context))
+                importantForAccessibility = ImageView.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, android.widget.FrameLayout.LayoutParams(dp(context, markDp * 3 / 4), dp(context, markDp * 3 / 4), Gravity.CENTER))
+        }
+        addView(tile, LinearLayout.LayoutParams(dp(context, markDp + 8), dp(context, markDp + 8)))
+        addView(TextView(context).apply {
+            text = "Rabta"; textSize = textSizeSp; letterSpacing = 0.01f
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD); setTextColor(AppTheme.text(context))
+            includeFontPadding = false; maxLines = 1; importantForAccessibility = TextView.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(context, 10) })
+    }
+
     private fun dp(context: Context, value: Int): Int = (value * context.resources.displayMetrics.density).toInt()
 }

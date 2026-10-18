@@ -26,8 +26,20 @@ object MessageActions {
     fun contact(a:Activity,peer:String) {
         AlertDialog.Builder(a).setItems(arrayOf("Offline security",L.t(a,"Block / unblock"),L.t(a,"Report contact"))) { _,i ->when(i){
             0->MeshSecurity.showContact(a,peer)
-            1->{val blocked=Privacy.blocked(a,peer);AlertDialog.Builder(a).setMessage(if(blocked)"Unblock this contact?" else "Block messages, calls and status from this contact?").setNegativeButton("Cancel",null).setPositiveButton(if(blocked)"Unblock" else "Block") { _,_ ->Privacy.setBlocked(a,peer,!blocked);Toast.makeText(a,if(blocked)"Contact unblocked" else "Contact blocked",Toast.LENGTH_SHORT).show() }.show()}
-            2->{val reason=EditText(a).apply {hint="Describe the issue (5–1000 characters)";filters=arrayOf(android.text.InputFilter.LengthFilter(1000))};AlertDialog.Builder(a).setTitle("Report contact").setView(reason).setNegativeButton("Cancel",null).setPositiveButton("Submit") { _,_ ->FeatureApi.run(a,{FeatureApi.request("/api/report","POST",JSONObject().put("target",peer).put("reason",reason.text.toString()))}) {Toast.makeText(a,"Report saved for the server administrator",Toast.LENGTH_LONG).show()} }.show()}
+            1->toggleBlock(a,peer) {}
+            2->report(a,peer)
         }}.show()
+    }
+    fun toggleBlock(a:Activity,peer:String,done:()->Unit) {
+        val blocked=Privacy.blocked(a,peer)
+        AlertDialog.Builder(a).setMessage(if(blocked)"Unblock this contact?" else "Block messages, calls and status from this contact?").setNegativeButton("Cancel",null).setPositiveButton(if(blocked)"Unblock" else "Block") { _,_ ->
+            Privacy.setBlocked(a,peer,!blocked);Toast.makeText(a,if(blocked)"Contact unblocked" else "Contact blocked",Toast.LENGTH_SHORT).show();done()
+        }.show()
+    }
+    fun report(a:Activity,peer:String) {
+        val reason=EditText(a).apply {hint="Describe the issue (5–1000 characters)";filters=arrayOf(android.text.InputFilter.LengthFilter(1000))}
+        AlertDialog.Builder(a).setTitle("Report contact").setView(reason).setNegativeButton("Cancel",null).setPositiveButton("Submit") { _,_ ->
+            FeatureApi.run(a,{FeatureApi.request("/api/report","POST",JSONObject().put("target",peer).put("reason",reason.text.toString()))}) {Toast.makeText(a,"Report sent. Thank you.",Toast.LENGTH_LONG).show()}
+        }.show()
     }
 }

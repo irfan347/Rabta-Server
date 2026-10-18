@@ -11,12 +11,17 @@ object ProfileHelper {
 
     fun get(userId: String): Bitmap? = cache[userId]
 
+    private val waiting = HashMap<String, MutableList<(Bitmap?) -> Unit>>()
+
+    /** Main thread only. Several views asking for the same person share one request. */
     fun loadIfNeeded(userId: String, serverUrl: String, token: String, onLoaded: (Bitmap?) -> Unit) {
         if (cache.containsKey(userId)) { onLoaded(cache[userId]); return }
+        waiting[userId]?.let { it.add(onLoaded); return }
+        waiting[userId] = mutableListOf(onLoaded)
         WsClient.fetchPhoto(serverUrl, token, userId) { b64 ->
             val bmp = if (!b64.isNullOrEmpty()) MediaHelper.base64ToBitmap(b64) else null
             cache[userId] = bmp
-            onLoaded(bmp)
+            waiting.remove(userId)?.forEach { it(bmp) }
         }
     }
 

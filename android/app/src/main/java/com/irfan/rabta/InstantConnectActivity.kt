@@ -138,11 +138,11 @@ class InstantConnectActivity:ThemedActivity() {
         content.addView(RabtaUi.text(this,"${offer.record.name}\n${offer.record.id}\n${MeshCrypto.fingerprint(offer.record.key)}",13f,color=AppTheme.sub(this)))
     }
     private fun showReply(offer:InstantInvitation.Verified,reply:InstantInvitation.Verified) {
-        reset("Show your pairing reply","Ask ${offer.record.name} to scan this reply and compare the pairing code. No contact key is saved on this phone until their signed confirmation is scanned.")
+        reset("Show your pairing reply","Ask ${offer.record.name} to scan this reply, then check that the pairing code matches on both phones.")
         qr(reply);content.addView(RabtaUi.text(this,"Pairing code\n${InstantInvitation.pairingCode(offer,reply)}",18f,true))
     }
     private fun showPaired(state:InstantPairingStore.ViewState) {
-        reset("Paired with ${state.peerName}","The contact key is saved. Messages follow your existing connection settings; pairing alone does not establish a radio or Internet connection.")
+        reset("Paired with ${state.peerName}","You can now chat with ${state.peerName}.")
         state.confirmation?.let { raw ->
             runCatching { store.verify(raw) }.onSuccess { confirmation ->
                 content.addView(FeatureUi.text(this,"Let ${state.peerName} scan this final confirmation to finish on their phone."));qr(confirmation)

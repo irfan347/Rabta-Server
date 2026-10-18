@@ -63,16 +63,16 @@ object WsClient {
                 override fun onOpen(socket:WebSocket,r:Response)=main {
                     if(attempt!=generation){socket.cancel();return@main}
                     // A successful HTTP upgrade is not an authenticated session.
-                    announce("Authenticating…")
-                    readyTimeout=Runnable {lost(attempt,"Server did not confirm login — retrying…")}.also {handler.postDelayed(it,15000)}
+                    announce("Connecting…")
+                    readyTimeout=Runnable {lost(attempt,"Reconnecting…")}.also {handler.postDelayed(it,15000)}
                 }
                 override fun onMessage(socket:WebSocket,text:String)=main {
                     if(attempt!=generation)return@main
                     val o=runCatching {JSONObject(text)}.getOrNull()?:return@main
                     if(o.optString("type")=="ready") {
-                        if(o.optString("id")!=expectedId){lost(attempt,"Server rejected account identity",true);return@main}
+                        if(o.optString("id")!=expectedId){lost(attempt,"Sign in again",true);return@main}
                         readyTimeout?.let {handler.removeCallbacks(it)};readyTimeout=null
-                        protocol=o.optInt("protocol",1);connected=true;status=if(protocol>=2)"Online" else "Online — backend update needed for calls";reconnectDelay=2000L;RabtaEvents.postConnected()
+                        protocol=o.optInt("protocol",1);connected=true;status="Online";reconnectDelay=2000L;RabtaEvents.postConnected()
                     } else if(connected)handle(o)
                 }
                 override fun onClosing(socket:WebSocket,code:Int,reason:String)=main {
@@ -85,11 +85,11 @@ object WsClient {
                 }
                 override fun onFailure(socket:WebSocket,t:Throwable,r:Response?)=main {
                     val auth=r?.code in listOf(401,403)
-                    val message=when {auth->"Sign in again — session expired or rejected";t is java.net.UnknownHostException->"Server address could not be found";t is javax.net.ssl.SSLException->"Secure connection failed; check phone date and time";r!=null->"Server unavailable (HTTP ${r.code}) — retrying…";else->"Server unreachable — check internet; retrying…"}
+                    val message=when {auth->"Sign in again — session expired or rejected";t is java.net.UnknownHostException->"Can't reach Rabta — check your internet";t is javax.net.ssl.SSLException->"Secure connection failed; check phone date and time";r!=null->"Rabta is unavailable — retrying…";else->"No connection — check your internet; retrying…"}
                     lost(attempt,message,auth)
                 }
             })
-        } catch(_:Exception) {lost(attempt,"Invalid server address — check connection settings",true)}
+        } catch(_:Exception) {lost(attempt,"Can't connect to Rabta — sign in again",true)}
     }
 
     private fun handle(o: JSONObject) {
@@ -145,7 +145,7 @@ object WsClient {
     // HTTP
     /** Signs this phone's Keystore proof into [body]; a phone without a usable key store cannot sign in safely. */
     private fun withDevice(body: JSONObject, purpose: String, cb: (Boolean,String,JSONObject?)->Unit): String? =
-        runCatching { body.put("device", DeviceIdentity.proof(purpose)).toString() }.getOrElse { handler.post { cb(false, "This phone's secure key store is unavailable", null) }; null }
+        runCatching { body.put("device", DeviceIdentity.proof(purpose)).toString() }.getOrElse { handler.post { cb(false, "This phone can't sign in securely. Restart it and try again.", null) }; null }
     fun register(ctx: Context, srv: String, un: String, pin: String, name: String, cb: (Boolean,String,JSONObject?)->Unit) {
         val body = withDevice(JSONObject().put("username",un).put("pin",pin).put("name",name), "register:$un", cb) ?: return
         post(srv, "/api/register", body, null, cb)
@@ -171,7 +171,7 @@ object WsClient {
     }
     fun findUser(srv: String, un: String, tok: String, cb: (Boolean,String,JSONObject?)->Unit) {
         http.newCall(Request.Builder().url(srv.trimEnd('/')+"/api/user/${un.lowercase()}").header("Authorization","Bearer $tok").build()).enqueue(object:Callback{
-            override fun onFailure(c: Call, e: IOException) { handler.post { cb(false,e.message?:"Network error",null) } }
+            override fun onFailure(c: Call, e: IOException) { handler.post { cb(false,unreachable(e),null) } }
             override fun onResponse(c: Call, r: Response) { val b=r.body?.string()?: ""; val o=try{JSONObject(b)}catch(_:Exception){JSONObject()}; handler.post { if(r.isSuccessful) cb(true,"ok",o) else cb(false,o.optString("error","Not found"),null) } }
         })
     }

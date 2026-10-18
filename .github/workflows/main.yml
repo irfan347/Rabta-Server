@@ -12,6 +12,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    outputs:
+      release: ${{ steps.public.outputs.ready }}
     steps:
       - uses: actions/checkout@v4
       - name: Locate or extract Android project
@@ -157,10 +159,31 @@ jobs:
           echo "RABTA_TEST_KEYSTORE=$RUNNER_TEMP/rabta-test.jks" >> "$GITHUB_ENV"
           echo "RABTA_TEST_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
           echo "Stable test signing key restored."
+      - name: Restore release signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.RABTA_RELEASE_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.RABTA_RELEASE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RABTA_RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RABTA_RELEASE_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "No release signing secrets: the public APK is not built or published."
+            exit 0
+          fi
+          # Pasted Base64 may carry spaces or line breaks.
+          printf '%s' "$KEYSTORE_B64" | tr -d ' \r\n' | base64 -d > "$RUNNER_TEMP/rabta-release.jks"
+          echo "RABTA_RELEASE_KEYSTORE=$RUNNER_TEMP/rabta-release.jks" >> "$GITHUB_ENV"
+          echo "RABTA_RELEASE_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "RABTA_RELEASE_KEY_ALIAS=${KEY_ALIAS:-rabta}" >> "$GITHUB_ENV"
+          if [ -n "$KEY_PASSWORD" ]; then echo "RABTA_RELEASE_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"; fi
+          echo "Release signing key restored."
       - name: Build and test APK
         env:
           ANDROID_PROJECT_DIR: ${{ steps.project.outputs.directory }}
-        run: gradle --project-dir "$ANDROID_PROJECT_DIR" :app:testDebugUnitTest :app:assembleDebug :app:assembleDevice --no-daemon --stacktrace
+        run: |
+          tasks=":app:testDebugUnitTest :app:assembleDebug :app:assembleDevice"
+          if [ -n "${RABTA_RELEASE_KEYSTORE:-}" ]; then tasks="$tasks :app:assembleRelease"; fi
+          gradle --project-dir "$ANDROID_PROJECT_DIR" $tasks --no-daemon --stacktrace
       - name: Record QR regression failure
         if: failure()
         run: |
@@ -236,6 +259,55 @@ jobs:
           path: |
             ${{ steps.project.outputs.directory }}/app/build/outputs/apk/device/*.apk
             ${{ steps.project.outputs.directory }}/app/build/outputs/apk/device/APK-VERIFICATION.txt
+          if-no-files-found: error
+      - name: Verify and package the public APK
+        id: public
+        if: env.RABTA_RELEASE_KEYSTORE != ''
+        env:
+          ANDROID_PROJECT_DIR: ${{ steps.project.outputs.directory }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$ANDROID_PROJECT_DIR/app/build/outputs/apk/release"
+          apk="$out/app-release.apk"
+          test -s "$apk"
+          tools="$ANDROID_HOME/build-tools/34.0.0"
+          "$tools/apksigner" verify --verbose --print-certs "$apk" > "$out/signature.txt"
+          "$tools/aapt" dump badging "$apk" > "$out/badging.txt"
+          grep -q "package: name='com.irfan.rabta'" "$out/badging.txt"
+          grep -q "application-label:'Rabta'" "$out/badging.txt"
+          if grep -q "application-debuggable" "$out/badging.txt"; then echo "The public APK must not be debuggable."; exit 1; fi
+          # Debuggable test builds must never carry the public app's signature.
+          digest() { grep -m1 "certificate SHA-256 digest" "$1" | awk '{print $NF}'; }
+          "$tools/apksigner" verify --print-certs "$ANDROID_PROJECT_DIR/app/build/outputs/apk/device/app-device.apk" > "$out/test-signature.txt"
+          if [ "$(digest "$out/signature.txt")" = "$(digest "$out/test-signature.txt")" ]; then echo "The public APK must not use the test key."; exit 1; fi
+          OUT="$out" python3 - <<'PYTHON'
+          import hashlib, json, os, re, shutil
+          from pathlib import Path
+          out = Path(os.environ["OUT"])
+          code, name = re.search(r"versionCode='(\d+)' versionName='([^']+)'", (out / "badging.txt").read_text()).groups()
+          dist = Path("rabta-release"); dist.mkdir()
+          apk = dist / f"Rabta-{name}.apk"
+          shutil.copy(out / "app-release.apk", apk)
+          config = json.loads((Path(os.environ["ANDROID_PROJECT_DIR"]) / "release.json").read_text())
+          info = {
+              "versionCode": int(code), "versionName": name,
+              "apk": f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/v{name}/{apk.name}",
+              "sha256": hashlib.sha256(apk.read_bytes()).hexdigest(), "size": apk.stat().st_size,
+              "minVersionCode": int(config.get("minVersionCode", 0)), "notes": config.get("notes", ""),
+          }
+          (dist / "rabta-update.json").write_text(json.dumps(info, indent=2, ensure_ascii=False))
+          (dist / "notes.txt").write_text(info["notes"] or f"Rabta {name}")
+          print(json.dumps(info, indent=2, ensure_ascii=False))
+          PYTHON
+          cat "$out/signature.txt"
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+      - name: Upload the public APK
+        if: steps.public.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rabta-release-apk
+          path: rabta-release/
           if-no-files-found: error
       - name: Android lint
         id: lint
@@ -360,3 +432,26 @@ jobs:
           name: Rabta-device-tests-api-${{ matrix.api }}
           path: android/app/build/reports/androidTests/
           if-no-files-found: ignore
+
+  # Each push to main publishes the verified public APK; installed apps find it through rabta-update.json.
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.build.outputs.release == 'true'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Rabta-release-apk
+          path: rabta-release
+      - name: Publish the update
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          name=$(python3 -c 'import json; print(json.load(open("rabta-release/rabta-update.json"))["versionName"])')
+          gh release create "v$name" "rabta-release/Rabta-$name.apk" rabta-release/rabta-update.json \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Rabta $name" --notes-file rabta-release/notes.txt --latest

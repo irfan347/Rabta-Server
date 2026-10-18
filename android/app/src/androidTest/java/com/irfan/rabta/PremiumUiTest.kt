@@ -68,13 +68,16 @@ class PremiumUiTest {
         fail("Real UI action unavailable: $value")
     }
     private fun setDialogText(value:String) {
-        val root=inst.uiAutomation.rootInActiveWindow?:error("No active dialog")
         fun editor(n:AccessibilityNodeInfo):AccessibilityNodeInfo? {
             if(n.className?.toString()==EditText::class.java.name)return n
             for(i in 0 until n.childCount)n.getChild(i)?.let {editor(it)}?.let {return it}
             return null
         }
-        val node=editor(root)?:error("No dialog editor")
+        // The dialog opens after the previous screen returns its result; wait for it to become the active window, like click().
+        val until=System.currentTimeMillis()+8000
+        var node:AccessibilityNodeInfo?=null
+        while(node==null&&System.currentTimeMillis()<until) {node=inst.uiAutomation.rootInActiveWindow?.let {editor(it)};if(node==null)Thread.sleep(80)}
+        if(node==null)error("No dialog editor")
         assertTrue(node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,android.os.Bundle().apply {putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,value)}))
     }
     private fun capture(name:String) {
@@ -137,7 +140,7 @@ class PremiumUiTest {
         override val connected=ConcurrentHashMap<String,String>()
         override val userIdOf=ConcurrentHashMap<String,String>()
         val peers=CopyOnWriteArrayList<RadarPeer>()
-        override var active=false
+        @Volatile override var active=false
         override val discoveredCount get()=peers.size
         override val connectingCount=0
         override fun start(name:String,userId:String){active=true;MeshBridge.status="Nearby searching — keep both phones open"}
@@ -148,6 +151,15 @@ class PremiumUiTest {
         override fun connect(endpointId:String){error("UI must not connect without approval")}
         override fun sendEnvelopeToAll(json:String,exceptEndpoint:String?) {}
         override fun sendEnvelopeTo(endpointId:String,json:String) {}
+    }
+    /**
+     * Starting a router first creates the fixture account's RSA identity key in the Android Keystore.
+     * On a busy emulator that alone can outlast a UI wait, so the radio gets its own wait.
+     */
+    private fun awaitRadio(router:Router,radio:Radio) {
+        val end=System.currentTimeMillis()+60000
+        while(!radio.active&&router.running&&System.currentTimeMillis()<end)Thread.sleep(50)
+        assertTrue("Isolated radio fixture started",radio.active)
     }
     private fun closeRouter(router:Router) {
         ui {router.stop();MeshBridge.detach()}
@@ -172,6 +184,7 @@ class PremiumUiTest {
         val router=Router(ctx,object:Router.UiListener {}) {radio}
         ui {RadarPrefs.setEnabled(ctx,true);router.start(account,"Irfan");MeshBridge.attach(router)}
         try {
+            awaitRadio(router,radio)
             waitUi("Real peers appear") {radio.active&&labels(a).contains("Ali")&&labels(a).contains("Samira")}
             val search=all(a.window.decorView).filterIsInstance<EditText>().first {it.contentDescription=="Search nearby users"}
             ui {search.setText("aLI")}
@@ -223,7 +236,7 @@ class PremiumUiTest {
             val a=launch(StatusActivity::class.java)
             waitUi("Authenticated real image preview") {all(a.window.decorView).filterIsInstance<StatusMediaPreview>().any {preview->all(preview).filterIsInstance<ImageView>().any {it.drawable is BitmapDrawable}}}
             ui {assertFalse(labels(a).contains("Expired secret"))};assertTrue(files.get()>0);capture("status")
-            click("Text status");inst.waitForIdleSync();setDialogText("A real private moment");click("Continue");click("Ali");click("Share")
+            click("Add status");inst.waitForIdleSync();click("Text");inst.waitForIdleSync();setDialogText("A real private moment");click("Continue");click("Ali");click("Share")
             waitUi("Creation reaches real API") {posted.get()!=null}
             assertEquals("text",posted.get().getString("kind"));assertEquals("A real private moment",posted.get().getString("body"));assertEquals(listOf(peer),(0 until posted.get().getJSONArray("audience").length()).map {posted.get().getJSONArray("audience").getString(it)})
             val viewer=launch(StatusViewerActivity::class.java,photoId)
@@ -283,6 +296,7 @@ class PremiumUiTest {
         ui {RadarPrefs.setEnabled(ctx,true);router.start(account,"Irfan");MeshBridge.attach(router)}
         try {
             val a=launch(NetworkVisionActivity::class.java)
+            awaitRadio(router,radio)
             waitUi("Observed network count") {radio.active&&labels(a).any {it.startsWith("27 nearby peers")}}
             ui {
                 all(a.window.decorView).first {it.contentDescription=="Next peers"}.performClick()
