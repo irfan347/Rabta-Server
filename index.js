@@ -272,6 +272,7 @@ wss.on('connection', (ws, req) => {
   const user = memUsers.get(userId);
   if (online.has(userId)) try { online.get(userId).close(); } catch (_) {}
   online.set(userId, ws);
+  ws.rabtaAlive = true; ws.on('pong', () => { ws.rabtaAlive = true; });
   updateLastSeen(userId);
 
   ws.send(JSON.stringify({ type: 'ready', id: userId, name: user.name, protocol: 2, receipts: true }));
@@ -280,6 +281,7 @@ wss.on('connection', (ws, req) => {
   for(const call of [...voiceCalls.values(),...videoCalls.values()]) if(call.to===userId) deliverCall(call);
 
   ws.on('message', async (raw) => {
+    ws.rabtaAlive = true;
     let msg; try { msg = JSON.parse(raw.toString()); } catch { return; }
     if (msg.type === 'msg' || msg.type === 'group_msg') {
       if (!/^[0-9A-F]{12}$/.test(String(msg.id || '')) || typeof msg.body !== 'string' || !msg.body || Buffer.byteLength(msg.body) > MAX_BODY || !['text','image','voice','video','file','sticker','rich','reaction'].includes(msg.msgType || 'text')) {
@@ -360,6 +362,19 @@ wss.on('connection', (ws, req) => {
   });
   ws.on('error', () => { try { ws.close(); } catch (_) {} });
 });
+
+// A phone that lost its network (asleep, or moved between Wi-Fi and mobile data) leaves a socket that still looks
+// open: a message written there is lost and a call rings nowhere. Every few minutes each socket is pinged (the app
+// answers by itself); one that stayed silent since the previous round is closed, so its messages wait on the server
+// and its calls ring once the phone reconnects.
+const HEARTBEAT_MS = 4 * 60 * 1000;
+setInterval(() => {
+  for (const socket of [...online.values()]) {
+    if (socket.rabtaAlive === false) { try { socket.terminate(); } catch (_) {} continue; }
+    socket.rabtaAlive = false;
+    try { socket.ping(); } catch (_) {}
+  }
+}, HEARTBEAT_MS).unref?.();
 
 app.post('/api/groups', async (req, res) => {
   const creator = authId(req); if (!creator) return res.status(401).json({ error: 'login required' });

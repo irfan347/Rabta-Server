@@ -84,6 +84,36 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
         }
         private const val CALL_STARTED = "call_started"
         private const val CALL_ENDED = "call_ended"
+
+        const val KEEP_ALIVE = "com.irfan.rabta.KEEP_ALIVE"
+        private const val KEEP_ALIVE_MS = 5 * 60_000L
+        private fun keepAliveAlarm(ctx: Context) = PendingIntent.getBroadcast(ctx, 1, Intent(ctx, StartReceiver::class.java).setAction(KEEP_ALIVE),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        private var connectWake: PowerManager.WakeLock? = null
+        /** Keeps the phone awake up to [ms] so a check or reconnect started now can finish with the screen off. */
+        fun awake(ctx: Context, ms: Long) {
+            runCatching {
+                val lock = connectWake ?: ctx.applicationContext.getSystemService(PowerManager::class.java)?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Rabta:connect")
+                    ?.apply { setReferenceCounted(false) }?.also { connectWake = it }
+                lock?.acquire(ms)
+                // Usually the server answers within a second: the phone goes back to sleep then, not after [ms].
+                WsClient.settled = { runCatching { connectWake?.takeIf { it.isHeld }?.release() } }
+            }
+        }
+        /**
+         * Rabta has no push service, so while it is closed its own connection must stay alive: every few minutes (less
+         * often in Android's deep sleep) this alarm wakes the phone briefly, checks the connection still answers and
+         * reconnects if not, restarting the service if Android ended it.
+         */
+        fun keepAlive(ctx: Context) {
+            awake(ctx, 15_000)
+            if (running == null) start(ctx)
+            WsClient.wake()
+            scheduleKeepAlive(ctx)
+        }
+        private fun scheduleKeepAlive(ctx: Context) {
+            runCatching { ctx.getSystemService(android.app.AlarmManager::class.java).setAndAllowWhileIdle(android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + KEEP_ALIVE_MS, keepAliveAlarm(ctx)) }
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -94,7 +124,12 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
     private fun cancelRinging() { callHandler.removeCallbacks(dismissCall); ringingId=""; (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).cancel(CALL_NOTIF) }
     private var router: Router? = null
     private val repair=object:Runnable { override fun run(){startMeshIfAllowed();callHandler.postDelayed(this,15000)} }
-    private val network=object:android.net.ConnectivityManager.NetworkCallback(){override fun onAvailable(n:android.net.Network){callHandler.post {if(Session.loggedIn&&!WsClient.connected)WsClient.retry()}}}
+    // A new network (Wi-Fi to mobile data and back), or Android letting Rabta use the network again after deep
+    // sleep: the old socket is likely dead even if it looks connected, so check it now.
+    private val network=object:android.net.ConnectivityManager.NetworkCallback(){
+        override fun onAvailable(n:android.net.Network){callHandler.post { if(Session.loggedIn) { awake(this@MessageService,15_000);WsClient.wake() } }}
+        override fun onBlockedStatusChanged(n:android.net.Network,blocked:Boolean){ if(!blocked) callHandler.post { if(Session.loggedIn) { awake(this@MessageService,15_000);WsClient.wake() } } }
+    }
     private var networkRegistered=false
     private var callWake: PowerManager.WakeLock? = null
 
@@ -106,6 +141,7 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
         showConnection()
         RabtaEvents.add(this)
         if (Session.loggedIn) WsClient.connect(Session)
+        scheduleKeepAlive(this)
         startMeshIfAllowed();callHandler.postDelayed(repair,15000)
         try{(getSystemService(CONNECTIVITY_SERVICE) as android.net.ConnectivityManager).registerDefaultNetworkCallback(network);networkRegistered=true}catch(_:Exception){}
     }
@@ -115,6 +151,7 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
         cancelRinging();callHandler.removeCallbacks(repair);releaseCallWake()
         // Stopped on purpose (signing out): the swipe-away restart below must not undo it.
         runCatching { getSystemService(android.app.AlarmManager::class.java).cancel(restartAlarm()) }
+        runCatching { getSystemService(android.app.AlarmManager::class.java).cancel(keepAliveAlarm(this)) }
         getSystemService(NotificationManager::class.java).cancel(RADAR_NOTIF)
         if(networkRegistered)runCatching {(getSystemService(CONNECTIVITY_SERVICE) as android.net.ConnectivityManager).unregisterNetworkCallback(network)}
         RabtaEvents.remove(this)
@@ -127,7 +164,7 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
             CALL_STARTED -> { inCall(intent.getStringExtra("peerId").orEmpty(), intent.getStringExtra("peerName").orEmpty(), intent.getBooleanExtra("video", false)); return START_STICKY }
             CALL_ENDED -> { callPeerId = ""; releaseCallWake(); if (!showConnection()) runCatching { getSystemService(NotificationManager::class.java).notify(1, persistentNotification()) }; return START_STICKY }
         }
-        if (Session.loggedIn && !WsClient.connected) WsClient.connect(Session)
+        if (Session.loggedIn && !WsClient.connected) { WsClient.connect(Session); WsClient.wake() }
         if(intent?.action=="retry_nearby"){router?.pauseTransport();MeshBridge.status="Restarting Nearby…"}
         startMeshIfAllowed()        // e.g. after the user granted Bluetooth permission
         return START_STICKY

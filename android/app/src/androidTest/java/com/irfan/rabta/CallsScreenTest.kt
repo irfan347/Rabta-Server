@@ -356,6 +356,41 @@ class CallsScreenTest {
         }
     }
 
+    /**
+     * The reported bug: with Rabta closed its connection died unnoticed (no messages, no calls), and opening Rabta took
+     * a minute to reconnect. The keep-alive alarm (and opening Rabta) now checks the connection and replaces a dead one.
+     */
+    @Test fun keepAliveReplacesAConnectionThatStoppedAnswering()=fixture { _ ->
+        val opened=java.util.concurrent.atomic.AtomicInteger();val answering=java.util.concurrent.atomic.AtomicBoolean(true)
+        val server=MockWebServer()
+        server.dispatcher=object:Dispatcher() {
+            override fun dispatch(request:RecordedRequest):MockResponse {
+                if(request.path!="/ws")return MockResponse().setResponseCode(404)
+                return MockResponse().withWebSocketUpgrade(object:WebSocketListener() {
+                    override fun onOpen(ws:WebSocket,response:Response) { opened.incrementAndGet();ws.send("{\"type\":\"ready\",\"id\":\"CA1100000001\",\"protocol\":2,\"receipts\":true}") }
+                    override fun onMessage(ws:WebSocket,raw:String) { if(JSONObject(raw).optString("type")=="ping"&&answering.get()) ws.send("{\"type\":\"pong\"}") }
+                })
+            }
+        }
+        server.start();val url=server.url("/").toString().trimEnd('/')
+        ui { Session.serverUrl=url;WsClient.connect(Session) }
+        fun keepAlive()=ctx.sendBroadcast(Intent(ctx,StartReceiver::class.java).setAction(MessageService.KEEP_ALIVE))
+        fun waitFor(ms:Long,check:()->Boolean) { val until=System.currentTimeMillis()+ms;while(!check()) { if(System.currentTimeMillis()>until) fail("Connection did not reach the expected state");Thread.sleep(100) } }
+        try {
+            waitUi { WsClient.connected }
+            assertEquals(1,opened.get())
+            // Quiet for a while, but alive: the check gets its answer and the connection is kept.
+            Thread.sleep(21_000);keepAlive();Thread.sleep(8_000)
+            assertEquals("A connection that answers is kept",1,opened.get());assertTrue(WsClient.connected)
+            // The connection stops answering (its network died while the phone slept): the next check replaces it.
+            answering.set(false);Thread.sleep(21_000);keepAlive()
+            waitFor(20_000) { opened.get()==2&&WsClient.connected }
+        } finally {
+            ui { WsClient.disconnect();MessageService.stop(ctx) }
+            server.shutdown()
+        }
+    }
+
     @Test fun messageServiceStartsAgainAfterRestartOrUpdate() {
         for(action in listOf(Intent.ACTION_BOOT_COMPLETED,Intent.ACTION_MY_PACKAGE_REPLACED)) {
             val receivers=ctx.packageManager.queryBroadcastReceivers(Intent(action).setPackage(ctx.packageName),0)
