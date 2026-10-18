@@ -61,6 +61,8 @@ class ProfilePhotoSyncTest {
     /** Switches this phone to the fixture account [id]; the photo the phone keeps is left as it is. */
     private fun signIn(id: String) = ui { Session.id = id; Session.name = "Fixture"; Session.token = "fixture-$id"; Session.serverUrl = url }
     private fun resetSyncPacing() = ProfilePhoto::class.java.getDeclaredField("lastSync").apply { isAccessible = true }.setLong(null, 0L)
+    /** Whether the phone still waits for the server's answer about [userId]; the server counts a reply before the phone reads it. */
+    private fun asking(userId: String) = (ProfileHelper::class.java.getDeclaredField("waiting").apply { isAccessible = true }.get(null) as Map<*, *>).containsKey(userId)
 
     private fun fixture(run: (PhotoServer) -> Unit) {
         Session.init(ctx)
@@ -121,7 +123,7 @@ class ProfilePhotoSyncTest {
         val first = seen
         now += 5 * 60_000 + 1
         look(); ui { assertEquals(4, answers); assertSame(first, seen) }
-        waitUi("Unchanged photo answered without the picture") { photos.unchanged.get() == 1 }
+        waitUi("Unchanged photo answered without the picture") { photos.unchanged.get() == 1 && !asking(owner) }
         assertEquals(1, photos.downloads.get())
 
         // Once the owner removes it, the contact's next look shows initials.
