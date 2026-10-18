@@ -911,7 +911,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     }
     /** Sends a Rabta contact as a readable message; Rabta shows it as a card with a Message button. */
     private fun shareContact() {
-        val contacts=db.conversations().filter { !it.isGroup&&it.peerId!=peerId&&!Privacy.blocked(this,it.peerId)&&Regex("[0-9A-F]{12}").matches(it.peerId) }
+        val contacts=db.contacts().filter { it.peerId!=peerId&&!Privacy.blocked(this,it.peerId)&&Regex("[0-9A-F]{12}").matches(it.peerId) }
         if(contacts.isEmpty()) { toast("No other contacts to share yet");return }
         android.app.AlertDialog.Builder(this).setTitle("Share a contact").setItems(contacts.map { it.peerName }.toTypedArray()) { _,i ->
             val c=contacts[i]

@@ -249,7 +249,7 @@ class NearbyPanel(private val activity:Activity) {
     private fun openChat(peer:RadarPeer) {
         if(!MeshBridge.snapshot().peers.any { it.id==peer.id&&it.keyMatched }||Privacy.blocked(activity,peer.id))return
         val db=Db.get(activity)
-        if(db.conversations().none { it.peerId==peer.id })db.upsertConversation(peer.id,peer.name,"",System.currentTimeMillis(),false)
+        db.saveContact(peer.id,peer.name)   // a contact, not an empty chat: the chat appears once you write
         activity.startActivity(Intent(activity,ChatActivity::class.java).putExtra("peerId",peer.id).putExtra("peerName",peer.name))
     }
     private fun guidance() {
@@ -303,7 +303,7 @@ class NearbyPanel(private val activity:Activity) {
                 .setMessage("Security code: $code\n\nCheck that this code matches on the other person's phone before adding them.")
                 .setNegativeButton("Cancel",null).setPositiveButton("Add contact") { _,_ ->
                     if(MeshSecurity(activity,Session.id).pin(contact.first,contact.third)) {
-                        Db.get(activity).upsertConversation(contact.first,contact.second,"",System.currentTimeMillis(),false)
+                        Db.get(activity).saveContact(contact.first,contact.second)
                         Toast.makeText(activity,"Contact added",Toast.LENGTH_SHORT).show()
                     } else Toast.makeText(activity,"This contact's security code has changed. Check with them before adding again.",Toast.LENGTH_LONG).show()
                 }.show()

@@ -19,7 +19,7 @@ import org.json.JSONObject
 object StatusPost {
     private fun prefs(c: Context) = c.getSharedPreferences("status_prefs_${Session.id}", 0)
 
-    fun contacts(c: Context) = Db.get(c).conversations().filter { !it.isGroup && !Privacy.blocked(c, it.peerId) }
+    fun contacts(c: Context) = Db.get(c).contacts().filter { it.peerId != Session.id && !Privacy.blocked(c, it.peerId) }
 
     /** The viewers chosen last time, still limited to current, unblocked contacts. Empty until the user picks. */
     fun audience(c: Context): List<String> {
@@ -78,7 +78,7 @@ object StatusPost {
         val views = status.optJSONArray("views")
         val list = if (views != null) (0 until views.length()).map { views.getJSONObject(it) }.sortedByDescending { it.optLong("at") }
             else status.optJSONArray("viewers")?.let { v -> (0 until v.length()).map { JSONObject().put("id", v.optString(it)) } }.orEmpty()
-        val names = Db.get(a).conversations().associate { it.peerId to it.peerName }
+        val names = Db.get(a).contacts().associate { it.peerId to it.name }
         val dialog = android.app.Dialog(a)
         dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
         val root = LinearLayout(a).apply {

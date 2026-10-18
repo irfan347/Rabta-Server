@@ -181,7 +181,7 @@ class InstantConnectActivity:ThemedActivity() {
         work("Opening saved conversation…",{
             require(store.paired()&&MeshPolicy.validId(id)&&!Privacy.blocked(this,id,store.account)&&MeshSecurity(this,store.account).key(id)!=null){"Pairing is not available. Review the contact identity first"}
             val db=Db.get(this)
-            if(db.conversations().none { it.peerId==id })db.upsertConversation(id,name,"",System.currentTimeMillis(),false)
+            db.saveContact(id,name)   // a contact, not an empty chat: the chat appears once you write
             id
         }) { peer -> startActivity(Intent(this,ChatActivity::class.java).putExtra("peerId",peer).putExtra("peerName",name)) }
     }
