@@ -1,4 +1,4 @@
 {
   "minVersionCode": 0,
-  "notes": "Calls keep going when your screen locks.\nMessages keep arriving after your phone restarts or Rabta updates. Tap Allow on the Chats screen so they also arrive when Rabta is closed.\nRabta now gets its updates from a new home: install this update to keep getting future updates."
+  "notes": "Message popups with Reply, Mark as read and Mute; Answer and Decline right on incoming calls; missed calls say voice or video, and calls now show inside the chat.\nStatus: full-screen text with your own colour and font, emoji in captions, and quick emoji replies that appear as a card in the chat.\nCalls keep going when your screen locks, and messages keep arriving after a restart or update."
 }

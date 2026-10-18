@@ -228,6 +228,9 @@ class PremiumUiTest {
                 r.path=="/api/files/$remote"->{files.incrementAndGet();MockResponse().setBody(okio.Buffer().write(bytes))}
                 r.path=="/api/status/$photoId/view"->{views.incrementAndGet();MockResponse().setBody("{\"ok\":true}")}
                 r.path=="/api/status"&&r.method=="POST"->{posted.set(JSONObject(r.body.readUtf8()));MockResponse().setBody("{\"id\":\"${"4".repeat(32)}\",\"expires\":${now+86400000}}")}
+                r.path=="/ws"->MockResponse().withWebSocketUpgrade(object:okhttp3.WebSocketListener() {
+                    override fun onOpen(ws:okhttp3.WebSocket,response:okhttp3.Response) { ws.send("{\"type\":\"ready\",\"id\":\"$account\",\"protocol\":2}") }
+                })
                 else->MockResponse().setResponseCode(404)
             }
         }}
@@ -236,12 +239,36 @@ class PremiumUiTest {
             val a=launch(StatusActivity::class.java)
             waitUi("Authenticated real image preview") {all(a.window.decorView).filterIsInstance<StatusMediaPreview>().any {preview->all(preview).filterIsInstance<ImageView>().any {it.drawable is BitmapDrawable}}}
             ui {assertFalse(labels(a).contains("Expired secret"))};assertTrue(files.get()>0);capture("status")
-            click("Add status");inst.waitForIdleSync();click("Text");inst.waitForIdleSync();setDialogText("A real private moment");click("Continue");click("Ali");click("Share")
+            // Text updates open WhatsApp's full-screen composer: words on a colour, with colour and font to change.
+            val composer=inst.addMonitor(TextStatusActivity::class.java.name,null,false)
+            click("Add status");inst.waitForIdleSync();click("Text")
+            val text=inst.waitForMonitorWithTimeout(composer,5000);inst.removeMonitor(composer);assertNotNull("Full-screen text composer",text)
+            setDialogText("A real private moment")
+            var before=0
+            ui {
+                before=(text!!.window.decorView.findViewById<View>(android.R.id.content) as ViewGroup).getChildAt(0).let { (it.background as android.graphics.drawable.ColorDrawable).color }
+                all(text.window.decorView).first {it.contentDescription=="Change colour"}.performClick()
+                all(text.window.decorView).first {it.contentDescription=="Change font"}.performClick()
+                assertNotEquals("Palette changes the colour",before,((text.window.decorView.findViewById<View>(android.R.id.content) as ViewGroup).getChildAt(0).background as android.graphics.drawable.ColorDrawable).color)
+                all(text.window.decorView).first {it.contentDescription=="Emoji"}.performClick()
+                assertTrue("Emoji open in the keyboard's place",all(text.window.decorView).any {it is EmojiPanel&&it.isShown})
+                all(text.window.decorView).first {it.contentDescription=="Send status"}.performClick()
+            }
+            click("Ali");click("Done")
             waitUi("Creation reaches real API") {posted.get()!=null}
             assertEquals("text",posted.get().getString("kind"));assertEquals("A real private moment",posted.get().getString("body"));assertEquals(listOf(peer),(0 until posted.get().getJSONArray("audience").length()).map {posted.get().getJSONArray("audience").getString(it)})
+            assertTrue("Chosen colour is sent",Regex("#[0-9A-F]{6}").matches(posted.get().getString("bg")));assertEquals("serif",posted.get().getString("font"))
+            ui {WsClient.connect(Session)}
             val viewer=launch(StatusViewerActivity::class.java,photoId)
             waitUi("Viewer shows actual photo") {all(viewer.window.decorView).filterIsInstance<ImageView>().any {it.contentDescription=="Status photo"&&it.drawable is BitmapDrawable}}
             assertTrue(views.get()>0)
+            // A quick emoji reply quotes the photo update with its owner, kind and a small picture.
+            waitUi("Signed in for replies") {WsClient.connected}
+            ui {all(viewer.window.decorView).first {it.contentDescription=="Reply with 😍"}.performClick()}
+            waitUi("Emoji reply saved as a chat message to the owner") {db.messages(peer).any {it.mine&&it.msgType=="rich"}}
+            val reply=JSONObject(db.messages(peer).first {it.mine&&it.msgType=="rich"}.body)
+            assertEquals("😍",reply.getString("text"));assertEquals("Ali",reply.getJSONObject("status").getString("name"))
+            assertEquals("image",reply.getJSONObject("status").getString("kind"));assertTrue("Photo thumbnail",reply.getJSONObject("status").getString("thumb").isNotEmpty())
             ui {viewer.finish()};inst.waitForIdleSync();allow.set(false)
             val denied=launch(StatusViewerActivity::class.java,photoId)
             waitUi("Revoked audience never reopens cached photo") {labels(denied).contains("Status unavailable")}

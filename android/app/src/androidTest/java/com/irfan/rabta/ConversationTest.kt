@@ -139,4 +139,32 @@ class ConversationTest {
             ui { val view=all(a.window.decorView).filterIsInstance<VoiceMessageView>().first();view.stop();assertFalse(all(view).filterIsInstance<SeekBar>().first().isEnabled) }
         } finally { ui { a.finish();WsClient.disconnect() };MessageService.stop(ctx) }
     }
+
+    /** WhatsApp-style timeline: day chips, call bubbles and a status reply's quote card with its big emoji. */
+    @Test fun callsStatusRepliesAndDaysShowInTheChat() {
+        prepare();val db=Db.get(ctx);val other="convo-calls-peer";val now=System.currentTimeMillis();val day=86_400_000L
+        db.upsertConversation(other,"Calls contact","",now,false)
+        db.saveMessage("convo-old",other,other,"Long ago",now-10*day,false,"received")
+        db.saveMessage("convo-week",other,other,"This week",now-3*day,false,"received")
+        val answered=db.logCallStart(other,"Calls contact","outgoing");db.logCallEnd(answered,46)
+        val missed=db.logCallStart(other,"Calls contact","missed video")
+        val thumb=java.io.ByteArrayOutputStream().also { android.graphics.Bitmap.createBitmap(40,40,android.graphics.Bitmap.Config.ARGB_8888).compress(android.graphics.Bitmap.CompressFormat.JPEG,70,it) }.toByteArray()
+        val card=JSONObject().put("owner",other).put("name","Calls contact").put("kind","image").put("text","Unbox").put("thumb",android.util.Base64.encodeToString(thumb,android.util.Base64.NO_WRAP))
+        db.saveMessage("convo-status-reply",other,Session.id,JSONObject().put("text","😍").put("reply","Status · Photo").put("status",card).toString(),now+1000,true,"sent","rich")
+        val a=inst.startActivitySync(Intent(ctx,ChatActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("peerId",other).putExtra("peerName","Calls contact")) as ChatActivity
+        try {
+            fun texts()=all(a.window.decorView).filterIsInstance<TextView>()
+            fun shown(value:String)=texts().any { it.isShown&&it.text.toString()==value }
+            waitUi { shown("Voice call")&&shown("46 sec")&&shown("Missed video call")&&shown("Calls contact • Status") }
+            ui {
+                assertTrue("Date older than a week",shown(java.text.DateFormat.getDateInstance(java.text.DateFormat.LONG).format(java.util.Date(now-10*day))))
+                assertTrue("Weekday within the last week",shown(java.text.SimpleDateFormat("EEEE",java.util.Locale.getDefault()).format(java.util.Date(now-3*day))))
+                assertTrue(shown("Today"));assertTrue("Status words in the quote",shown("Unbox"))
+                val biggest=texts().filter { it.isShown&&it.text.toString()=="😍" }.maxOf { it.textSize }
+                assertTrue("Emoji-only status reply is big",biggest>=40*a.resources.displayMetrics.scaledDensity)
+                assertTrue("Photo status shows its thumbnail",all(a.window.decorView).any { it is android.widget.ImageView&&it.isShown&&it.width==RabtaUi.dp(a,56) })
+                assertTrue("Calls sit in time order after this week's message",texts().indexOfFirst { it.text.toString()=="This week" }<texts().indexOfFirst { it.text.toString()=="Voice call" })
+            }
+        } finally { ui { a.finish() };db.deleteCall(answered);db.deleteCall(missed) }
+    }
 }

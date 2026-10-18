@@ -26,3 +26,10 @@ test('status caption and view times are additive and owner-only',async()=>{const
   const own=(await h.call('get','/api/status','A')).body.statuses[0];assert.equal(own.caption,'Sunset');assert.deepEqual(own.viewers,['B']);assert.equal(own.views.length,1);assert.equal(own.views[0].id,'B');assert.equal(own.views[0].name,'B');assert.ok(own.views[0].at>=before);assert.equal(own.viewedAt,undefined);
   const seen=(await h.call('get','/api/status','B')).body.statuses[0];assert.equal(seen.caption,'Sunset');assert.equal(seen.views,undefined);assert.equal(seen.viewers,undefined);assert.equal(seen.viewedAt,undefined);
   const text=(await h.call('post','/api/status','A',{kind:'text',body:'Hello',audience:['B'],caption:'ignored'})).body.id;assert.equal((await h.call('get','/api/status','B')).body.statuses.find(s=>s.id===text).caption,undefined);});
+test('text status keeps a valid colour and font for its viewers, and ignores anything else',async()=>{const h=setup();
+ const styled=(await h.call('post','/api/status','A',{kind:'text',body:'Hello',audience:['B'],bg:'#A62C6E',font:'serif'})).body.id;
+ const plain=(await h.call('post','/api/status','A',{kind:'text',body:'Plain',audience:['B'],bg:'red;}',font:'<script>'})).body.id;
+ const feed=(await h.call('get','/api/status','B')).body.statuses;const s=feed.find(x=>x.id===styled),p=feed.find(x=>x.id===plain);
+ assert.equal(s.bg,'#A62C6E');assert.equal(s.font,'serif');assert.equal(p.bg,undefined);assert.equal(p.font,undefined);
+ const file=await upload(h);const image=(await h.call('post','/api/status','A',{kind:'image',body:JSON.stringify(file),audience:['B'],bg:'#000000',font:'mono'})).body.id;
+ const i=(await h.call('get','/api/status','B')).body.statuses.find(x=>x.id===image);assert.equal(i.bg,undefined);assert.equal(i.font,undefined);});

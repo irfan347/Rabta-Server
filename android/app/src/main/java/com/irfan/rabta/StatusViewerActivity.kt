@@ -193,8 +193,9 @@ class StatusViewerActivity:ThemedActivity() {
     }
     private fun spinner()=ProgressBar(this).apply {indeterminateTintList=android.content.res.ColorStateList.valueOf(AppTheme.primary(this@StatusViewerActivity));contentDescription="Opening status"}
 
+    private var photo:android.graphics.Bitmap?=null
     private fun render(status:JSONObject,local:String?,bitmap:android.graphics.Bitmap?,request:Int) {
-        current=status;header(status)
+        current=status;header(status);photo=if(status.optString("kind")=="image") bitmap else null
         mediaBody=if(status.optString("kind")=="text")null else status.optString("body")
         expires=status.optLong("expires");if(expires<=System.currentTimeMillis()){unavailable("This update has expired.");return}
         content.removeAllViews();state.removeAllViews();handler.post(expiry)
@@ -205,7 +206,8 @@ class StatusViewerActivity:ThemedActivity() {
             "text"->{
                 val body=status.optString("body")
                 content.addView(RabtaUi.text(this,body,if(body.length<80)30f else 22f,true,Color.WHITE).apply {
-                    gravity=Gravity.CENTER;setPadding(dp(28),dp(96),dp(28),dp(120));setBackgroundColor(textColor(status.optString("id")))
+                    gravity=Gravity.CENTER;setPadding(dp(28),dp(96),dp(28),dp(120))
+                    setBackgroundColor(StatusLook.background(status));typeface=StatusLook.typeface(status.optString("font"))
                 },FrameLayout.LayoutParams(-1,-1))
                 startClock((5000L+body.length*40L).coerceAtMost(12000L))
             }
@@ -241,12 +243,22 @@ class StatusViewerActivity:ThemedActivity() {
                 })
             },FrameLayout.LayoutParams(-2,-2,Gravity.CENTER))
         } else {
-            footer.addView(LinearLayout(this).apply {
+            // Reply, quick emoji replies like WhatsApp's, and a heart.
+            val bar=LinearLayout(this).apply {gravity=Gravity.CENTER_VERTICAL}
+            bar.addView(LinearLayout(this).apply {
                 gravity=Gravity.CENTER_VERTICAL;isFocusable=true;contentDescription="Reply to ${status.optString("name")}";minimumHeight=dp(48)
-                background=RabtaUi.ripple(this@StatusViewerActivity,0x33FFFFFF,999);setPadding(dp(18),0,dp(18),0);setOnClickListener {reply(status)}
+                background=RabtaUi.ripple(this@StatusViewerActivity,0x33FFFFFF,999);setPadding(dp(18),0,dp(8),0);setOnClickListener {reply(status)}
                 addView(UiIcons.image(this@StatusViewerActivity,"reply",Color.WHITE,20,"Reply"),LinearLayout.LayoutParams(dp(24),dp(24)).apply {marginEnd=dp(10)})
-                addView(RabtaUi.text(this@StatusViewerActivity,"Reply",15f,true,Color.WHITE))
-            },FrameLayout.LayoutParams(-1,-2))
+                addView(RabtaUi.text(this@StatusViewerActivity,"Reply",15f,true,Color.WHITE),LinearLayout.LayoutParams(0,-2,1f))
+                listOf("😍","😂","😮").forEach {e->addView(RabtaUi.text(this@StatusViewerActivity,e,24f).apply {
+                    gravity=Gravity.CENTER;isFocusable=true;contentDescription="Reply with $e";background=RabtaUi.ripple(this@StatusViewerActivity,Color.TRANSPARENT,999)
+                    setOnClickListener {quickReply(status,e)}
+                },LinearLayout.LayoutParams(dp(44),dp(44)))}
+            },LinearLayout.LayoutParams(0,-2,1f))
+            bar.addView(UiIcons.image(this,"heart",Color.WHITE,24,"Reply with a heart").apply {
+                isFocusable=true;background=RabtaUi.ripple(this@StatusViewerActivity,0x33FFFFFF,999);setOnClickListener {quickReply(status,"❤️")}
+            },LinearLayout.LayoutParams(dp(48),dp(48)).apply {marginStart=dp(8)})
+            footer.addView(bar,FrameLayout.LayoutParams(-1,-2))
         }
     }
 
@@ -300,17 +312,33 @@ class StatusViewerActivity:ThemedActivity() {
         android.app.AlertDialog.Builder(this).setTitle("Reply to status").setView(box)
             .setNegativeButton("Cancel",null).setPositiveButton("Send") {_,_->
                 val text=field.text.toString().trim()
-                when {
-                    text.isEmpty()->{}
-                    !WsClient.connected->Toast.makeText(this,"Replies need internet",Toast.LENGTH_SHORT).show()
-                    else->{
-                        val quote="Status · "+when(status.optString("kind")){"text"->status.optString("body").take(80);"video"->"Video";else->"Photo"}+status.optString("caption").takeIf {it.isNotBlank()}?.let {" · ${it.take(60)}"}.orEmpty()
-                        Outbox.send(to,name,false,JSONObject().put("text",text).put("reply",quote).toString(),"rich")
-                        Toast.makeText(this,"Reply sent to $name",Toast.LENGTH_SHORT).show()
-                    }
-                }
+                if(text.isNotEmpty()&&send(status,text))Toast.makeText(this,"Reply sent to $name",Toast.LENGTH_SHORT).show()
             }.setOnDismissListener {held=false;resumePlayback()}.show()
     }
+    private fun quickReply(status:JSONObject,emoji:String) {
+        if(Privacy.blocked(this,status.optString("owner"))){Toast.makeText(this,"Unblock this contact to reply",Toast.LENGTH_SHORT).show();return}
+        if(send(status,emoji))Toast.makeText(this,"Sent $emoji",Toast.LENGTH_SHORT).show()
+    }
+    /**
+     * The reply quotes the update: "reply" is the line older apps show, and "status" lets chats show a card with the
+     * owner, the words or caption and, for photos, a small picture.
+     */
+    private fun send(status:JSONObject,text:String):Boolean {
+        if(!WsClient.connected){Toast.makeText(this,"Replies need internet",Toast.LENGTH_SHORT).show();return false}
+        val to=status.optString("owner");val name=status.optString("name").ifBlank {"Rabta contact"};val kind=status.optString("kind")
+        val quote="Status · "+when(kind){"text"->status.optString("body").take(80);"video"->"Video";else->"Photo"}+status.optString("caption").takeIf {it.isNotBlank()}?.let {" · ${it.take(60)}"}.orEmpty()
+        val card=JSONObject().put("owner",to).put("name",name).put("kind",kind).put("text",(if(kind=="text") status.optString("body") else status.optString("caption")).take(300))
+        if(kind=="text")card.put("bg",StatusLook.hex(StatusLook.background(status)))
+        photo?.takeIf {kind=="image"}?.let {thumbnail(it)}?.let {card.put("thumb",it)}
+        Outbox.send(to,name,false,JSONObject().put("text",text).put("reply",quote).put("status",card).toString(),"rich")
+        return true
+    }
+    private fun thumbnail(src:android.graphics.Bitmap):String?=runCatching {
+        val scale=112f/maxOf(src.width,src.height)
+        val small=android.graphics.Bitmap.createScaledBitmap(src,maxOf(1,(src.width*scale).toInt()),maxOf(1,(src.height*scale).toInt()),true)
+        val out=java.io.ByteArrayOutputStream();small.compress(android.graphics.Bitmap.CompressFormat.JPEG,70,out)
+        android.util.Base64.encodeToString(out.toByteArray(),android.util.Base64.NO_WRAP).takeIf {it.length<9000}
+    }.getOrNull()
 
     private fun openExternal() {
         if(openingExternal)return

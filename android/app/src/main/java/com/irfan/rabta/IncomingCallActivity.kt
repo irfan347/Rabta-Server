@@ -28,8 +28,8 @@ class IncomingCallActivity : ThemedActivity(), RabtaEvents.Listener {
     private val handler = Handler(Looper.getMainLooper())
     private var answered = false
 
-    // Auto-decline after 30 seconds
-    private val autoDecline = Runnable { if (!answered) decline() }
+    // Nobody answered within 30 seconds: a missed call, then the caller is told.
+    private val autoDecline = Runnable { if (!answered) { MessageService.missed(this, callId); decline() } }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -38,6 +38,8 @@ class IncomingCallActivity : ThemedActivity(), RabtaEvents.Listener {
         callId   = intent.getStringExtra("callId")   ?: ""
         offerSdp = intent.getStringExtra("offerSdp")
         isVideo  = intent.getBooleanExtra("isVideo", false)
+        // Answer on the call notification: go straight into the call.
+        if (intent.getBooleanExtra("answerNow", false)) { answer(); return }
 
         // Show on lock screen + turn screen on
         window.addFlags(
@@ -51,8 +53,16 @@ class IncomingCallActivity : ThemedActivity(), RabtaEvents.Listener {
         handler.postDelayed(autoDecline, 30_000)
     }
 
+    override fun onNewIntent(next: Intent) {
+        super.onNewIntent(next)
+        if (next.getBooleanExtra("answerNow", false) && next.getStringExtra("callId") == callId && !answered) answer()
+    }
+
     override fun onCallEnd(fromId: String, callId: String) {
         if (fromId == this.fromId && callId==this.callId && !answered) { answered = true; cancelNotif(); finish() }
+    }
+    override fun onVideoEnd(callId: String) {
+        if (callId == this.callId && !answered) { answered = true; cancelNotif(); finish() }
     }
 
     private fun cancelNotif() {
@@ -127,7 +137,7 @@ class IncomingCallActivity : ThemedActivity(), RabtaEvents.Listener {
     }
 
     private fun decline() {
-        answered = true
+        answered = true; MessageService.declined(callId)
         cancelNotif()
         WsClient.sendRaw(org.json.JSONObject().put("type",if(isVideo) "video_end" else "call_end").put("to",fromId).put("callId",callId).toString())
         finish()

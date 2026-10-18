@@ -26,9 +26,37 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
         const val RADAR_CHANNEL = "rabta_radar_requests"
         const val DEVICE_NOTIF = 4
         const val SECURITY_CHANNEL = "rabta_security"
-        private var msgId      = 100
+        /** Rabta's notification channels. Creating one that already exists changes nothing, so anything about to notify may call this. */
+        fun channels(c: Context) {
+            val nm = c.getSystemService(NotificationManager::class.java) ?: return
+            nm.createNotificationChannel(NotificationChannel(SERVICE_CHANNEL,"Connection service",NotificationManager.IMPORTANCE_LOW).apply {description="Keeps Rabta available in the background"})
+            nm.createNotificationChannel(NotificationChannel(RADAR_CHANNEL,"Radar requests",NotificationManager.IMPORTANCE_DEFAULT).apply { description="Review nearby connection requests in Radar" })
+            nm.createNotificationChannel(NotificationChannel(SECURITY_CHANNEL,"Sign-in requests",NotificationManager.IMPORTANCE_HIGH).apply { description="A new phone wants to sign in to your account" })
+            nm.createNotificationChannel(NotificationChannel(MSG_CHANNEL, "Messages", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "New message notifications"; enableLights(true); enableVibration(true)
+            })
+            nm.createNotificationChannel(NotificationChannel(CALL_CHANNEL, "Calls", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "Incoming calls use your phone ringtone and respect silent / Do Not Disturb settings"
+                setSound(android.provider.Settings.System.DEFAULT_RINGTONE_URI,android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE).setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+                enableVibration(true)
+            })
+            nm.createNotificationChannel(NotificationChannel(ChatNotifications.MISSED_CHANNEL, "Missed calls", NotificationManager.IMPORTANCE_HIGH).apply { description = "Calls you did not answer" })
+        }
         private val pendingCalls=java.util.concurrent.ConcurrentHashMap<String,Long>()
-        fun accepted(ctx:Context,id:String) { pendingCalls.remove(id)?.let { Db.get(ctx).deleteCall(it) } }
+        private class Ring(val fromId:String,val fromName:String,val video:Boolean)
+        private val rings=java.util.concurrent.ConcurrentHashMap<String,Ring>()
+        fun accepted(ctx:Context,id:String) { rings.remove(id); pendingCalls.remove(id)?.let { Db.get(ctx).deleteCall(it) } }
+        /** Turned down on purpose: no missed-call notice. */
+        fun declined(id:String) { rings.remove(id) }
+        /** A ring that stopped without an answer (the caller hung up, or nobody picked up) becomes a missed call. */
+        fun missed(ctx:Context,id:String) { rings.remove(id)?.let { ChatNotifications.missedCall(ctx,it.fromId,it.fromName,it.video) } }
+        /** Decline from the call notification: tell the caller, and close the ringing screen if it is open. */
+        fun decline(ctx:Context,fromId:String,callId:String,video:Boolean) {
+            declined(callId)
+            WsClient.sendRaw(org.json.JSONObject().put("type",if(video)"video_end" else "call_end").put("to",fromId).put("callId",callId).toString())
+            runCatching { ctx.getSystemService(NotificationManager::class.java).cancel(CALL_NOTIF) }
+            if(video) RabtaEvents.postVideoEnd(callId) else RabtaEvents.postCallEnd(fromId,callId)
+        }
 
         fun start(ctx: Context) {
             try { ctx.startForegroundService(Intent(ctx, MessageService::class.java)) } catch (_: Exception) {MeshBridge.status="Open Rabta to start Nearby service"}
@@ -55,7 +83,7 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
 
     private var ringingId=""
     private val callHandler=android.os.Handler(android.os.Looper.getMainLooper())
-    private val dismissCall=Runnable { cancelRinging() }
+    private val dismissCall=Runnable { val id=ringingId; cancelRinging(); missed(this,id) }
     private fun cancelRinging() { callHandler.removeCallbacks(dismissCall); ringingId=""; (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).cancel(CALL_NOTIF) }
     private var router: Router? = null
     private val repair=object:Runnable { override fun run(){startMeshIfAllowed();callHandler.postDelayed(this,15000)} }
@@ -66,7 +94,7 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
     override fun onCreate() {
         super.onCreate()
         Session.init(this)          // service may be restarted by Android without the app open
-        createChannels()
+        channels(this)
         showConnection()
         RabtaEvents.add(this)
         if (Session.loggedIn) WsClient.connect(Session)
@@ -176,38 +204,25 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
         runCatching { getSystemService(NotificationManager::class.java).notify(DEVICE_NOTIF,notification) }
     }
     override fun onMessage(fromId: String, fromName: String, msgId: String, body: String, t: Long, msgType: String, groupId: String) {
-        if (msgType!="reaction" && !Privacy.blocked(this,fromId) && ChatActivity.openPeer != fromId) showMessageNotification(fromId, fromName, when(msgType) { "file"->"File"; "video"->"Video"; "image"->"Photo"; "voice"->"Voice note"; "sticker"->"Sticker"; else->body.take(160) })
+        val convId=groupId.ifEmpty { fromId }
+        if (msgType=="reaction" || Privacy.blocked(this,fromId) || ChatActivity.openPeer == convId) return
+        val title=if(groupId.isEmpty()) fromName else runCatching { Db.get(this).group(groupId)?.name }.getOrNull() ?: "Group"
+        ChatNotifications.message(this, convId, title, groupId.isNotEmpty(), fromId, fromName, ChatNotifications.preview(body, msgType))
     }
 
     override fun onIncomingCall(fromId: String, fromName: String, callId:String) { showCallNotification(fromId, fromName, false,callId) }
     override fun onVideoOffer(fromId: String, fromName: String, callId: String, sdp: String) { showCallNotification(fromId, fromName, true, callId, sdp) }
 
-    override fun onCallEnd(fromId: String,callId:String) { if(callId==ringingId) cancelRinging() }
-    override fun onVideoEnd(callId:String) { if(callId==ringingId) cancelRinging() }
+    override fun onCallEnd(fromId: String,callId:String) { if(callId==ringingId) cancelRinging(); missed(this,callId) }
+    override fun onVideoEnd(callId:String) { if(callId==ringingId) cancelRinging(); missed(this,callId) }
 
     // --- Notifications ---
-    private fun showMessageNotification(fromId: String, fromName: String, body: String) {
-        val chatIntent = Intent(this, ChatActivity::class.java)
-            .putExtra("peerId", fromId).putExtra("peerName", fromName)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        val pi = PendingIntent.getActivity(this, fromId.hashCode(), chatIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val n = Notification.Builder(this, MSG_CHANNEL)
-            .setSmallIcon(R.drawable.ic_stat_rabta)
-            .setContentTitle(fromName)
-            .setContentText(if(Privacy.hidePreviews(this)) "New message" else body)
-            .setAutoCancel(true)
-            .setContentIntent(pi)
-            .setWhen(System.currentTimeMillis())
-            .setShowWhen(true)
-            .build()
-        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(msgId++, n)
-    }
-
     private fun showCallNotification(fromId: String, fromName: String, isVideo: Boolean = false, callId: String = "", offerSdp: String? = null) {
         if(Privacy.blocked(this,fromId))return
         if(ringingId==callId && callId.isNotEmpty()) return
         if(pendingCalls.size>100)pendingCalls.clear()
-        if(!pendingCalls.containsKey(callId))pendingCalls[callId]=Db.get(this).logCallStart(fromId,fromName,"missed")
+        if(!pendingCalls.containsKey(callId))pendingCalls[callId]=Db.get(this).logCallStart(fromId,fromName,if(isVideo) "missed video" else "missed")
+        if(callId.isNotEmpty())rings[callId]=Ring(fromId,fromName,isVideo)
         ringingId=callId; callHandler.removeCallbacks(dismissCall); callHandler.postDelayed(dismissCall,45000)
         val callIntent = Intent(this, IncomingCallActivity::class.java)
             .putExtra("fromId", fromId).putExtra("fromName", fromName)
@@ -215,7 +230,13 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
             .also { if (offerSdp != null) it.putExtra("offerSdp", offerSdp) }
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         val pi = PendingIntent.getActivity(this, 0, callIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val n = Notification.Builder(this, CALL_CHANNEL)
+        // Answer and Decline right on the notification, like a phone call.
+        val answer = PendingIntent.getActivity(this, 1, Intent(callIntent).setData(android.net.Uri.parse("rabta://answer/$callId")).putExtra("answerNow", true),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val decline = PendingIntent.getBroadcast(this, 2, Intent(this, NotificationActionReceiver::class.java).setAction(ChatNotifications.DECLINE)
+            .setData(android.net.Uri.parse("rabta://decline/$callId")).putExtra("id", callId).putExtra("fromId", fromId).putExtra("isVideo", isVideo),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val builder = Notification.Builder(this, CALL_CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_rabta)
             .setContentTitle(if (isVideo) "Incoming Video Call" else "Incoming Call")
             .setContentText("$fromName is ${if (isVideo) "video " else ""}calling...")
@@ -225,7 +246,13 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
             .setFullScreenIntent(pi, true)
             .setAutoCancel(false)
             .setOngoing(true)
-            .build()
+        if (Build.VERSION.SDK_INT >= 31) builder.setStyle(Notification.CallStyle.forIncomingCall(
+            android.app.Person.Builder().setName(fromName.ifBlank { "Rabta contact" }).setImportant(true).setIcon(ChatNotifications.photo(fromId)).build(), decline, answer).setIsVideo(isVideo))
+        else {
+            val icon = android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_stat_rabta)
+            builder.addAction(Notification.Action.Builder(icon, "Decline", decline).build()).addAction(Notification.Action.Builder(icon, "Answer", answer).build())
+        }
+        val n = builder.build()
         n.flags=n.flags or Notification.FLAG_INSISTENT
         (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(CALL_NOTIF, n)
         WsClient.sendRaw(org.json.JSONObject().put("type","call_ringing").put("to",fromId).put("callId",callId).toString())
@@ -244,18 +271,4 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
             .build()
     }
 
-    private fun createChannels() {
-        val nm = getSystemService(NotificationManager::class.java) ?: return
-        nm.createNotificationChannel(NotificationChannel(SERVICE_CHANNEL,"Connection service",NotificationManager.IMPORTANCE_LOW).apply {description="Keeps Rabta available in the background"})
-        nm.createNotificationChannel(NotificationChannel(RADAR_CHANNEL,"Radar requests",NotificationManager.IMPORTANCE_DEFAULT).apply { description="Review nearby connection requests in Radar" })
-        nm.createNotificationChannel(NotificationChannel(SECURITY_CHANNEL,"Sign-in requests",NotificationManager.IMPORTANCE_HIGH).apply { description="A new phone wants to sign in to your account" })
-        nm.createNotificationChannel(NotificationChannel(MSG_CHANNEL, "Messages", NotificationManager.IMPORTANCE_HIGH).apply {
-            description = "New message notifications"; enableLights(true); enableVibration(true)
-        })
-        nm.createNotificationChannel(NotificationChannel(CALL_CHANNEL, "Calls", NotificationManager.IMPORTANCE_HIGH).apply {
-            description = "Incoming calls use your phone ringtone and respect silent / Do Not Disturb settings"
-            setSound(android.provider.Settings.System.DEFAULT_RINGTONE_URI,android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE).setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
-            enableVibration(true)
-        })
-    }
 }

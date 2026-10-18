@@ -204,6 +204,10 @@ class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(
     fun deleteCall(id:Long)=writableDatabase.execSQL("DELETE FROM calls WHERE id=?",arrayOf(id))
     fun callOutcome(id:Long,outcome:String)=writableDatabase.execSQL("UPDATE calls SET type=? WHERE id=?",arrayOf(outcome,id))
     fun logCallEnd(callId: Long, durationSec: Int) = writableDatabase.execSQL("UPDATE calls SET duration=? WHERE id=?", arrayOf(durationSec, callId))
+    /** One contact's calls, oldest first, for the chat timeline. */
+    fun callsWith(peerId: String): List<CallRecord> = readableDatabase.rawQuery("SELECT id,peer_id,peer_name,type,duration,started_at FROM calls WHERE peer_id=? ORDER BY started_at", arrayOf(peerId)).use { c ->
+        generateSequence { if (c.moveToNext()) CallRecord(c.getLong(0),c.getString(1),c.getString(2),c.getString(3),c.getInt(4),c.getLong(5)) else null }.toList()
+    }
     fun calls(limit: Int = 100): List<CallRecord> {
         val list = mutableListOf<CallRecord>()
         readableDatabase.rawQuery("SELECT id,peer_id,peer_name,type,duration,started_at FROM calls ORDER BY started_at DESC LIMIT ?", arrayOf(limit.toString())).use { c ->

@@ -63,6 +63,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     private var scrollAfterSend=false
     private var renderedHistory:List<Triple<Db.Message,Pair<Boolean,String>,Int?>>?=null
     private var renderedQuery:String?=null
+    private var renderedCalls:List<Db.CallRecord>?=null
     private lateinit var chatBox: LinearLayout
     private lateinit var chatScroll: ScrollView
     private lateinit var input: EditText
@@ -183,8 +184,9 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
 
     override fun onResume() {
         super.onResume(); if (!::db.isInitialized) return
-        openPeer = peerId
+        openPeer = peerId; ChatNotifications.clear(this, peerId)
         uiHandler.post(statusTick); uiHandler.post(presenceTick); RabtaEvents.add(this)
+        if (!firstHistory) loadHistory()   // e.g. a video call just ended: its bubble joins the chat
         Thread { try { db.clearUnread(peerId) } catch (_: Exception) {} }.start()
         if (!isGroup) WsClient.sendRead(peerId, "all")
     }
@@ -567,30 +569,35 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             val result=runCatching {
                 db.searchMessages(peerId,query).map { m -> Triple(m,db.meta(m.id),Transfers.progress[m.id]) }
             }
+            // Calls with this contact sit in the timeline like WhatsApp's; searches show messages only.
+            val calls=if(isGroup||query.isNotBlank()) emptyList() else runCatching { db.callsWith(peerId) }.getOrDefault(emptyList())
             uiHandler.post {
                 if(isDestroyed||isFinishing||version!=historyVersion)return@post
-                val unchanged=result.getOrNull()?.let { it==renderedHistory&&query==renderedQuery }?:false
+                val unchanged=result.getOrNull()?.let { it==renderedHistory&&query==renderedQuery&&calls==renderedCalls }?:false
                 if(unchanged) { if(forceScroll)scrollBottom(true);return@post }
                 voiceViews.forEach { it.stop() };voiceViews.clear();chatBox.removeAllViews()
                 result.onFailure {
-                    renderedHistory=null;renderedQuery=null
+                    renderedHistory=null;renderedQuery=null;renderedCalls=null
                     chatBox.addView(RabtaUi.empty(this,"chats","Could not load messages","Your saved conversation is still on this phone.","Retry") { loadHistory() })
                 }.onSuccess { items ->
-                    renderedHistory=items;renderedQuery=query
-                    if(items.isEmpty()) {
+                    renderedHistory=items;renderedQuery=query;renderedCalls=calls
+                    if(items.isEmpty()&&calls.isEmpty()) {
                         chatBox.addView(if(query.isNotBlank()) RabtaUi.empty(this,"search","No matches","Try another word or clear your search.","Clear search") { searchField.setText("") }
                             else RabtaUi.empty(this,"chats","Start the conversation","Messages you send and receive will appear here."))
                     }
                     var lastDay=""
                     var previous:Db.Message?=null
+                    fun newDay(time:Long)=dayKey(time).let { day -> (day!=lastDay).also { if(it) { addDateSeparator(time);lastDay=day } } }
+                    var nextCall=0
+                    fun callsUntil(time:Long) { while(nextCall<calls.size&&calls[nextCall].startedAt<=time) { val c=calls[nextCall++];newDay(c.startedAt);addCallBubble(c);previous=null } }
                     items.forEach { (m,meta,progress) ->
-                        val day=dayKey(m.sentAt)
-                        val newDay=day!=lastDay
-                        if(newDay) { addDateSeparator(m.sentAt);lastDay=day }
+                        callsUntil(m.sentAt)
+                        val newDay=newDay(m.sentAt)
                         val continued=!newDay&&previous?.let { it.mine==m.mine&&it.fromId==m.fromId&&m.sentAt-it.sentAt<10*60_000 }==true
                         addBubble(m,meta,progress,continued)
                         previous=m
                     }
+                    callsUntil(Long.MAX_VALUE)
                     if(replyTo==null&&draftReplyId!=null) {
                         items.firstOrNull { it.first.id==draftReplyId }?.first?.let { selectReply(it,false) }
                         draftReplyId=null
@@ -614,12 +621,15 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     }
 
     private fun dayKey(time:Long)=SimpleDateFormat("yyyy-MM-dd",Locale.getDefault()).format(Date(time))
+    /** Like WhatsApp: Today, Yesterday, the weekday within the last week, then the full date. */
     private fun addDateSeparator(time:Long) {
-        val yesterday=java.util.Calendar.getInstance().apply { add(java.util.Calendar.DAY_OF_YEAR,-1) }
-        val title=when(dayKey(time)) {
-            dayKey(System.currentTimeMillis())->L.t(this,"Today")
-            dayKey(yesterday.timeInMillis)->L.t(this,"Yesterday")
-            else->java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM).format(Date(time))
+        fun midnight(t:Long)=java.util.Calendar.getInstance().apply { timeInMillis=t;set(java.util.Calendar.HOUR_OF_DAY,0);set(java.util.Calendar.MINUTE,0);set(java.util.Calendar.SECOND,0);set(java.util.Calendar.MILLISECOND,0) }.timeInMillis
+        val days=Math.round((midnight(System.currentTimeMillis())-midnight(time))/86_400_000.0).toInt()
+        val title=when(days) {
+            0->L.t(this,"Today")
+            1->L.t(this,"Yesterday")
+            in 2..6->SimpleDateFormat("EEEE",Locale.getDefault()).format(Date(time))
+            else->java.text.DateFormat.getDateInstance(java.text.DateFormat.LONG).format(Date(time))
         }
         chatBox.addView(RabtaUi.text(this,title,12f,true,SUB).apply {
             gravity=Gravity.CENTER;setPadding(dp(14),dp(6),dp(14),dp(6));background=RabtaUi.shape(this@ChatActivity,AppTheme.raised(this@ChatActivity),16)
@@ -654,12 +664,17 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             "rich" -> {
                 val o=runCatching { org.json.JSONObject(m.body) }.getOrNull()
                 if(o!=null) {
-                    bubble.addView(textLine(o.optString("reply")).apply {
+                    val status=o.optJSONObject("status")
+                    if(status!=null) bubble.addView(statusCard(status),LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(6) })
+                    else bubble.addView(textLine(o.optString("reply")).apply {
                         textSize=13f;setTextColor(SUB);maxLines=3;ellipsize=android.text.TextUtils.TruncateAt.END
                         background=RabtaUi.shape(this@ChatActivity,AppTheme.raised(this@ChatActivity),12)
                         setPadding(dp(12),dp(8),dp(12),dp(8));contentDescription="Quoted message: ${o.optString("reply")}"
                     },LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(8) })
-                    bubble.addView(InlineMetaLayout(this,textLine(o.optString("text")),msgFooter(m)));timeInline=true
+                    val text=o.optString("text")
+                    // A quick emoji reply to a status shows big, like WhatsApp's.
+                    if(status!=null&&emojiOnly(text)) bubble.addView(RabtaUi.text(this,text,44f).apply { includeFontPadding=false;setPadding(dp(4),0,dp(4),0) })
+                    else { bubble.addView(InlineMetaLayout(this,textLine(text),msgFooter(m)));timeInline=true }
                 } else bubble.addView(textLine("Reply could not be displayed"))
             }
             "image" -> {
@@ -720,6 +735,53 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     }
 
     private fun textLine(t:String)=RabtaUi.text(this,t,16f).apply { setLineSpacing(dp(1).toFloat(),1.05f) }
+    /** Up to a few emoji and nothing else (skin tones, joiners and variation selectors allowed). */
+    private fun emojiOnly(t:String)=t.isNotBlank()&&t.length<=16&&t.codePoints().allMatch { cp ->
+        Character.getType(cp)==Character.OTHER_SYMBOL.toInt()||Character.getType(cp)==Character.MODIFIER_SYMBOL.toInt()||cp==0x200D||cp in 0xFE00..0xFE0F||Character.isWhitespace(cp)
+    }
+    /** A status reply's quote, like WhatsApp's: "Name • Status", the words or caption, and a photo's thumbnail. */
+    private fun statusCard(s:org.json.JSONObject)=LinearLayout(this).apply {
+        gravity=Gravity.CENTER_VERTICAL;background=RabtaUi.shape(this@ChatActivity,AppTheme.raised(this@ChatActivity),12);clipToOutline=true
+        val bar=s.optString("bg").takeIf { Regex("#[0-9A-Fa-f]{6}").matches(it) }?.let { Color.parseColor(it) } ?: AppTheme.accent(this@ChatActivity)
+        addView(View(this@ChatActivity).apply { setBackgroundColor(bar) },LinearLayout.LayoutParams(dp(4),-1))
+        val words=s.optString("text").ifBlank { when(s.optString("kind")) { "image"->"📷 Photo";"video"->"🎥 Video";else->"" } }
+        val col=LinearLayout(this@ChatActivity).apply { orientation=LinearLayout.VERTICAL;setPadding(dp(10),dp(8),dp(10),dp(8)) }
+        col.addView(RabtaUi.text(this@ChatActivity,"${s.optString("name").ifBlank { "Rabta contact" }} • Status",13f,true,AppTheme.accent(this@ChatActivity)).apply { maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END })
+        if(words.isNotBlank()) col.addView(RabtaUi.text(this@ChatActivity,words,13f,color=SUB).apply { maxLines=3;ellipsize=android.text.TextUtils.TruncateAt.END;setPadding(0,dp(2),0,0) })
+        addView(col,LinearLayout.LayoutParams(0,-2,1f))
+        s.optString("thumb").takeIf { it.isNotEmpty() }?.let { MediaHelper.base64ToBitmap(it) }?.let { thumb ->
+            addView(ImageView(this@ChatActivity).apply { setImageBitmap(thumb);scaleType=ImageView.ScaleType.CENTER_CROP;importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO },LinearLayout.LayoutParams(dp(56),dp(56)))
+        }
+        contentDescription="Reply to ${s.optString("name")}'s status${if(words.isNotBlank()) ": $words" else ""}"
+    }
+    /** A call in the chat, like WhatsApp: voice or video, how long or how it ended, on the caller's side. Tap to call back. */
+    private fun addCallBubble(c:Db.CallRecord) {
+        val missed=c.type.contains("missed",true);val video=c.type.contains("video",true)
+        val mine=!missed&&!c.type.startsWith("incoming")
+        val title=when { missed->if(video) "Missed video call" else "Missed voice call"; video->"Video call"; else->"Voice call" }
+        val detail=when {
+            c.duration>0->if(c.duration<60) "${c.duration} sec" else if(c.duration<3600) "${c.duration/60} min" else "${c.duration/3600} hr ${c.duration%3600/60} min"
+            missed->"Tap to call back"
+            c.type.contains("busy",true)->"Busy"
+            c.type.startsWith("incoming")->"Not connected"
+            else->"No answer"
+        }
+        val color=if(missed) AppTheme.error(this) else TXT
+        val bubble=bubbleSurface(mine,true)
+        val row=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL;setPadding(0,dp(2),0,dp(2)) }
+        row.addView(UiIcons.image(this,if(video) "video" else "phone",color,20,title).apply { background=RabtaUi.shape(this@ChatActivity,AppTheme.raised(this@ChatActivity),999) },LinearLayout.LayoutParams(dp(40),dp(40)))
+        val col=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;setPadding(dp(10),0,dp(14),0) }
+        col.addView(RabtaUi.text(this,title,15f,true,color))
+        col.addView(RabtaUi.text(this,detail,13f,color=SUB))
+        row.addView(col)
+        row.addView(RabtaUi.text(this,fmtTime(c.startedAt),11f,color=SUB),LinearLayout.LayoutParams(-2,-2).apply { gravity=Gravity.BOTTOM })
+        bubble.addView(row)
+        bubble.isFocusable=true;bubble.contentDescription="$title, $detail, ${fmtTime(c.startedAt)}. Tap to call back"
+        bubble.setOnClickListener { if(video) startVideoCall() else startCall(true) }
+        val wrap=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL;gravity=if(mine) Gravity.END else Gravity.START;tag="call:${c.id}" }
+        wrap.addView(bubble,LinearLayout.LayoutParams(-2,-2).apply { topMargin=dp(8) })
+        chatBox.addView(wrap,LinearLayout.LayoutParams(-1,-2))
+    }
     /** Time and, on your own messages, the tick: clock, ✓, ✓✓, blue ✓✓ or a red mark. The words stay for screen readers. */
     private fun msgFooter(m:Db.Message)=TextView(this).apply {
         textSize=11f;setTextColor(SUB);maxLines=1;includeFontPadding=false
@@ -991,7 +1053,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         uiHandler.removeCallbacks(callTick); uiHandler.removeCallbacks(callTimeout)
         val seconds=if(connectedAt==0L) 0 else ((android.os.SystemClock.elapsedRealtime()-connectedAt)/1000).toInt()
         if(callId>0) db.logCallEnd(callId,seconds); if(callId>0&&connectedAt==0L)db.callOutcome(callId,outcome)
-        callId=-1L; connectedAt=0L
+        callId=-1L; connectedAt=0L; loadHistory()
         try { (getSystemService(AUDIO_SERVICE) as AudioManager).apply { isSpeakerphoneOn=previousSpeaker; mode=previousAudioMode } } catch (_:Exception) {}
         headerBar.visibility=View.VISIBLE; (headerBar.parent as View).setBackgroundColor(BEIGE); RabtaUi.systemBars(this,AppTheme.dark(this))
         callOverlay.visibility=View.GONE;updateStatus();if(replyTo!=null)replyBar.visibility=View.VISIBLE

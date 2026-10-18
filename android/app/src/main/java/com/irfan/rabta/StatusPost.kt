@@ -45,10 +45,12 @@ object StatusPost {
     }
 
     /** Uploads the media (resumable), publishes the update, and keeps the local copy as this phone's preview. Blocking. */
-    fun publish(c: Context, kind: String, body: String, caption: String, ids: List<String>, changed: () -> Unit = {}): JSONObject {
+    fun publish(c: Context, kind: String, body: String, caption: String, ids: List<String>, look: JSONObject? = null, changed: () -> Unit = {}): JSONObject {
         val remote = if (kind == "text") body else Transfers.upload(c, body, UPLOAD, changed)
         val request = JSONObject().put("kind", kind).put("body", remote).put("audience", JSONArray(ids))
         if (caption.isNotBlank() && kind != "text") request.put("caption", caption.trim())
+        // A text update's colour and font; servers before this field simply ignore it.
+        if (kind == "text" && look != null) request.put("bg", look.optString("bg")).put("font", look.optString("font"))
         val result = FeatureApi.request("/api/status", "POST", request)
         // Your own update opens from the file already on this phone instead of downloading it again.
         if (kind != "text") runCatching { c.getSharedPreferences("downloads_${Session.id}", 0).edit().putString(JSONObject(remote).getString("remote"), body).apply() }
