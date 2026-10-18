@@ -52,12 +52,12 @@ class Router(private val ctx:Context,private val ui:UiListener,transportFactory:
         myId=userId; myName=name; store=MeshStore(ctx,myId); security=MeshSecurity(ctx,myId); running=true
         worker.execute {
             try { security.pair(); maintain(); securityReady=true;runCatching { startDrop() };main.post { if(running) { retryTransport(); main.post(pulse) } } }
-            catch(_:Exception) { running=false; main.post { ui.onStatus("Offline security key unavailable") } }
+            catch(_:Exception) { running=false; main.post { ui.onStatus("Nearby can't start on this phone right now") } }
         }
     }
     @Synchronized private fun enqueue(action:()->Unit) {
         if(!running||worker.isShutdown)return
-        worker.execute { if(running)runCatching(action).onFailure { main.post { if(running)ui.onStatus("Nearby queue operation failed — retained messages will retry") } } }
+        worker.execute { if(running)runCatching(action).onFailure { main.post { if(running)ui.onStatus("Nearby had a problem — messages will be retried") } } }
     }
     @Synchronized fun stop() {
         if(worker.isShutdown)return
@@ -130,8 +130,8 @@ class Router(private val ctx:Context,private val ui:UiListener,transportFactory:
                 val plain=JSONObject().put("body",p.body).put("type",p.type).put("name",myName).toString()
                 val env=packet(p.id,p.to,"message",p.sent,plain)
                 if(store.promote(p,env.toString(),env.getLong("x"))) RabtaEvents.postAck(p.id,MessageDelivery.NEARBY_QUEUED)
-                else main.post { ui.onStatus("Nearby carry queue full — pending message retained") }
-            } catch(_:Exception) { main.post { ui.onStatus("Message waiting for offline security key") } }
+                else main.post { ui.onStatus("Too many messages waiting nearby — yours will be sent later") }
+            } catch(_:Exception) { main.post { ui.onStatus("Message waiting until you connect with this contact nearby or by QR") } }
         }
     }
     private fun keyPacket():String {
@@ -163,7 +163,7 @@ class Router(private val ctx:Context,private val ui:UiListener,transportFactory:
             // Only learn self-announced keys from the directly connected peer.
             if(mesh.userIdOf[source]!=from) return
             if(security.pin(from,pub)) { matchedKeys[source]=from;flushPending();carry(source);RabtaEvents.postNearbyLinked() }
-            else main.post { ui.onStatus("Nearby identity key changed — compare contact security codes") }
+            else main.post { ui.onStatus("A contact's security code changed — check it with them") }
             return
         }
         val id=o.optString("i"); val to=o.optString("t"); val h=o.optInt("h")
@@ -223,7 +223,7 @@ class Router(private val ctx:Context,private val ui:UiListener,transportFactory:
     }
     override fun onLost(endpointId:String)=ui.onPeople()
     override fun onConnecting(endpointId:String,name:String) {}
-    override fun onDisconnected(endpointId:String) {matchedKeys.remove(endpointId);peerOfEndpoint.remove(endpointId)?.let { drop?.onPeerLost(it) };ui.onStatus(if(connected.isEmpty())"Nearby peer disconnected — searching again" else "Nearby: ${connected.size} phone(s) connected");ui.onPeople()}
+    override fun onDisconnected(endpointId:String) {matchedKeys.remove(endpointId);peerOfEndpoint.remove(endpointId)?.let { drop?.onPeerLost(it) };ui.onStatus(if(connected.isEmpty())"Disconnected — searching again" else "Nearby: ${connected.size} phone(s) connected");ui.onPeople()}
     override fun onFileStart(endpointId:String,payloadId:Long,name:String,size:Long) {}
     override fun onFileDone(endpointId:String,payloadId:Long) {}
     override fun onStream(endpointId:String,payload:Payload) {

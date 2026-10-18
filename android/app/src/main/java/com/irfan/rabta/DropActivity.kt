@@ -59,7 +59,7 @@ class DropActivity : ThemedActivity() {
             pair.forEachIndexed { i, (label, icon, types) -> row.addView(kindButton(label, icon) { pick(types) }, LinearLayout.LayoutParams(0, -2, 1f).apply { if (i == 0) marginEnd = dp(8) }) }
             send.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
         }
-        send.addView(text("End-to-end encrypted between both phones. Files are checked with SHA-256 before they are saved.", 12f, color = AppTheme.sub(this)).apply { setPadding(0, dp(4), 0, 0) })
+        send.addView(text("End-to-end encrypted between both phones. Files are checked before they are saved.", 12f, color = AppTheme.sub(this)).apply { setPadding(0, dp(4), 0, 0) })
         body.addView(send)
 
         body.addView(RabtaUi.section(this, "Transfers"))
@@ -135,7 +135,7 @@ class DropActivity : ThemedActivity() {
         background = RabtaUi.shape(this@DropActivity, AppTheme.sent(this@DropActivity), RabtaUi.CORNER, AppTheme.accent(this@DropActivity))
         addView(text("${t.peerName} wants to send you", 13f, true, AppTheme.accent(this@DropActivity)))
         addView(text(t.name, 17f, true).apply { setPadding(0, dp(6), 0, 0); maxLines = 2; ellipsize = TextUtils.TruncateAt.MIDDLE })
-        addView(text("${DropProtocol.kind(t.mime)} · ${RabtaDrop.size(t.size)} · checksum ${t.sha256.take(8)}", 13f, color = AppTheme.sub(this@DropActivity)).apply { setPadding(0, dp(4), 0, 0) })
+        addView(text("${DropProtocol.kind(t.mime)} · ${RabtaDrop.size(t.size)}", 13f, color = AppTheme.sub(this@DropActivity)).apply { setPadding(0, dp(4), 0, 0) })
         addView(text("From a verified nearby contact. Nothing is saved until you accept.", 12f, color = AppTheme.sub(this@DropActivity)).apply { setPadding(0, dp(8), 0, dp(12)) })
         val actions = LinearLayout(this@DropActivity)
         actions.addView(RabtaUi.button(this@DropActivity, "Decline") { RabtaDrop.engine?.decline(t.id) }.apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(8) })
@@ -185,7 +185,7 @@ class DropActivity : ThemedActivity() {
             State.INCOMING -> "Waiting for your approval"
             State.SENDING -> "Sending · ${moving()}"
             State.RECEIVING -> "Receiving · ${moving()}"
-            State.VERIFYING -> if (t.outgoing) "Sent · waiting for ${t.peerName} to verify" else "Verifying checksum…"
+            State.VERIFYING -> if (t.outgoing) "Sent · waiting for ${t.peerName} to verify" else "Checking file…"
             State.COMPLETED -> if (t.outgoing) "Delivered · verified by ${t.peerName}" else "Saved to Downloads/Rabta · verified"
             State.FAILED -> "Failed · ${t.error.ifBlank { "Transfer stopped" }}"
             State.DECLINED -> if (t.outgoing) "Declined by ${t.peerName}" else "Declined"

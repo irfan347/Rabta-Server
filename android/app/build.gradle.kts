@@ -9,14 +9,18 @@ android {
         applicationId = "com.irfan.rabta"
         minSdk = 26
         targetSdk = 34
-        versionCode = 33
-        versionName = "1.9.1"
+        // Every CI run numbers its build, so a published Rabta is always newer than the one it updates.
+        val ciRun = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
+        versionCode = if (ciRun != null) 1000 + ciRun else 34
+        versionName = "2.0.${ciRun ?: 0}"
         manifestPlaceholders["appLabel"] = "Rabta"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     // One stable key for every test build, so a new Rabta Test APK installs over the previous one.
     // CI restores it from GitHub Secrets; without it, Android's per-machine debug key is used as before.
     val testKeystore = System.getenv("RABTA_TEST_KEYSTORE")?.let { file(it) }?.takeIf { it.exists() }
+    // The public app has its own key, kept only in GitHub Secrets and never used for debuggable builds.
+    val releaseKeystore = System.getenv("RABTA_RELEASE_KEYSTORE")?.let { file(it) }?.takeIf { it.exists() }
     signingConfigs {
         if (testKeystore != null) create("rabtaTest") {
             storeFile = testKeystore
@@ -24,9 +28,17 @@ android {
             keyAlias = System.getenv("RABTA_TEST_KEY_ALIAS") ?: "rabta-test"
             keyPassword = System.getenv("RABTA_TEST_KEYSTORE_PASSWORD")
         }
+        if (releaseKeystore != null) create("rabtaRelease") {
+            storeFile = releaseKeystore
+            storePassword = System.getenv("RABTA_RELEASE_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("RABTA_RELEASE_KEY_ALIAS") ?: "rabta"
+            keyPassword = System.getenv("RABTA_RELEASE_KEYSTORE_PASSWORD")
+        }
     }
     buildTypes {
         getByName("debug") { if (testKeystore != null) signingConfig = signingConfigs.getByName("rabtaTest") }
+        // Without the release key Gradle leaves the public APK unsigned, and CI publishes nothing.
+        getByName("release") { if (releaseKeystore != null) signingConfig = signingConfigs.getByName("rabtaRelease") }
         create("device") {
             initWith(getByName("debug"))
             applicationIdSuffix = ".testing"

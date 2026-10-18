@@ -68,7 +68,7 @@ class ConversationTest {
                 // Ticks are icons; each bubble's delivery words are its accessibility description.
                 fun described(id:String)=all(views().first { it.tag=="bubble:$id" }).mapNotNull { it.contentDescription?.toString() }
                 assertTrue("Stored Nearby states read as Queued",described("convo-queued").any { it.contains("Queued") })
-                assertTrue("Stored server acceptance reads as Relayed, not Delivered",described("convo-sent").any { it.contains("Relayed") }&&described("convo-sent").none { it.contains("Delivered") })
+                assertTrue("Stored server acceptance reads as Sent, not Delivered",described("convo-sent").any { it.contains("Sent") }&&described("convo-sent").none { it.contains("Delivered") })
                 assertTrue(views().filterIsInstance<TextView>().any { it.text=="Yesterday" })
                 for(v in views().filter { it.tag?.toString()?.startsWith("bubble:")==true })assertTrue(v.width<=(v.parent as View).width)
                 incoming().performLongClick()
@@ -115,7 +115,7 @@ class ConversationTest {
             assertTrue("Retry went through the existing websocket",sent.await(8,TimeUnit.SECONDS))
             assertEquals("convo-failed",wireId)
             // The server's ack only proves it relayed the message; the recipient's receipt proves delivery.
-            waitUi { all(a.window.decorView).firstOrNull { it.tag=="bubble:convo-failed" }?.let { b -> all(b).any { it.contentDescription?.contains("Relayed")==true } }==true }
+            waitUi { all(a.window.decorView).firstOrNull { it.tag=="bubble:convo-failed" }?.let { b -> all(b).any { it.contentDescription?.contains("Sent")==true } }==true }
             assertEquals("relayed",db.status("convo-failed"))
             socket!!.send(JSONObject().put("type","receipt").put("id",wireId).put("by",peer).toString())
             waitUi { all(a.window.decorView).firstOrNull { it.tag=="bubble:convo-failed" }?.let { b -> all(b).any { it.contentDescription?.contains("Delivered")==true } }==true }

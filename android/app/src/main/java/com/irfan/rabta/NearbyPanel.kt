@@ -95,11 +95,12 @@ class NearbyPanel(private val activity:Activity) {
 
         // ── Quick tools: each opens a real, existing feature ──
         val tools=LinearLayout(activity)
-        listOf(
+        val quick=listOfNotNull(
             tile("send","Quick Drop","Share files nearby") { activity.startActivity(Intent(activity,DropActivity::class.java)) },
             tile("qr","QR Connect","Scan or share ID") { activity.startActivity(Intent(activity,InstantConnectActivity::class.java)) },
-            tile("vision","Network Vision","See live links") { activity.startActivity(Intent(activity,NetworkVisionActivity::class.java)) }
-        ).forEachIndexed { i,v -> tools.addView(v,LinearLayout.LayoutParams(0,-1,1f).apply { if(i<2) marginEnd=d(8) }) }
+            if(Config.testBuild(activity)) tile("vision","Network Vision","See live links") { activity.startActivity(Intent(activity,NetworkVisionActivity::class.java)) } else null
+        )
+        quick.forEachIndexed { i,v -> tools.addView(v,LinearLayout.LayoutParams(0,-1,1f).apply { if(i<quick.size-1) marginEnd=d(8) }) }
         view.addView(tools)
 
         // ── Nearby devices ──
@@ -112,7 +113,7 @@ class NearbyPanel(private val activity:Activity) {
         view.addView(search,LinearLayout.LayoutParams(-1,-2).apply {bottomMargin=d(8)})
         view.addView(users)
         view.addView(RabtaUi.text(activity,"No phone numbers are shared. Radar shows activity, not distance or location.",12f,color=AppTheme.sub(activity)).apply {setPadding(d(4),d(8),0,d(12))})
-        view.addView(RabtaUi.row(activity,"Connection help","Permissions, radios and discovery","connection") { guidance() })
+        view.addView(RabtaUi.row(activity,"Connection help","Permissions and settings","connection") { guidance() })
     }
     private fun toggleDiscoverable() { discoverable.isChecked=!discoverable.isChecked }
     private fun tile(icon:String,title:String,detail:String,action:()->Unit)=LinearLayout(activity).apply {
@@ -144,7 +145,7 @@ class NearbyPanel(private val activity:Activity) {
         else {MessageService.restartNearby(activity);rendered="";refresh()}
     }
     private fun options()=RabtaUi.sheet(activity,"Nearby options",listOf(
-        RabtaUi.SheetAction("My contact QR","Permanent contact key") {showQr()},
+        RabtaUi.SheetAction("My contact QR","Let people add you by scanning") {showQr()},
         RabtaUi.SheetAction("Scan contact QR") {
             IntentIntegrator(activity).setDesiredBarcodeFormats(IntentIntegrator.QR_CODE).setPrompt("Scan a trusted Rabta contact").setBeepEnabled(false).setOrientationLocked(false).initiateScan()
         },
@@ -183,7 +184,7 @@ class NearbyPanel(private val activity:Activity) {
             if(matches.isEmpty()) {
                 if(query.isNotBlank())users.addView(RabtaUi.empty(activity,"search","No nearby matches","Try another display name or Rabta ID.","Clear search") {search.field.setText("")})
                 else {
-                users.addView(RabtaUi.empty(activity,"profile","No devices found",if(enabled)"Both people need discoverability on, Nearby permissions and compatible Rabta versions." else "Turn on discoverability when you want to meet someone nearby.").apply {
+                users.addView(RabtaUi.empty(activity,"profile","No devices found",if(enabled)"Both people need Rabta open with discoverability on." else "Turn on discoverability when you want to meet someone nearby.").apply {
                     background=RabtaUi.shape(activity,AppTheme.surface(activity),20)
                 })
             }
@@ -214,12 +215,12 @@ class NearbyPanel(private val activity:Activity) {
         })
         card.addView(head)
         val status=when(peer.stage) {
-            RadarStage.FOUND -> "Discovered · approval required"
+            RadarStage.FOUND -> "Found nearby · send a request to connect"
             RadarStage.OUTGOING -> "Request sent · waiting for approval"
             RadarStage.INCOMING -> "Wants to connect with you"
-            RadarStage.APPROVED -> "Your approval sent · waiting for connection"
-            RadarStage.CONNECTED -> if(keyMatched)"Connected · signed key matches saved identity" else "Connected · verifying identity key"
-            RadarStage.FAILED -> "Connection ended, failed or timed out"
+            RadarStage.APPROVED -> "Accepted · connecting…"
+            RadarStage.CONNECTED -> if(keyMatched)"Connected · verified" else "Connected · checking security…"
+            RadarStage.FAILED -> "Not connected · try again"
             RadarStage.REJECTED -> "Request declined"
         }
         card.addView(RabtaUi.text(activity,status,13f,color=AppTheme.sub(activity)).apply { setPadding(0,RabtaUi.dp(activity,10),0,RabtaUi.dp(activity,10)) })
@@ -233,8 +234,8 @@ class NearbyPanel(private val activity:Activity) {
             RadarStage.CONNECTED -> {
                 card.addView(RabtaUi.button(activity,if(keyMatched)"Open private chat" else "Waiting for security verification",keyMatched) { if(keyMatched)openChat(peer) }.apply { isEnabled=keyMatched;alpha=if(keyMatched)1f else 0.55f })
             }
-            else -> card.addView(RabtaUi.button(activity,if(now<peer.retryAt)"Request cooldown · try again shortly" else "Request connection",now>=peer.retryAt) {
-                if(MeshBridge.requestConnection(peer.endpoint))pendingOpen=peer.id else Toast.makeText(activity,"Request unavailable. Refresh Radar or wait for the cooldown.",Toast.LENGTH_SHORT).show()
+            else -> card.addView(RabtaUi.button(activity,if(now<peer.retryAt)"Please wait a moment" else "Request connection",now>=peer.retryAt) {
+                if(MeshBridge.requestConnection(peer.endpoint))pendingOpen=peer.id else Toast.makeText(activity,"Couldn't send the request. Try again in a moment.",Toast.LENGTH_SHORT).show()
                 refresh()
             }.apply { isEnabled=now>=peer.retryAt;alpha=if(isEnabled)1f else 0.55f })
         }
@@ -252,8 +253,8 @@ class NearbyPanel(private val activity:Activity) {
         activity.startActivity(Intent(activity,ChatActivity::class.java).putExtra("peerId",peer.id).putExtra("peerName",peer.name))
     }
     private fun guidance() {
-        val message=NearbySetup.problem(activity)?:"Nearby prerequisites are available. Turn discoverability on on both phones, then request a connection. Compare the connection code before accepting."
-        AlertDialog.Builder(activity).setTitle("Radar permissions & discovery").setMessage(message+"\n\nRabta uses nearby-device and location permissions required by Android discovery. Radar does not display your coordinates or share a phone number.")
+        val message=NearbySetup.problem(activity)?:"Everything is ready. Turn on discoverability on both phones, send a request, and check that the connection code matches before accepting."
+        AlertDialog.Builder(activity).setTitle("Nearby permissions").setMessage(message+"\n\nAndroid needs these permissions to find phones nearby. Rabta never shows your location or phone number.")
             .setPositiveButton("Allow permissions") { _,_ -> NearbySetup.request(activity) }
             .setNeutralButton("Connection tools") { _,_ -> tools() }.setNegativeButton("Close",null).show()
     }
@@ -266,7 +267,7 @@ class NearbyPanel(private val activity:Activity) {
                 setImageBitmap(BarcodeEncoder().encodeBitmap(bundle,BarcodeFormat.QR_CODE,700,700))
                 adjustViewBounds=true;setPadding(20,20,20,20);contentDescription="My Rabta contact QR"
             }
-            AlertDialog.Builder(activity).setTitle("Legacy contact QR").setMessage("This permanent public contact key does not expire. Use Instant Connect for temporary, single-use invitations.").setView(image).setPositiveButton("Close",null).show()
+            AlertDialog.Builder(activity).setTitle("My contact QR").setMessage("Anyone who scans this code can add you as a contact. For a one-time code, use QR Connect.").setView(image).setPositiveButton("Close",null).show()
         }
     }
     private fun tools() {
@@ -283,8 +284,8 @@ class NearbyPanel(private val activity:Activity) {
                     .addOnFailureListener { Toast.makeText(activity,"Update or enable Google Play services on this phone",Toast.LENGTH_LONG).show() }
             },
             RabtaUi.SheetAction("Retry connection") { WsClient.retry();retry() },
-            RabtaUi.SheetAction("Connectivity diagnostics") {activity.startActivity(Intent(activity,ConnectivityDiagnosticsActivity::class.java))}
-        ))
+            if(Config.testBuild(activity)) RabtaUi.SheetAction("Connectivity diagnostics") {activity.startActivity(Intent(activity,ConnectivityDiagnosticsActivity::class.java))} else null
+        ).filterNotNull())
     }
     fun handleResult(req: Int,res: Int,data: Intent?): Boolean {
         val result=IntentIntegrator.parseActivityResult(req,res,data)?:return false
@@ -299,12 +300,12 @@ class NearbyPanel(private val activity:Activity) {
             Triple(id,o.optString("name",id).take(80),key) to code
         }.onSuccess { (contact,code) ->
             AlertDialog.Builder(activity).setTitle("Add ${contact.second}?")
-                .setMessage("${contact.first}\n\n$code\n\nThis is a legacy permanent contact QR. Compare this code with the person before adding. Use Instant Connect for temporary invitations and replay protection.")
+                .setMessage("Security code: $code\n\nCheck that this code matches on the other person's phone before adding them.")
                 .setNegativeButton("Cancel",null).setPositiveButton("Add contact") { _,_ ->
                     if(MeshSecurity(activity,Session.id).pin(contact.first,contact.third)) {
                         Db.get(activity).upsertConversation(contact.first,contact.second,"",System.currentTimeMillis(),false)
                         Toast.makeText(activity,"Contact added",Toast.LENGTH_SHORT).show()
-                    } else Toast.makeText(activity,"Key differs from saved contact. Verify with the person; key was not replaced.",Toast.LENGTH_LONG).show()
+                    } else Toast.makeText(activity,"This contact's security code has changed. Check with them before adding again.",Toast.LENGTH_LONG).show()
                 }.show()
         }.onFailure { Toast.makeText(activity,"Invalid Rabta contact QR",Toast.LENGTH_LONG).show() }
         return true

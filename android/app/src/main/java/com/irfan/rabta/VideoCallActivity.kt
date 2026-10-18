@@ -225,8 +225,8 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
     private fun sdpObserver(onSet: () -> Unit = {}, onCreate: (SessionDescription) -> Unit = {}) = object : SdpObserver {
         override fun onCreateSuccess(s: SessionDescription) { onCreate(s) }
         override fun onSetSuccess() { onSet() }
-        override fun onCreateFailure(e: String) { handler.post { if (!isFinishing) statusTv.text = "SDP error: $e" } }
-        override fun onSetFailure(e: String) { handler.post { if (!isFinishing) statusTv.text = "SDP fail: $e" } }
+        override fun onCreateFailure(e: String) { handler.post { if (!isFinishing) statusTv.text = "Couldn't connect the call" } }
+        override fun onSetFailure(e: String) { handler.post { if (!isFinishing) statusTv.text = "Couldn't connect the call" } }
     }
 
     private fun createAndSendOffer() {
@@ -243,7 +243,7 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
                 }), sdp)
             }
             override fun onSetSuccess() {}
-            override fun onCreateFailure(e: String) { handler.post { statusTv.text = "Error: $e" } }
+            override fun onCreateFailure(e: String) { handler.post { statusTv.text = "Couldn't connect the call" } }
             override fun onSetFailure(e: String) {}
         }, mc)
     }
@@ -259,7 +259,7 @@ class VideoCallActivity : ThemedActivity(), RabtaEvents.Listener {
                     }), sdp)
                 }
                 override fun onSetSuccess() {}
-                override fun onCreateFailure(e: String) { handler.post { statusTv.text = "Error: $e" } }
+                override fun onCreateFailure(e: String) { handler.post { statusTv.text = "Couldn't connect the call" } }
                 override fun onSetFailure(e: String) {}
             }, MediaConstraints())
         }), SessionDescription(SessionDescription.Type.OFFER, offerSdp))

@@ -129,6 +129,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         uiHandler.removeCallbacks(connectionTick);uiHandler.post(connectionTick)
         when(activeTab) { 1->nearbyPanel.resume();3->loadCalls();else->loadConvs() }
         if(activeTab==0) loadMoments(force=true)
+        AppUpdate.check(this)
     }
     override fun onPause() {
         resumed=false;if(::nearbyPanel.isInitialized)nearbyPanel.pause()
@@ -777,7 +778,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
                 if(isDestroyed||isFinishing)return@post
                 result.onSuccess { contacts ->
                     RabtaUi.sheet(this,if(video) "Start a video call" else "Start a call",contacts.map { (id,name) ->
-                        RabtaUi.SheetAction(name.ifBlank { id },"${if(video) "Video" else "Voice"} call · $id") { callContact(id,name,video) }
+                        RabtaUi.SheetAction(name.ifBlank { id },"${if(video) "Video" else "Voice"} call") { callContact(id,name,video) }
                     }+RabtaUi.SheetAction("Find by username or Rabta ID") { showNewChat(forCall=true) })
                 }.onFailure { android.widget.Toast.makeText(this,"Could not load contacts. Try again.",android.widget.Toast.LENGTH_SHORT).show() }
             }

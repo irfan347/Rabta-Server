@@ -73,23 +73,29 @@ class SettingsActivity : ThemedActivity() {
         }
 
         section("CONNECTIONS") {
-            row("Nearby mesh", "${MeshBridge.peersConnected} connected · ${if(RadarPrefs.enabled(this@SettingsActivity)) "Discoverable" else "Private"}", "nearby") {
+            row("Nearby", "${MeshBridge.peersConnected} connected · ${if(RadarPrefs.enabled(this@SettingsActivity)) "Discoverable" else "Private"}", "nearby") {
                 startActivity(Intent(this@SettingsActivity, NearbyActivity::class.java))
             }
-            row("Connection details", "Internet and Nearby diagnostics", "connection") { ConnectionHelp.show(this@SettingsActivity) }
-            row("Video relay", "Check whether this server offers relay support", "video") {
+            row("Connection help", "Fix internet and Nearby problems", "connection") { ConnectionHelp.show(this@SettingsActivity) }
+            if (Config.testBuild(this@SettingsActivity)) row("Video relay", "Check whether this server offers relay support", "video") {
                 FeatureApi.run(this@SettingsActivity, { FeatureApi.request("/api/ice").optBoolean("relayConfigured") }) { configured ->
                     themedInfo("Video relay", if (configured) "Relay is configured. Calls may use it when direct connections fail." else "No relay is configured. Some networks may prevent video calls.")
                 }
             }
         }
         section("HELP") {
-            row("Connectivity diagnostics", "Technical connection information", "connection") {startActivity(Intent(this@SettingsActivity,ConnectivityDiagnosticsActivity::class.java))}
+            if (Config.testBuild(this@SettingsActivity)) row("Connectivity diagnostics", "Technical connection information", "connection") {startActivity(Intent(this@SettingsActivity,ConnectivityDiagnosticsActivity::class.java))}
+            if (AppUpdate.enabled(this@SettingsActivity)) row("Check for updates", "Rabta ${AppUpdate.versionName(this@SettingsActivity)}", "backup") {
+                AppUpdate.check(this@SettingsActivity, manual = true)
+            }
             row("About Rabta", "Version ${packageManager.getPackageInfo(packageName, 0).versionName}", "info") {
-                themedInfo("About Rabta", "Rabta keeps your account identity and local chat history on this phone. Nearby messaging requires compatible devices, Google Play services, radios and permissions.")
+                themedInfo("About Rabta", "Your chats are saved on this phone. Rabta can also message people nearby without internet when both phones have Bluetooth, Wi-Fi and Nearby permission turned on.")
             }
         }
     }
+
+    // Also continues an update once the user has allowed Rabta to install it.
+    override fun onResume() { super.onResume(); AppUpdate.check(this) }
 
     private fun section(title: String, build: LinearLayout.() -> Unit) {
         content.addView(RabtaUi.text(this, title, 12f, true, AppTheme.accent(this)).apply {
@@ -149,7 +155,7 @@ class SettingsActivity : ThemedActivity() {
         val blocked = blockedContacts()
         if (blocked.isEmpty()) { themedInfo("Blocked contacts", "You have no blocked contacts."); return }
         RabtaUi.sheet(this, "Blocked contacts", blocked.map { c ->
-            RabtaUi.SheetAction(c.peerName, "${c.peerId} · Tap to unblock") {
+            RabtaUi.SheetAction(c.peerName, "Tap to unblock") {
                 AlertDialog.Builder(this).setTitle("Unblock ${c.peerName}?").setMessage("Messages and calls from this contact will be allowed again.")
                     .setNegativeButton("Cancel", null).setPositiveButton("Unblock") { _, _ -> Privacy.setBlocked(this, c.peerId, false); recreate() }.show()
             }

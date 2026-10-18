@@ -108,7 +108,7 @@ object VideoCompressor {
                     when (e) {
                         is Cancelled -> {}
                         is Problem -> AlertDialog.Builder(a).setTitle("Video can't be sent").setMessage(e.message).setPositiveButton("OK", null).show()
-                        else -> Toast.makeText(a, "Could not prepare this video. ${e.message ?: ""}".trim(), Toast.LENGTH_LONG).show()
+                        else -> Toast.makeText(a, "Could not prepare this video. Try another one.", Toast.LENGTH_LONG).show()
                     }
                 }
             }

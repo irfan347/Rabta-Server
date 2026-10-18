@@ -9,21 +9,21 @@ object ConnectionHelp {
     fun show(activity: Activity) {
         val nearby = NearbySetup.problem(activity) ?: MeshBridge.status
         val internetDetail = buildString {
-            append("${WsClient.status}\n")
-            append("Server: ${Uri.parse(Session.serverUrl).host ?: "Not configured"}")
-            if (WsClient.connected && WsClient.protocol < 2) append("\nThis server uses an older call protocol. Calls need the current Rabta server.")
+            append(WsClient.status)
+            if (Config.testBuild(activity)) append("\nServer: ${Uri.parse(Session.serverUrl).host ?: "Not configured"}")
+            if (WsClient.connected && WsClient.protocol < 2) append("\nCalls aren't available right now.")
         }
         val nearbyDetail = buildString {
             append(nearby)
             append("\nConnected phones: ${MeshBridge.peersConnected}")
             append("\nBoth phones need Rabta open, Bluetooth, Wi-Fi and Nearby permissions.")
         }
-        RabtaUi.sheet(activity, "Connection & permissions", listOf(
-            RabtaUi.SheetAction("Connectivity diagnostics", "Radios, peers, delivery queues and relay evidence") {
+        RabtaUi.sheet(activity, "Connection & permissions", listOfNotNull(
+            if (Config.testBuild(activity)) RabtaUi.SheetAction("Connectivity diagnostics", "Radios, peers, delivery queues and relay evidence") {
                 activity.startActivity(Intent(activity,ConnectivityDiagnosticsActivity::class.java))
-            },
+            } else null,
             RabtaUi.SheetAction("Internet connection", internetDetail) {
-                AlertDialog.Builder(activity).setTitle("Internet diagnostics").setMessage(internetDetail)
+                AlertDialog.Builder(activity).setTitle("Internet connection").setMessage(internetDetail)
                     .setPositiveButton("Close", null).show()
             },
             RabtaUi.SheetAction("Nearby network", nearbyDetail) {

@@ -131,7 +131,7 @@ class StatusActivity : ThemedActivity() {
         feed.removeAllViews();feed.addView(RabtaUi.loading(this,if(posting) "Sharing status…" else "Updating…"))
         // A sleeping free server can take a while to answer the first request; say so instead of spinning silently.
         handler.postDelayed({
-            if(request==generation&&foreground) {feed.removeAllViews();feed.addView(RabtaUi.loading(this,"Server is waking up — this can take up to a minute…"))}
+            if(request==generation&&foreground) {feed.removeAllViews();feed.addView(RabtaUi.loading(this,"Loading… this can take up to a minute"))}
         },8000)
         Thread {
             val result=runCatching {FeatureApi.request("/api/status").getJSONArray("statuses")}

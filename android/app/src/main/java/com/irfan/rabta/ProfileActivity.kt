@@ -101,7 +101,7 @@ class ProfileActivity : ThemedActivity() {
         navRow(actions, "qr", AppTheme.teal(this), "My QR invitation", "Pair with a temporary QR code") { startActivity(Intent(this, InstantConnectActivity::class.java)) }
         navRow(actions, "privacy", AppTheme.teal(this), "Offline security code", "Verify your identity with a contact") { MeshSecurity.showIdentity(this) }
         navRow(actions, "connection", AppTheme.teal(this), "Connection", ConnectionStatus.text(this)) { ConnectionHelp.show(this) }
-        navRow(actions, "info", AppTheme.violet(this), "About Rabta", "v${runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: ""} (NOVA)", last = true) {
+        navRow(actions, "info", AppTheme.violet(this), "About Rabta", "Version ${runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: ""}", last = true) {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
         body.addView(actions, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = d(12) })

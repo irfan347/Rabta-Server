@@ -100,12 +100,12 @@ class InternetVoiceCall(private val peerId: String, val id:String, private val o
                         val enc = Base64.encodeToString(buf, 0, n, Base64.NO_WRAP)
                         WsClient.sendRaw(JSONObject().put("type","call_audio").put("to",peerId).put("callId",id).put("data",enc).toString())
                     } else if (n < 0) {
-                        handler.post { onStatus("Mic error ($n)") }; break
+                        handler.post { onStatus("Microphone problem") }; break
                     }
                 }
             }.also { it.isDaemon = true; it.start() }
         } catch (e: Exception) {
-            handler.post { onStatus("Mic error: ${e.message}") }
+            handler.post { onStatus("Microphone problem") }
         }
     }
 
@@ -131,7 +131,7 @@ class InternetVoiceCall(private val peerId: String, val id:String, private val o
                 }
             }.also { it.isDaemon = true; it.start() }
         } catch (e: Exception) {
-            handler.post { onStatus("Speaker error: ${e.message}") }
+            handler.post { onStatus("Speaker problem") }
         }
     }
 

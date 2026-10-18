@@ -91,7 +91,7 @@ class ContactProfileActivity : ThemedActivity() {
         val blockRow = row(danger, "block", AppTheme.error(this), "", null, AppTheme.error(this)) { MessageActions.toggleBlock(this, peerId) { renderBlock(danger) } }
         blockRow.tag = "block"
         divider(danger)
-        row(danger, "report", AppTheme.error(this), "Report $peerName", "Send a report to the server administrator", AppTheme.error(this)) { MessageActions.report(this, peerId) }
+        row(danger, "report", AppTheme.error(this), "Report $peerName", "Tell Rabta about a problem with this contact", AppTheme.error(this)) { MessageActions.report(this, peerId) }
         renderBlock(danger)
         loadMedia(); loadSafety(); loadAccount()
     }

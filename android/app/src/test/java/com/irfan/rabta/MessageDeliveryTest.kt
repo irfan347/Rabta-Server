@@ -39,7 +39,7 @@ class MessageDeliveryTest {
         assertTrue(MessageDelivery.canTransition("relayed", "delivered"))
     }
     @Test fun legacyStoredValuesKeepWorkingAndShowAccurateLabels() {
-        assertEquals("✓ Relayed", MessageDelivery.label("sent"))
+        assertEquals("✓ Sent", MessageDelivery.label("sent"))
         assertEquals("Queued", MessageDelivery.label("mesh"))
         assertEquals("Queued", MessageDelivery.label("mesh_wait"))
         assertTrue(MessageDelivery.pending("mesh_wait"))
