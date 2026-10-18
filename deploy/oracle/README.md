@@ -10,13 +10,17 @@ there. Accounts, waiting messages and sign-ins come along: the database is copie
 1. Sign up at cloud.oracle.com. Choose the home region **India West (Mumbai)**; it cannot be changed later.
 2. Compute → Instances → **Create instance**:
    - Image: **Canonical Ubuntu 24.04** (22.04 also works).
-   - Shape: **Ampere VM.Standard.A1.Flex**, 2 OCPUs and 12 GB memory. Always Free covers up to 4 OCPUs and 24 GB.
-     If Oracle reports "out of capacity", try again later or pick another availability domain.
+   - Shape: **Ampere VM.Standard.A1.Flex**, 2 OCPUs and 12 GB memory. This stays within the Always Free allowance,
+     which Oracle lowered in 2026. If Oracle reports "out of capacity", try again later or pick another availability
+     domain.
    - Networking: keep **Assign a public IPv4 address** on.
    - SSH keys: **Generate a key pair** and download both keys. Keep them private.
 3. Note the instance's **public IP address**.
 4. Networking → Virtual cloud networks → your VCN → Security Lists → Default security list → **Add Ingress Rules**:
    source `0.0.0.0/0`, protocol TCP, destination port `80`; add a second rule for port `443`.
+5. Oracle reclaims Always Free VMs that stay idle for 7 days (CPU, network and memory under 20%). A small Rabta server
+   looks idle, so upgrade the account to **Pay As You Go** (Billing & Cost Management → Upgrade and Manage Payment).
+   The VM is then kept, and usage within the Always Free limits stays free.
 
 ## 2. Domain
 
