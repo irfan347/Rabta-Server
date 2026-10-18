@@ -38,7 +38,11 @@ android {
     buildTypes {
         getByName("debug") { if (testKeystore != null) signingConfig = signingConfigs.getByName("rabtaTest") }
         // Without the release key Gradle leaves the public APK unsigned, and CI publishes nothing.
-        getByName("release") { if (releaseKeystore != null) signingConfig = signingConfigs.getByName("rabtaRelease") }
+        getByName("release") {
+            if (releaseKeystore != null) signingConfig = signingConfigs.getByName("rabtaRelease")
+            // Phones are ARM; the x86 libraries only serve emulators and nearly double the download.
+            ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
+        }
         create("device") {
             initWith(getByName("debug"))
             applicationIdSuffix = ".testing"
