@@ -932,6 +932,9 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         val am=getSystemService(AUDIO_SERVICE) as AudioManager
         previousAudioMode=am.mode; previousSpeaker=am.isSpeakerphoneOn
         am.mode=AudioManager.MODE_IN_COMMUNICATION; am.isSpeakerphoneOn=false
+        // The screen may turn off or lock: the call keeps its microphone through MessageService, and at the ear
+        // the screen turns off like a phone call.
+        MessageService.callStarted(this,peerName,false); earpiece(true)
         headerBar.visibility=View.GONE; (headerBar.parent as View).setBackgroundColor(DARK); RabtaUi.systemBars(this,true)
         voiceViews.forEach { it.stop() };replyBar.visibility=View.GONE;offlineBanner.visibility=View.GONE
         callOverlay.visibility=View.VISIBLE; chatScroll.visibility=View.GONE; composerBar.visibility=View.GONE; searchField.visibility=View.GONE
@@ -964,7 +967,16 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     private fun toggleSpeaker(btn: TextView) {
         callSpeaker=!callSpeaker
         try { (getSystemService(AUDIO_SERVICE) as AudioManager).isSpeakerphoneOn=callSpeaker } catch (_:Exception) {}
+        earpiece(!callSpeaker)
         updateCallControls()
+    }
+    private var earpieceLock: android.os.PowerManager.WakeLock?=null
+    /** Like a phone call: held to the ear, the proximity sensor turns the screen off instead of the phone locking. */
+    private fun earpiece(on:Boolean) {
+        if(!on) { earpieceLock?.takeIf { it.isHeld }?.release(android.os.PowerManager.RELEASE_FLAG_WAIT_FOR_NO_PROXIMITY); earpieceLock=null; return }
+        val power=getSystemService(android.os.PowerManager::class.java) ?: return
+        if(earpieceLock!=null || !power.isWakeLockLevelSupported(android.os.PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK)) return
+        earpieceLock=power.newWakeLock(android.os.PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK,"Rabta:earpiece").apply { setReferenceCounted(false); acquire(4*60*60_000L) }
     }
     private fun updateCallControls() {
         UiIcons.set(muteControl,if(callAudioMuted) "muted" else "mic",label=if(callAudioMuted) "Unmute microphone" else "Mute microphone")
@@ -975,6 +987,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     private fun endCall(sendEnd:Boolean=true,outcome:String="cancelled") {
         if(!inCall) return
         inCall=false; netCall?.stop(sendEnd); netCall=null
+        MessageService.callEnded(this); earpiece(false)
         uiHandler.removeCallbacks(callTick); uiHandler.removeCallbacks(callTimeout)
         val seconds=if(connectedAt==0L) 0 else ((android.os.SystemClock.elapsedRealtime()-connectedAt)/1000).toInt()
         if(callId>0) db.logCallEnd(callId,seconds); if(callId>0&&connectedAt==0L)db.callOutcome(callId,outcome)

@@ -70,6 +70,7 @@ class SettingsActivity : ThemedActivity() {
             row("All notification settings", "Manage Rabta notifications in Android", "notifications") {
                 openAppNotificationSettings()
             }
+            backgroundRow = row("Background activity", BackgroundRun.summary(this@SettingsActivity), "connection") { BackgroundRun.open(this@SettingsActivity) }
         }
 
         section("CONNECTIONS") {
@@ -94,8 +95,10 @@ class SettingsActivity : ThemedActivity() {
         }
     }
 
+    private var backgroundRow: TextView? = null
+
     // Also continues an update once the user has allowed Rabta to install it.
-    override fun onResume() { super.onResume(); AppUpdate.check(this) }
+    override fun onResume() { super.onResume(); AppUpdate.check(this); backgroundRow?.text = BackgroundRun.summary(this) }
 
     private fun section(title: String, build: LinearLayout.() -> Unit) {
         content.addView(RabtaUi.text(this, title, 12f, true, AppTheme.accent(this)).apply {
@@ -111,7 +114,8 @@ class SettingsActivity : ThemedActivity() {
         content.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = RabtaUi.dp(this@SettingsActivity, 4) })
     }
 
-    private fun LinearLayout.row(title: String, detail: String, icon: String? = null, action: () -> Unit) {
+    /** Returns the detail line, for rows whose state can change while Settings is open. */
+    private fun LinearLayout.row(title: String, detail: String, icon: String? = null, action: () -> Unit): TextView {
         val row = LinearLayout(this@SettingsActivity).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             minimumHeight = RabtaUi.dp(this@SettingsActivity, 64)
@@ -125,11 +129,13 @@ class SettingsActivity : ThemedActivity() {
         }, LinearLayout.LayoutParams(RabtaUi.dp(this@SettingsActivity, 40), RabtaUi.dp(this@SettingsActivity, 40)).apply { marginEnd = RabtaUi.dp(this@SettingsActivity, 14) })
         val labels = LinearLayout(this@SettingsActivity).apply { orientation = LinearLayout.VERTICAL }
         labels.addView(RabtaUi.text(this@SettingsActivity, title, 15f, true))
-        labels.addView(RabtaUi.text(this@SettingsActivity, detail, 13f, color = AppTheme.sub(this@SettingsActivity)).apply { setPadding(0, RabtaUi.dp(this@SettingsActivity, 3), 0, 0); maxLines = 2 })
+        val detailLine = RabtaUi.text(this@SettingsActivity, detail, 13f, color = AppTheme.sub(this@SettingsActivity)).apply { setPadding(0, RabtaUi.dp(this@SettingsActivity, 3), 0, 0); maxLines = 2 }
+        labels.addView(detailLine)
         row.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
         row.addView(RabtaUi.text(this@SettingsActivity, "›", 24f, color = AppTheme.sub(this@SettingsActivity)))
         addView(row)
         if (childCount > 1) addView(View(this@SettingsActivity).apply { setBackgroundColor(AppTheme.line(this@SettingsActivity)) }, LinearLayout.LayoutParams(-1, RabtaUi.dp(this@SettingsActivity, 1)).apply { marginStart = RabtaUi.dp(this@SettingsActivity, 70) })
+        return detailLine
     }
 
     private fun LinearLayout.toggle(title: String, detail: String, checked: Boolean, changed: (Boolean) -> Unit) {
