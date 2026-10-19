@@ -24,12 +24,31 @@ function post(url, headers, body) {
   });
 }
 
+/**
+ * The service account from FCM_SERVICE_ACCOUNT, read the way people paste it: the whole JSON file, the same in quotes or
+ * base64, or with its key's line breaks written as \\n. Gives the account, or why wake pushes stay off (never the key).
+ */
+function readAccount(raw) {
+  let text = String(raw || '').trim();
+  if (!text) return { problem: 'FCM_SERVICE_ACCOUNT is not set' };
+  if (!text.startsWith('{') && !text.startsWith('"')) {
+    const decoded = Buffer.from(text, 'base64').toString('utf8').trim();
+    if (decoded.startsWith('{')) text = decoded;
+  }
+  let o;
+  try { o = JSON.parse(text); if (typeof o === 'string') o = JSON.parse(o); } catch { return { problem: 'FCM_SERVICE_ACCOUNT is not JSON: paste the whole downloaded key file' }; }
+  if (!o || typeof o !== 'object') return { problem: 'FCM_SERVICE_ACCOUNT is not JSON: paste the whole downloaded key file' };
+  if (o.project_info || o.client) return { problem: 'FCM_SERVICE_ACCOUNT holds google-services.json; it needs the service account key (Firebase > Project settings > Service accounts > Generate new private key)' };
+  if (!o.client_email || !o.private_key || !o.project_id) return { problem: 'FCM_SERVICE_ACCOUNT is not a complete service account key: paste the whole downloaded file' };
+  o.private_key = String(o.private_key).replace(/\\n/g, '\n');
+  try { crypto.createPrivateKey(o.private_key); } catch { return { problem: "FCM_SERVICE_ACCOUNT's private key is damaged: paste the whole downloaded file as it is" }; }
+  return { account: o };
+}
+
 module.exports = function install({ app, authId, getPool, account = process.env.FCM_SERVICE_ACCOUNT, request = post, clock = Date.now }) {
-  let sa = null;
-  if (account) try {
-    sa = JSON.parse(account);
-    if (!sa.client_email || !sa.private_key || !sa.project_id) throw new Error();
-  } catch { sa = null; console.error('FCM_SERVICE_ACCOUNT is not a Firebase service account JSON; push stays off.'); }
+  const setup = readAccount(account);
+  const sa = setup.account || null;
+  if (account && !sa) console.error(setup.problem + '; push stays off.');
   const tokens = new Map();    // token -> userId
   const lastWake = new Map();  // userId -> time of the last message wake
   let access = '', accessUntil = 0;
@@ -105,6 +124,6 @@ module.exports = function install({ app, authId, getPool, account = process.env.
   });
 
   // How many phones can be woken, and how the latest wake went (no tokens, ids or message content).
-  const stats = () => ({ pushPhones: tokens.size, pushLast: lastSend });
+  const stats = () => ({ pushPhones: tokens.size, pushLast: lastSend, pushSetup: sa ? 'ok' : setup.problem, pushProject: sa ? sa.project_id : null });
   return { init, wake, enabled: () => !!sa, stats };
 };
