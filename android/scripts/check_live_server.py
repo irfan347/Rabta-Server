@@ -7,6 +7,8 @@ try:
     with urllib.request.urlopen(url+'/health', timeout=90) as r:
         health=json.load(r)
         print('Health:', r.status, 'ok=',health.get('ok'), 'persistent_database=',health.get('db'), 'keys=',sorted(health))
+        # Whether the server can wake closed apps through Firebase (FCM_SERVICE_ACCOUNT set on the host), and how many phones are connected now.
+        print('Wake pushes enabled=',health.get('push'), 'phones_online=',health.get('online'))
 except Exception as e:
     print('Health check failed:', type(e).__name__, str(e)[:180])
 try:
