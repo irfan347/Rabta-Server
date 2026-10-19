@@ -16,7 +16,7 @@ async function fixture(database=false) {
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../index.js'),'utf8'),context);
   const register=async name=>{let value;await routes.get('POST /api/register')({body:{username:name,pin:'123456',name}},{json(v){value=v},status(){return this}});return value;};
   const alice=await register('alice'),bob=await register('bob'),eve=await register('eve');
-  function socket(user,{broken=false}={}){const handlers={},messages=[];const ws={readyState:1,pings:0,send(s,cb){if(broken)return cb?.(new Error('socket write failed'));messages.push(JSON.parse(s));cb?.()},close(){this.readyState=3;handlers.close?.()},terminate(){this.close()},ping(){this.pings++},on(e,f){handlers[e]=f}};connect(ws,{headers:{authorization:'Bearer '+user.token},url:'/ws'});return {messages,send:async m=>handlers.message(Buffer.from(JSON.stringify(m))),pong:()=>handlers.pong?.(),ws};}
+  function socket(user,{broken=false}={}){const handlers={},messages=[];const ws={readyState:1,pings:0,send(s,cb){if(broken)return cb?.(new Error('socket write failed'));messages.push(JSON.parse(s));cb?.()},close(){this.readyState=3;handlers.close?.()},terminate(){this.close()},ping(){this.pings++},on(e,f){handlers[e]=f}};connect(ws,{headers:{authorization:'Bearer '+user.token},url:'/ws'});return {messages,send:async m=>handlers.message(Buffer.from(JSON.stringify(m))),pong:()=>handlers.pong?.(),ping:()=>handlers.ping?.(),ws};}
   return {socket,alice,bob,eve,queries,routes,register,wakes,failSql:re=>{failing=re},onSql:fn=>{responder=fn},expire:()=>{for(const t of [...timers])t.fn();},beat:()=>intervals.forEach(fn=>fn())};
 }
 test('large offline attachment survives intact and retries do not duplicate',async()=>{
@@ -259,6 +259,47 @@ test('heartbeat closes sockets whose phone stopped answering, so their messages 
   assert.equal(e.messages.filter(m=>m.type==='pong').length,1);
 });
 
+// The reported problem: with Rabta in the background nothing arrived. A phone's connection can die unnoticed while it
+// sleeps; the server then wrote messages and calls into it and never woke the phone.
+test('a message whose receipt does not come back waits for the phone and wakes it',async()=>{
+  const f=await fixture();const a=f.socket(f.alice),b=f.socket(f.bob);
+  await a.send({type:'msg',id:'ABCDEF123456',to:f.bob.id,body:'are you there'});
+  assert.equal(a.messages.at(-1).status,'delivered');assert.equal(f.wakes.length,0);
+  f.expire();   // 20 s, and no receipt: the socket swallowed it
+  assert.deepEqual(f.wakes,[[f.bob.id,'message']]);
+  b.ws.close();const again=f.socket(f.bob);await settle();
+  assert.deepEqual(again.messages.filter(m=>m.type==='msg').map(m=>m.body),['are you there'],'it arrives once Rabta connects');
+});
+test('a message whose receipt comes back in time is not kept or woken for',async()=>{
+  const f=await fixture();const a=f.socket(f.alice),b=f.socket(f.bob);
+  await a.send({type:'msg',id:'ABCDEF123456',to:f.bob.id,body:'hello'});
+  await b.send({type:'receipt',id:'ABCDEF123456',to:f.alice.id});
+  f.expire();assert.equal(f.wakes.length,0);
+  b.ws.close();const again=f.socket(f.bob);await settle();
+  assert.equal(again.messages.filter(m=>m.type==='msg').length,0);
+});
+test('a socket whose app stopped pinging is closed, so what comes next wakes the phone',async()=>{
+  const f=await fixture();const a=f.socket(f.alice),b=f.socket(f.bob);
+  b.ping();b.ws.rabtaHeard=Date.now()-71000;   // last heard over a minute ago
+  f.beat();assert.equal(b.ws.readyState,3,'closed as dead');
+  await a.send({type:'msg',id:'ABCDEF123456',to:f.bob.id,body:'later'});
+  assert.equal(a.messages.at(-1).status,'stored');assert.deepEqual(f.wakes,[[f.bob.id,'message']]);
+  const quietOld=f.socket(f.eve);quietOld.ws.rabtaHeard=Date.now()-71000;f.beat();
+  assert.equal(quietOld.ws.readyState,1,'an app that never pinged is left alone');
+});
+test('a group message to a socket that went quiet is kept for later too',async()=>{
+  const f=await fixture();const a=f.socket(f.alice),b=f.socket(f.bob);let group;
+  await f.routes.get('POST /api/groups')({headers:{authorization:'Bearer '+f.alice.token},body:{name:'Family',members:[f.bob.id]}},{json(v){group=v},status(){return this}});
+  b.ping();b.ws.rabtaHeard=Date.now()-40000;
+  await a.send({type:'group_msg',id:'AAAABBBBCCCC',to:group.id,body:'hi all'});
+  assert.equal(b.messages.filter(m=>m.type==='group_msg').length,1,'written as usual');
+  assert.deepEqual(f.wakes,[[f.bob.id,'message']],'and kept, with the phone woken');
+});
+test('a call wakes the phone even when it looks connected',async()=>{
+  const f=await fixture();const a=f.socket(f.alice),b=f.socket(f.bob);
+  await a.send({type:'call_init',callId:'112233445566',to:f.bob.id});
+  assert.equal(b.messages.at(-1).type,'incoming_call');assert.deepEqual(f.wakes,[[f.bob.id,'call']]);
+});
 test('a message or call for a phone that is not connected wakes it; a connected phone is not woken',async()=>{
   const f=await fixture();const a=f.socket(f.alice);let group;
   await a.send({type:'msg',id:'ABCDEF123456',to:f.bob.id,body:'hello'});

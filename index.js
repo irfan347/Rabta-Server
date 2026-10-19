@@ -198,8 +198,9 @@ function beginCall(from,to,id,video,sdp) {
   const call={id,from,to,video,sdp,answered:false,expires:Date.now()+45000,ice:[]};
   call.timer=setTimeout(()=>endCall(call),45000);call.timer.unref?.();
   (video?videoCalls:voiceCalls).set(id,call); callState(call,'calling'); deliverCall(call);
-  // Not connected: wake the phone; once Rabta connects, the ringing call reaches it as above.
-  if(online.get(to)?.readyState!==1) push.wake(to,'call');
+  // Wake the phone too, also when it looks connected: its connection may have died unnoticed while it slept. Once
+  // Rabta connects, the ringing call reaches it as above; a phone that already rings just keeps ringing.
+  push.wake(to,'call');
 }
 // A phone whose connection drops in an answered call gets a moment to come back before the call ends: mobile networks
 // blink, and a video call's picture even goes on directly between the phones meanwhile. The other phone hears
@@ -244,6 +245,23 @@ async function deliverPending(userId, ws) {
     if (done.length < msgs.length || msgs.length < PENDING_BATCH) return;
   }
 }
+
+// A message written to a phone's socket has only arrived once the phone's receipt comes back: a socket that died
+// unnoticed (the phone went to sleep or lost its network) swallows what is written to it, and the server would not
+// wake the phone because it looks connected. Without the receipt in 20 s the message waits on the server as for a
+// phone that is offline, and the phone is woken; a copy that did arrive is recognised by its id.
+const RECEIPT_MS = 20000;
+const awaiting = new Map();   // msgId|from|to -> timer
+function expectReceipt(from, fromName, to, msgId, body, type, sentAt) {
+  const key = msgId + '|' + from + '|' + to;
+  clearTimeout(awaiting.get(key));
+  const t = setTimeout(() => { awaiting.delete(key); storeMessage(from, fromName, to, msgId, body, type, sentAt).catch(e => console.error('Offline storage failed:', e.message)); }, RECEIPT_MS);
+  t.unref?.(); awaiting.set(key, t);
+}
+function received(msgId, from, to) { const key = msgId + '|' + from + '|' + to; clearTimeout(awaiting.get(key)); awaiting.delete(key); }
+// Rabta pings its connection every 25 s: one not heard from for a while may be dead, so what goes there is kept too.
+const QUIET_MS = 35000, SILENT_MS = 70000;
+const quiet = socket => !!socket && socket.rabtaPings > 0 && Date.now() - socket.rabtaHeard > QUIET_MS;
 
 async function storeMessage(fromId, fromName, toId, msgId, body, type, sentAt, groupId = null, groupName = null) {
   if (pool) {
@@ -300,7 +318,9 @@ wss.on('connection', (ws, req) => {
   const user = memUsers.get(userId);
   if (online.has(userId)) try { online.get(userId).close(); } catch (_) {}
   online.set(userId, ws);
-  ws.rabtaAlive = true; ws.on('pong', () => { ws.rabtaAlive = true; });
+  ws.rabtaAlive = true; ws.rabtaHeard = Date.now(); ws.rabtaPings = 0;
+  ws.on('pong', () => { ws.rabtaAlive = true; ws.rabtaHeard = Date.now(); });
+  ws.on('ping', () => { ws.rabtaAlive = true; ws.rabtaHeard = Date.now(); ws.rabtaPings++; });   // the app pings every 25 s
   updateLastSeen(userId);
 
   ws.send(JSON.stringify({ type: 'ready', id: userId, name: user.name, protocol: 2, receipts: true }));
@@ -309,7 +329,7 @@ wss.on('connection', (ws, req) => {
   for(const call of [...voiceCalls.values(),...videoCalls.values()]) if(call.to===userId) deliverCall(call);
 
   ws.on('message', async (raw) => {
-    ws.rabtaAlive = true;
+    ws.rabtaAlive = true; ws.rabtaHeard = Date.now();
     let msg; try { msg = JSON.parse(raw.toString()); } catch { return; }
     if (msg.type === 'msg' || msg.type === 'group_msg') {
       if (!/^[0-9A-F]{12}$/.test(String(msg.id || '')) || typeof msg.body !== 'string' || !msg.body || Buffer.byteLength(msg.body) > MAX_BODY || !['text','image','voice','video','file','sticker','rich','reaction'].includes(msg.msgType || 'text')) {
@@ -330,6 +350,7 @@ wss.on('connection', (ws, req) => {
       const sentAt = Number(t) || Date.now();
       if (await sendFrame(online.get(to), { type: 'msg', id: msgId, from: userId, fromName: user.name, body, msgType, t: sentAt })) {
         ws.send(JSON.stringify({ type: 'ack', id: msgId, status: 'delivered' }));
+        expectReceipt(userId, user.name, to, msgId, body, msgType, sentAt);
       } else {
         try { await storeMessage(userId, user.name, to, msgId, body, msgType, sentAt); } catch (_) { ws.send(JSON.stringify({type:'ack',id:msgId,status:'error'})); return; }
         ws.send(JSON.stringify({ type: 'ack', id: msgId, status: 'stored' }));
@@ -378,11 +399,12 @@ wss.on('connection', (ws, req) => {
       for (const mid of g.members) {
         if (mid===userId || features.blocked(userId,mid)) continue;
         try { await features.grant(msg.body,userId,mid); } catch(_) { ws.send(JSON.stringify({type:"ack",id:msg.id,status:"error"}));return; }
-        if (!(await sendFrame(online.get(mid), out))) { try { await storeMessage(userId, user.name, mid, msg.id, msg.body, msg.msgType||'text', now, g.id, g.name); } catch (_) { ws.send(JSON.stringify({type:'ack',id:msg.id,status:'error'})); return; } }
+        if (!(await sendFrame(online.get(mid), out)) || quiet(online.get(mid))) { try { await storeMessage(userId, user.name, mid, msg.id, msg.body, msg.msgType||'text', now, g.id, g.name); } catch (_) { ws.send(JSON.stringify({type:'ack',id:msg.id,status:'error'})); return; } }
       }
       ws.send(JSON.stringify({ type:'ack', id:msg.id, status:'sent' }));
     } else if (msg.type === 'receipt') {
       const id = String(msg.id || ''), to = String(msg.to || '');
+      received(id, to, userId);
       if (/^[0-9A-F]{12}$/.test(id) && to !== userId && memUsers.has(to) && !features.blocked(userId, to))
         await relayReceipt(userId, to, id).catch(e => console.error('Receipt storage failed:', e.message));
     } else if (msg.type === 'ping') {
@@ -422,6 +444,13 @@ async function tidy() {
 }
 setInterval(() => tidy().catch(e => console.error('Clean-up failed:', e.message)), TIDY_MS).unref?.();
 
+// A socket whose app stopped pinging is dead (the phone slept or lost its network without closing it). Closing it
+// within about a minute lets what comes next wait on the server and wake the phone, instead of going nowhere.
+setInterval(() => {
+  const now = Date.now();
+  for (const socket of [...online.values()]) if (socket.rabtaPings > 0 && now - socket.rabtaHeard > SILENT_MS) { try { socket.terminate(); } catch (_) {} }
+}, 15000).unref?.();
+
 app.post('/api/groups', async (req, res) => {
   const creator = authId(req); if (!creator) return res.status(401).json({ error: 'login required' });
   const name = String(req.body?.name||'').trim().slice(0,40); if (!name) return res.status(400).json({ error: 'name required' });
@@ -444,7 +473,7 @@ app.post('/api/groups', async (req, res) => {
   res.json({ id, name, members:[...members] });
 });
 
-app.get('/health', (req, res) => res.json({ ok: true, db: !!pool, online: online.size, users: memUsers.size, push: push.enabled() }));
+app.get('/health', (req, res) => res.json({ ok: true, db: !!pool, online: online.size, users: memUsers.size, push: push.enabled(), ...push.stats?.() }));
 
 const features=require('./features')({app,authId,users:memUsers,getPool:()=>pool});
 const push=require('./push')({app,authId,getPool:()=>pool});

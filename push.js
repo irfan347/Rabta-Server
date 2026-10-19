@@ -33,6 +33,7 @@ module.exports = function install({ app, authId, getPool, account = process.env.
   const tokens = new Map();    // token -> userId
   const lastWake = new Map();  // userId -> time of the last message wake
   let access = '', accessUntil = 0;
+  let lastSend = null;         // {status, at} of the latest wake sent to Firebase, for /health
 
   async function store(token, user) {
     const db = getPool();
@@ -67,6 +68,7 @@ module.exports = function install({ app, authId, getPool, account = process.env.
     // High priority, so Android delivers it at once, also in deep sleep. A call ends after 45 s; a message waits a day.
     const body = JSON.stringify({ message: { token, data: { type: 'wake', kind }, android: { priority: 'HIGH', ttl: kind === 'call' ? '45s' : '86400s' } } });
     const res = await request(url, { 'content-type': 'application/json', authorization: 'Bearer ' + await accessToken() }, body);
+    lastSend = { status: res.status, at: clock() };
     if (res.status === 401) access = '';
     // Rabta was uninstalled or the phone got a new token: this one never works again.
     else if (res.status === 404 || (res.status === 400 && /UNREGISTERED|INVALID_ARGUMENT/.test(res.body))) await forget(token);
@@ -80,7 +82,7 @@ module.exports = function install({ app, authId, getPool, account = process.env.
       if (clock() - (lastWake.get(userId) || 0) < MESSAGE_GAP) return;
       lastWake.set(userId, clock());
     }
-    for (const [token, user] of tokens) if (user === userId) send(token, kind).catch(e => console.error('Push failed:', e.message));
+    for (const [token, user] of tokens) if (user === userId) send(token, kind).catch(e => { lastSend = { status: 'error', at: clock() }; console.error('Push failed:', e.message); });
   }
 
   const signedIn = (req, res) => { const me = authId(req); if (!me) res.status(401).json({ error: 'Login required' }); return me; };
@@ -102,5 +104,7 @@ module.exports = function install({ app, authId, getPool, account = process.env.
     res.json({ ok: true });
   });
 
-  return { init, wake, enabled: () => !!sa };
+  // How many phones can be woken, and how the latest wake went (no tokens, ids or message content).
+  const stats = () => ({ pushPhones: tokens.size, pushLast: lastSend });
+  return { init, wake, enabled: () => !!sa, stats };
 };

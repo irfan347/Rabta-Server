@@ -98,3 +98,13 @@ test('without a Firebase service account nothing is sent', async () => {
   f.push.wake('ALICE0000001', 'call'); await f.settle();
   assert.equal(f.calls.length, 0);
 });
+
+test('health shows how many phones can be woken and how the latest wake went, nothing private', async () => {
+  const h = setup({ answer: () => ({ status: 403, body: '{"error":{"status":"PERMISSION_DENIED"}}' }) });
+  assert.deepEqual(h.push.stats(), { pushPhones: 0, pushLast: null });
+  await h.call('POST /api/me/push', 'U1', { token: TOKEN });
+  h.push.wake('U1'); await h.settle();
+  const stats = h.push.stats();
+  assert.equal(stats.pushPhones, 1); assert.equal(stats.pushLast.status, 403, 'a refused wake shows up');
+  assert.ok(!JSON.stringify(stats).includes(TOKEN) && !JSON.stringify(stats).includes('U1'));
+});
