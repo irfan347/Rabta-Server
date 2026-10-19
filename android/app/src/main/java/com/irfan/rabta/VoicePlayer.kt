@@ -86,7 +86,8 @@ object VoicePlayer {
     /** Stops the note playing (another one starts, a call, the bar's stop); it resumes where it was next time. */
     fun stop() = halt(true)
     private fun halt(remember: Boolean) {
-        if (key.isNotEmpty()) { if (remember && prepared) position.takeIf { it > 0 }?.let { leftAt[key] = it } else if (!remember) leftAt.remove(key) }
+        // Kept even at 0 ms (stopped just as it began), so the note shows it can be resumed, as the one playing did.
+        if (key.isNotEmpty()) { if (remember && prepared) leftAt[key] = position else if (!remember) leftAt.remove(key) }
         generation++; main.removeCallbacks(tick)
         player?.let { runCatching { it.release() } }; player = null
         file?.delete(); file = null
