@@ -98,3 +98,37 @@ test('without a Firebase service account nothing is sent', async () => {
   f.push.wake('ALICE0000001', 'call'); await f.settle();
   assert.equal(f.calls.length, 0);
 });
+
+test('health shows how many phones can be woken and how the latest wake went, nothing private', async () => {
+  const h = setup({ answer: () => ({ status: 403, body: '{"error":{"status":"PERMISSION_DENIED"}}' }) });
+  assert.deepEqual(h.push.stats(), { pushPhones: 0, pushLast: null, pushSetup: 'ok', pushProject: 'rabta-test' });
+  await h.call('POST /api/me/push', 'U1', { token: TOKEN });
+  h.push.wake('U1'); await h.settle();
+  const stats = h.push.stats();
+  assert.equal(stats.pushPhones, 1); assert.equal(stats.pushLast.status, 403, 'a refused wake shows up');
+  assert.ok(!JSON.stringify(stats).includes(TOKEN) && !JSON.stringify(stats).includes('U1'));
+});
+
+test('the key works however it was pasted: whole file, in quotes, base64, or with \\n line breaks', async () => {
+  const { privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const key = privateKey.export({ type: 'pkcs8', format: 'pem' });
+  const file = JSON.stringify({ type: 'service_account', project_id: 'rabta-test', client_email: 'push@rabta-test.iam.gserviceaccount.com', private_key: key });
+  const escaped = file.replace(/\\n/g, '\\\\n');   // the key's line breaks written out as \n
+  for (const pasted of [file, JSON.stringify(file), Buffer.from(file).toString('base64'), escaped, '  ' + file + '\n']) {
+    const push = install({ app: { post() {}, delete() {} }, authId: () => null, getPool: () => null, account: pasted });
+    assert.equal(push.enabled(), true, pasted.slice(0, 20));
+    assert.equal(push.stats().pushSetup, 'ok'); assert.equal(push.stats().pushProject, 'rabta-test');
+  }
+});
+
+test('health says why wake pushes are off, without showing the key', async () => {
+  const off = account => install({ app: { post() {}, delete() {} }, authId: () => null, getPool: () => null, account }).stats();
+  assert.match(off(undefined).pushSetup, /not set/);
+  assert.match(off('{"project_info":{"project_id":"rabta-test"},"client":[]}').pushSetup, /google-services\.json/);
+  assert.match(off('{"project_id":"rabta-test"}').pushSetup, /not a complete service account key/);
+  assert.match(off('not json at all').pushSetup, /not JSON/);
+  const damaged = off(JSON.stringify({ project_id: 'p', client_email: 'e@p.iam.gserviceaccount.com', private_key: '-----BEGIN PRIVATE KEY-----\nbroken\n-----END PRIVATE KEY-----' }));
+  assert.match(damaged.pushSetup, /private key is damaged/);
+  assert.ok(!JSON.stringify(damaged).includes('broken'));
+  assert.equal(off(undefined).pushProject, null);
+});

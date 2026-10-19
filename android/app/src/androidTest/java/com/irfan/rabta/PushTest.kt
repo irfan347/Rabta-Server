@@ -90,4 +90,31 @@ class PushTest {
         val services = (ctx.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).getRunningServices(Int.MAX_VALUE)
         assertTrue("Rabta's message service runs, so the call's notification can show", services.any { it.service.className == MessageService::class.java.name })
     }
+
+    @Suppress("DEPRECATION")
+    private fun service() = (ctx.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).getRunningServices(Int.MAX_VALUE)
+        .firstOrNull { it.service.className == MessageService::class.java.name }
+    private fun running() = MessageService::class.java.getDeclaredField("running").apply { isAccessible = true }.get(null) as MessageService?
+
+    /** Signing out just as Rabta opens stops its service while it still starts: it stops once started, and Rabta lives on. */
+    @Test fun aServiceStoppedWhileStartingStopsWithoutEndingRabta() = fixture { server ->
+        var started = false
+        ui { MessageService.start(ctx); MessageService.stop(ctx); started = service() != null }
+        assertTrue("Android was asked to start it", started)
+        waitUi("The service started and stopped itself") { service() == null && running() == null }
+        assertEquals("Stopped while starting, it does not connect", 0, server.sockets.get())
+    }
+
+    /**
+     * Android may restart Rabta's service without letting it show its notice. A wake push then starts it in the
+     * foreground again: it must show its notice at once, or Android ends Rabta.
+     */
+    @Test fun aWakePushBringsTheRunningServiceBackToTheForeground() = fixture { _ ->
+        ui { MessageService.start(ctx) }
+        waitUi("The service runs in the foreground") { service()?.foreground == true }
+        ui { running()!!.stopForeground(android.app.Service.STOP_FOREGROUND_REMOVE) }   // as when Android refused the notice
+        waitUi("It runs without its notice") { service()?.foreground == false }
+        Push.received(ctx, mapOf("type" to "wake", "kind" to "message"))
+        waitUi("The wake push brings it back to the foreground") { service()?.foreground == true }
+    }
 }

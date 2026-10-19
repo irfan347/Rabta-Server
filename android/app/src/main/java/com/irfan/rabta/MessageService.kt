@@ -58,12 +58,26 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
             if(video) RabtaEvents.postVideoEnd(callId) else RabtaEvents.postCallEnd(fromId,callId)
         }
 
+        // Android ends Rabta when a service it was asked to start in the foreground is stopped before it got there, so a
+        // service still starting stops itself once it has (see stop).
+        @Volatile private var startedAt = 0L
+        @Volatile private var stopWhenStarted = false
         fun start(ctx: Context) {
-            try { ctx.startForegroundService(Intent(ctx, MessageService::class.java)) } catch (_: Exception) {MeshBridge.status="Open Rabta to start Nearby service"}
+            try { startedAt = SystemClock.elapsedRealtime(); stopWhenStarted = false; ctx.startForegroundService(Intent(ctx, MessageService::class.java)) } catch (_: Exception) {MeshBridge.status="Open Rabta to start Nearby service"}
         }
-        fun restartNearby(ctx:Context) {try {ctx.startForegroundService(Intent(ctx,MessageService::class.java).setAction("retry_nearby"))}catch(_:Exception){MeshBridge.status="Open Rabta to restart Nearby"}}
+        fun restartNearby(ctx:Context) {try {startedAt=SystemClock.elapsedRealtime();stopWhenStarted=false;ctx.startForegroundService(Intent(ctx,MessageService::class.java).setAction("retry_nearby"))}catch(_:Exception){MeshBridge.status="Open Rabta to restart Nearby"}}
         fun stop(ctx: Context) {
-            try { ctx.stopService(Intent(ctx, MessageService::class.java)) } catch (_: Exception) {}
+            val app = ctx.applicationContext
+            val halt = Runnable {
+                val service = running
+                when {
+                    service != null -> service.quit()
+                    SystemClock.elapsedRealtime() - startedAt < 20_000 -> stopWhenStarted = true
+                    else -> try { app.stopService(Intent(app, MessageService::class.java)) } catch (_: Exception) {}
+                }
+            }
+            // On the main thread, where the service starts, so the two cannot overlap.
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) halt.run() else android.os.Handler(android.os.Looper.getMainLooper()).post(halt)
         }
         /**
          * From an open call screen: Android keeps a call's microphone working with the screen locked only for a
@@ -140,9 +154,11 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
         channels(this)
         showConnection()
         RabtaEvents.add(this)
-        if (Session.loggedIn) WsClient.connect(Session)
+        // Stopped while it was still starting (see stop): it quits at once, so it neither connects nor starts Nearby.
+        if (Session.loggedIn && !stopWhenStarted) WsClient.connect(Session)
         scheduleKeepAlive(this)
-        startMeshIfAllowed();callHandler.postDelayed(repair,15000)
+        if (!stopWhenStarted) startMeshIfAllowed()
+        callHandler.postDelayed(repair,15000)
         try{(getSystemService(CONNECTIVITY_SERVICE) as android.net.ConnectivityManager).registerDefaultNetworkCallback(network);networkRegistered=true}catch(_:Exception){}
     }
 
@@ -159,11 +175,18 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
         super.onDestroy()
     }
 
+    /** Stops for good, in the foreground first as Android requires of a service it was asked to start there. */
+    private fun quit() { showConnection(); runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }; stopSelf() }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             CALL_STARTED -> { inCall(intent.getStringExtra("peerId").orEmpty(), intent.getStringExtra("peerName").orEmpty(), intent.getBooleanExtra("video", false)); return START_STICKY }
             CALL_ENDED -> { callPeerId = ""; releaseCallWake(); if (!showConnection()) runCatching { getSystemService(NotificationManager::class.java).notify(1, persistentNotification()) }; return START_STICKY }
         }
+        if (stopWhenStarted) { stopWhenStarted = false; quit(); return START_NOT_STICKY }
+        // Asked to start in the foreground (start, restartNearby, a wake push): also when the service already runs
+        // without its notice, as after a restart Android refused one, it must show it now or Android ends Rabta.
+        if (callPeerId.isEmpty()) showConnection()
         if (Session.loggedIn && !WsClient.connected) { WsClient.connect(Session); WsClient.wake() }
         if(intent?.action=="retry_nearby"){router?.pauseTransport();MeshBridge.status="Restarting Nearby…"}
         startMeshIfAllowed()        // e.g. after the user granted Bluetooth permission

@@ -28,6 +28,7 @@ import org.webrtc.SurfaceViewRenderer
 /**
  * Shows the [VideoCall]. Back or Home turns it into a small picture-in-picture window so you can use your chats
  * while the call goes on; closing that window leaves the call going, with the green bar and its notice to return.
+ * The call has a task of its own (see the manifest), so back leads to the chat with that person explicitly.
  */
 class VideoCallActivity : ThemedActivity(), CallWatcher {
 
@@ -130,7 +131,11 @@ class VideoCallActivity : ThemedActivity(), CallWatcher {
     }
 
     override fun callChanged() {
-        if (!VideoCall.active) { releaseViews(); finish(); return }
+        if (!VideoCall.active) {
+            // Ended while on screen: the chat with that person, where the call now shows; a small window just closes.
+            val onScreen = started && !isInPictureInPictureMode
+            releaseViews(); if (onScreen) showChat(); finish(); return
+        }
         render()
     }
 
@@ -139,8 +144,26 @@ class VideoCallActivity : ThemedActivity(), CallWatcher {
     override fun onStop() { super.onStop(); started = false; if (VideoCall.active && !isChangingConfigurations) VideoCall.visible(false) }
     override fun onDestroy() { VideoEffects.onSnapshot = null; handler.removeCallbacksAndMessages(null); releaseViews(); super.onDestroy() }
 
+    /** Like WhatsApp, back shows the chat with that person, under the call's small window where this phone has one. */
     @Deprecated("Deprecated in Java")
-    override fun onBackPressed() { if (!minimize()) finish() }
+    override fun onBackPressed() { if (!minimize()) finish(); showChat() }
+
+    /**
+     * The chat with the person in the call, in Rabta's own task (the call's task is separate): brought to the front
+     * when Rabta is open, or opened over the chats when the call came while Rabta was closed.
+     */
+    private fun showChat() {
+        val peer = VideoCall.peerId.ifBlank { return }
+        val chat = Intent(this, ChatActivity::class.java).putExtra("peerId", peer).putExtra("peerName", VideoCall.peerName)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        val rabtaOpen = getSystemService(android.app.ActivityManager::class.java).appTasks.any { task ->
+            runCatching { task.taskInfo.baseActivity?.className }.getOrNull().let { it != null && it != VideoCallActivity::class.java.name }
+        }
+        runCatching {
+            if (rabtaOpen) startActivity(chat)
+            else android.app.TaskStackBuilder.create(this).addNextIntent(Intent(this, ConversationListActivity::class.java)).addNextIntent(chat).startActivities()
+        }
+    }
     override fun onUserLeaveHint() { super.onUserLeaveHint(); if (!askingShare) minimize() }
 
     /** The small floating window, like WhatsApp; false where this phone does not offer it. */
