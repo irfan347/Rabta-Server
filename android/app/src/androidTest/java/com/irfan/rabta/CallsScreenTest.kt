@@ -348,8 +348,8 @@ class CallsScreenTest {
                 .putExtra("peerId","CA1100000002").putExtra("peerName","Busy contact").putExtra("requestedCallKind","voice")) as ChatActivity
             val c=chat!!
             waitUi { VoiceCall.connectedAt>0&&shows(c,"Connected") }
-            // The connection drops, as when the network blinks: the call waits instead of ending.
-            sockets.last().cancel()
+            // The connection drops, as when the network blinks or the server restarts: the call waits instead of ending.
+            sockets.last().close(1001,"Going away")
             waitUi { !WsClient.connected&&VoiceCall.active&&shows(c,"Reconnecting") }
             assertTrue("Rabta connects again and says the call goes on",alive.await(20,TimeUnit.SECONDS))
             waitUi { WsClient.connected&&VoiceCall.active&&shows(c,"Connected") }
@@ -361,13 +361,13 @@ class CallsScreenTest {
         }
     }
 
-    /** Back turns a video call into a small window that goes on; with that window closed, the chats lead back to it. */
+    /** Back turns a video call into a small window over its chat; with that window closed, the chat leads back to it. */
     @Test fun videoCallGoesOnInASmallWindowAndBehindTheChats()=fixture { _ ->
         listOf("CAMERA","RECORD_AUDIO").forEach { shell("pm grant ${ctx.packageName} android.permission.$it") }
         val ended=CountDownLatch(1);val offered=CountDownLatch(1);val server=answeringServer(ended,offered)
         server.start();val url=server.url("/").toString().trimEnd('/')
         ui { Session.serverUrl=url;WsClient.connect(Session) }
-        var video:VideoCallActivity?=null;var again:android.app.Activity?=null;var list:ConversationListActivity?=null
+        var video:VideoCallActivity?=null;var again:android.app.Activity?=null;var behind:android.app.Activity?=null
         try {
             waitUi { WsClient.connected&&WsClient.protocol>=2 }
             video=inst.startActivitySync(Intent(ctx,VideoCallActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -387,16 +387,15 @@ class CallsScreenTest {
             val chats=inst.addMonitor(ChatActivity::class.java.name,null,false)
             ui { v.onBackPressed() }
             waitUi { v.isInPictureInPictureMode }
-            val behind=try { inst.waitForMonitorWithTimeout(chats,10000) } finally { inst.removeMonitor(chats) }
-            assertTrue("Back leads to the chat with that person",behind is ChatActivity&&behind.intent.getStringExtra("peerId")=="CA1100000002")
-            waitUi { ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).contains(behind) }
+            behind=try { inst.waitForMonitorWithTimeout(chats,10000) } finally { inst.removeMonitor(chats) }
+            val l=behind!!
+            assertTrue("Back leads to the chat with that person",l is ChatActivity&&l.intent.getStringExtra("peerId")=="CA1100000002")
+            waitUi { ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).contains(l) }
             assertTrue("The call goes on in the small window",VideoCall.active)
             assertEquals("Nobody hung up",1L,ended.count)
-            // The window closed: the call still goes on, and the chats show the green bar back to it.
+            // The window closed: the call still goes on, and the chat shows the green bar back to it.
             ui { v.finish() }
             waitUi { v.isDestroyed }
-            list=launch()
-            val l=list!!
             waitUi { shows(l,"Tap to return to call")&&shows(l,"Video contact") }
             assertTrue(VideoCall.active)
             val monitor=inst.addMonitor(VideoCallActivity::class.java.name,null,false)
@@ -410,7 +409,7 @@ class CallsScreenTest {
             assertTrue("End tells the other phone",ended.await(5,TimeUnit.SECONDS))
             waitUi { !VideoCall.active&&(a.isFinishing||a.isDestroyed) }
         } finally {
-            ui { again?.finish();list?.finish();video?.finish();VideoCall.end();WsClient.disconnect();MessageService.stop(ctx) }
+            ui { again?.finish();behind?.finish();video?.finish();VideoCall.end();WsClient.disconnect();MessageService.stop(ctx) }
             server.shutdown()
         }
     }
