@@ -89,12 +89,12 @@ class TextStatusActivity : ThemedActivity() {
     private fun look() { root.setBackgroundColor(StatusLook.COLOURS[colour]); field.typeface = StatusLook.typeface(StatusLook.FONTS[font]); size() }
     /** Short updates are big, long ones smaller, so they still fit the screen. */
     private fun size() { field.textSize = when (field.text.length) { in 0..39 -> 34f; in 40..119 -> 28f; in 120..299 -> 22f; else -> 18f } }
-    private fun showAudience() { audiencePill.text = StatusPost.audienceLabel(audience); audiencePill.contentDescription = "${audiencePill.text}. Change who can see" }
+    private fun showAudience() { audiencePill.text = StatusPost.audienceLabel(this, audience); audiencePill.contentDescription = "${audiencePill.text}. Change who can see" }
 
     private fun send() {
         val text = field.text.toString().trim()
         if (text.isEmpty()) { Toast.makeText(this, "Type something first", Toast.LENGTH_SHORT).show(); return }
-        if (audience.isEmpty()) { StatusPost.chooseAudience(this, audience) { audience = it; showAudience(); if (it.isNotEmpty()) send() }; return }
+        if (audience.isEmpty()) { StatusPost.chooseAudience(this, audience, "Share") { audience = it; showAudience(); if (it.isNotEmpty()) send() }; return }
         setResult(RESULT_OK, Intent().putExtra("kind", "text").putExtra("body", text).putExtra("caption", "").putExtra("audience", audience.toTypedArray())
             .putExtra("bg", StatusLook.hex(StatusLook.COLOURS[colour])).putExtra("font", StatusLook.FONTS[font]))
         finish()

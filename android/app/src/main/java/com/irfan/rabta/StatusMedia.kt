@@ -84,10 +84,11 @@ class StatusMediaPreview(c:Context,private val body:String,private val kind:Stri
                 if(!attached||owner!=Session.id||expires<=System.currentTimeMillis())return@post
                 result.onSuccess {
                     image.setImageBitmap(it);label.visibility=View.GONE
-                    if(kind=="video") {
-                        label.visibility=View.VISIBLE;label.text="Video · tap to play";label.gravity=Gravity.BOTTOM or Gravity.START
-                        label.setTextColor(android.graphics.Color.WHITE);label.setBackgroundColor(0x33000000)
-                    }
+                    // A video shows a round play mark in the middle; the card's own name label keeps the bottom.
+                    if(kind=="video"&&findViewWithTag<View>("play")==null) addView(UiIcons.image(context,"play",android.graphics.Color.WHITE,22,"").apply {
+                        tag="play";importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                        background=android.graphics.drawable.GradientDrawable().apply { shape=android.graphics.drawable.GradientDrawable.OVAL;setColor(0x80000000.toInt());setStroke(RabtaUi.dp(context,1),0x66FFFFFF) }
+                    },LayoutParams(RabtaUi.dp(context,40),RabtaUi.dp(context,40),Gravity.CENTER))
                     setOnClickListener {open()}
                 }.onFailure {
                     label.visibility=View.VISIBLE;label.text="Preview unavailable · tap to retry"

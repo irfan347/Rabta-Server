@@ -21,27 +21,122 @@ object StatusPost {
 
     fun contacts(c: Context) = Db.get(c).contacts().filter { it.peerId != Session.id && !Privacy.blocked(c, it.peerId) }
 
-    /** The viewers chosen last time, still limited to current, unblocked contacts. Empty until the user picks. */
-    fun audience(c: Context): List<String> {
-        val allowed = contacts(c).map { it.peerId }.toSet()
-        val saved = runCatching { JSONArray(prefs(c).getString("audience", "[]")) }.getOrDefault(JSONArray())
-        return (0 until saved.length()).map { saved.optString(it) }.filter { it in allowed }
-    }
-    fun saveAudience(c: Context, ids: List<String>) = prefs(c).edit().putString("audience", JSONArray(ids).toString()).apply()
-    fun audienceLabel(ids: List<String>) = if (ids.isEmpty()) "Choose who can see" else "Status (${ids.size} contact${if (ids.size == 1) "" else "s"})"
+    /**
+     * Who sees your updates, like WhatsApp: all your contacts, all except some, or only some. The choice and both lists
+     * are kept per account; the first update still asks, so nothing is shared before you chose.
+     */
+    enum class Audience { ALL, EXCEPT, ONLY }
+    private const val MODE = "audience_mode"
+    private const val EXCEPT_IDS = "audience_except"
+    private const val ONLY_IDS = "audience_only"
+    private fun ids(c: Context, key: String): Set<String> = runCatching { JSONArray(prefs(c).getString(key, "[]")) }.getOrDefault(JSONArray()).let { a -> (0 until a.length()).map { a.optString(it) }.toSet() }
 
-    fun chooseAudience(a: Activity, current: List<String>, done: (List<String>) -> Unit) {
+    /** The saved choice; a list picked before these choices existed counts as "Only share with". Null until chosen. */
+    fun mode(c: Context): Audience? = prefs(c).getString(MODE, null)?.let { runCatching { Audience.valueOf(it) }.getOrNull() }
+        ?: if (prefs(c).contains("audience")) Audience.ONLY else null
+    fun excluded(c: Context) = ids(c, EXCEPT_IDS)
+    fun included(c: Context) = if (prefs(c).contains(ONLY_IDS)) ids(c, ONLY_IDS) else ids(c, "audience")
+
+    /** The people who see an update, from the choice and your current, unblocked contacts. */
+    fun resolve(mode: Audience, contacts: List<String>, except: Set<String>, only: Set<String>): List<String> = when (mode) {
+        Audience.ALL -> contacts
+        Audience.EXCEPT -> contacts.filter { it !in except }
+        Audience.ONLY -> contacts.filter { it in only }
+    }
+
+    /** The viewers for the saved choice. Empty until the user picks. */
+    fun audience(c: Context): List<String> {
+        val mode = mode(c) ?: return emptyList()
+        return resolve(mode, contacts(c).map { it.peerId }, excluded(c), included(c))
+    }
+    fun saveAudience(c: Context, mode: Audience, except: Collection<String>, only: Collection<String>) =
+        prefs(c).edit().putString(MODE, mode.name).putString(EXCEPT_IDS, JSONArray(except.toList()).toString()).putString(ONLY_IDS, JSONArray(only.toList()).toString()).apply()
+
+    fun audienceLabel(c: Context, ids: List<String>): String = when (mode(c)) {
+        null -> "Choose who can see"
+        Audience.ALL -> "My contacts"
+        Audience.EXCEPT -> excluded(c).size.let { if (it == 0) "My contacts" else "My contacts except $it" }
+        Audience.ONLY -> "Only ${ids.size} contact${if (ids.size == 1) "" else "s"}"
+    }
+
+    /**
+     * Choose audience: My contacts, My contacts except…, Only share with… — each list edited in a searchable picker.
+     * [confirm] is "Done" when only changing the choice, "Share" when the update goes out next.
+     */
+    fun chooseAudience(a: Activity, current: List<String>, confirm: String = "Done", done: (List<String>) -> Unit) {
         val contacts = contacts(a)
         if (contacts.isEmpty()) {
             AlertDialog.Builder(a).setTitle("No available contacts").setMessage("Add a contact before sharing a status. Blocked contacts cannot be selected.").setPositiveButton("Close", null).show(); return
         }
-        val selected = BooleanArray(contacts.size) { contacts[it].peerId in current }
-        AlertDialog.Builder(a).setTitle("Who can see this update")
-            .setMultiChoiceItems(contacts.map { it.peerName }.toTypedArray(), selected) { _, i, checked -> selected[i] = checked }
-            .setNeutralButton("All") { _, _ -> val ids = contacts.map { it.peerId }; saveAudience(a, ids); done(ids) }
-            .setNegativeButton("Cancel", null)
-            .setPositiveButton("Done") { _, _ -> val ids = contacts.filterIndexed { i, _ -> selected[i] }.map { it.peerId }; saveAudience(a, ids); done(ids) }
-            .show()
+        val all = contacts.map { it.peerId }
+        var mode = mode(a) ?: Audience.ALL
+        val except = excluded(a).filter { it in all }.toMutableSet()
+        val only = included(a).filter { it in all }.toMutableSet()
+        fun dp(n: Int) = RabtaUi.dp(a, n)
+        val dialog = android.app.Dialog(a)
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        val root = LinearLayout(a).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(12), dp(16), dp(20))
+            background = RabtaUi.shape(a, AppTheme.surface(a), 28).apply { val r = dp(28).toFloat(); cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f) }
+        }
+        root.addView(View(a).apply { background = RabtaUi.shape(a, AppTheme.line(a), 2) }, LinearLayout.LayoutParams(dp(36), dp(4)).apply { gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = dp(16) })
+        root.addView(RabtaUi.text(a, "Who can see your status", 20f, true).apply { setPadding(dp(8), 0, 0, dp(12)); androidx.core.view.ViewCompat.setAccessibilityHeading(this, true) })
+        val rows = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
+        root.addView(rows)
+        val note = RabtaUi.text(a, "", 13f, color = AppTheme.error(a)).apply { setPadding(dp(8), dp(6), dp(8), 0); visibility = View.GONE; accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE }
+        root.addView(note)
+        lateinit var render: () -> Unit
+        fun edit(kind: Audience) {
+            val title = if (kind == Audience.EXCEPT) "Hide status from…" else "Share status with…"
+            PeoplePicker.dialog(a, title, if (kind == Audience.EXCEPT) except else only) { chosen ->
+                val target = if (kind == Audience.EXCEPT) except else only
+                target.clear(); target.addAll(chosen); mode = kind; render()
+            }
+        }
+        render = {
+            rows.removeAllViews(); note.visibility = View.GONE
+            fun option(kind: Audience, icon: String, title: String, detail: String, editable: Boolean) {
+                val on = mode == kind
+                rows.addView(LinearLayout(a).apply {
+                    gravity = Gravity.CENTER_VERTICAL; minimumHeight = dp(72); setPadding(dp(8), dp(10), dp(8), dp(10)); isFocusable = true
+                    background = RabtaUi.ripple(a, if (on) AppTheme.raised(a) else android.graphics.Color.TRANSPARENT, 18)
+                    contentDescription = "$title. $detail. ${if (on) "Selected" else "Not selected"}"
+                    setOnClickListener { mode = kind; if (editable && (if (kind == Audience.EXCEPT) except else only).isEmpty()) edit(kind) else render() }
+                    addView(UiIcons.image(a, icon, AppTheme.accent(a), 22, "").apply { background = RabtaUi.shape(a, AppTheme.bg(a), 999); importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO },
+                        LinearLayout.LayoutParams(dp(48), dp(48)))
+                    val texts = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), 0, dp(8), 0) }
+                    texts.addView(RabtaUi.text(a, title, 16f, true))
+                    texts.addView(RabtaUi.text(a, detail, 13f, editable, if (editable) AppTheme.accent(a) else AppTheme.sub(a)).apply {
+                        if (editable) { isFocusable = true; setPadding(0, dp(4), dp(8), dp(4)); setOnClickListener { edit(kind) } }
+                    })
+                    addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
+                    // A radio dot: filled ring when chosen.
+                    addView(View(a).apply {
+                        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                        background = android.graphics.drawable.LayerDrawable(arrayOf(
+                            android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setStroke(dp(2), if (on) AppTheme.accent(a) else AppTheme.sub(a)) },
+                            android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(if (on) AppTheme.accent(a) else android.graphics.Color.TRANSPARENT) }
+                        )).apply { setLayerInset(1, dp(5), dp(5), dp(5), dp(5)) }
+                    }, LinearLayout.LayoutParams(dp(22), dp(22)))
+                })
+            }
+            option(Audience.ALL, "people", "My contacts", "All ${all.size} contact${if (all.size == 1) "" else "s"}", false)
+            option(Audience.EXCEPT, "eye_off", "My contacts except…", "${except.size} excluded · Edit ›", true)
+            option(Audience.ONLY, "check", "Only share with…", "${only.size} included · Edit ›", true)
+        }
+        render()
+        root.addView(RabtaUi.button(a, confirm, true) {
+            val chosen = resolve(mode, all, except, only)
+            if (chosen.isEmpty()) {
+                note.text = L.t(a, if (mode == Audience.ONLY) "Choose at least one person to share with." else "With everyone excluded, no one would see it.")
+                note.visibility = View.VISIBLE; return@button
+            }
+            saveAudience(a, mode, except, only); dialog.dismiss(); done(chosen)
+        }.apply { gravity = Gravity.CENTER; contentDescription = confirm }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(16) })
+        dialog.setContentView(root)
+        dialog.window?.apply { setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0)); setGravity(Gravity.BOTTOM); setDimAmount(0.5f) }
+        dialog.show()
+        dialog.window?.setLayout(-1, -2)
     }
 
     /** Uploads the media (resumable), publishes the update, and keeps the local copy as this phone's preview. Blocking. */
