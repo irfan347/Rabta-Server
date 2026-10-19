@@ -389,11 +389,15 @@ setInterval(() => {
   }
 }, HEARTBEAT_MS).unref?.();
 
-// Now and then the server forgets what phones already have: markers of delivered messages after 30 days, and files
-// everyone has saved (features.js). Messages delivered before this rule kept their content and are left as they were.
+// Now and then the server forgets what phones already have: the content of messages delivered before it let go of it
+// on delivery (once, then this finds nothing), markers of delivered messages after 30 days, and files everyone has
+// saved (features.js). Messages still on their way are never touched.
 const TIDY_MS = 30 * 60 * 1000, MARKER_MS = 30 * 24 * 60 * 60 * 1000;
 async function tidy() {
-  if (pool) await pool.query('DELETE FROM ru_messages WHERE body IS NULL AND delivered_at < $1', [Date.now() - MARKER_MS]);
+  if (pool) {
+    await pool.query('UPDATE ru_messages SET body=NULL WHERE delivered_at IS NOT NULL AND body IS NOT NULL');
+    await pool.query('DELETE FROM ru_messages WHERE body IS NULL AND delivered_at < $1', [Date.now() - MARKER_MS]);
+  }
   await features.tidy();
 }
 setInterval(() => tidy().catch(e => console.error('Clean-up failed:', e.message)), TIDY_MS).unref?.();

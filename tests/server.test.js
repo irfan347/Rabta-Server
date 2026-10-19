@@ -150,8 +150,10 @@ test('a delivered message keeps no content on the server, and sending it again d
   const again=f.socket(f.bob);await settle();
   assert.equal(again.messages.filter(x=>x.type==='msg').length,0,'recognised by its marker');
 });
-test('now and then the server forgets markers of messages delivered over 30 days ago, and only those',async()=>{
-  const f=await fixture(true);f.beat();await settle();
+test('now and then the server lets go of delivered content, and forgets markers older than 30 days',async()=>{
+  const f=await fixture(true);f.beat();await settle();await settle();
+  const old=f.queries.find(([sql])=>sql.startsWith('UPDATE ru_messages SET body=NULL'));
+  assert.ok(old,'messages delivered before this rule let go of their content too');assert.match(old[0],/WHERE delivered_at IS NOT NULL AND body IS NOT NULL/);
   const forget=f.queries.find(([sql])=>sql.startsWith('DELETE FROM ru_messages'));
   assert.ok(forget,'markers are cleaned up');assert.match(forget[0],/body IS NULL AND delivered_at < \$1/);
   assert.ok(Math.abs(forget[1][0]-(Date.now()-30*24*60*60*1000))<60000);

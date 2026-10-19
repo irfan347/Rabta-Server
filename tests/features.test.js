@@ -62,6 +62,13 @@ test('status media leaves once its whole audience has it if the owner keeps a co
  await h.call('post','/api/files/:id/got','C',{}, {id:kept.remote});
  await later(11*60*1000,async()=>{await h.api.tidy();assert.equal((await h.call('get','/api/files/:id','B',{}, {id:kept.remote})).statusCode,400);assert.equal((await h.call('get','/api/status','B')).body.statuses.length,2,'the updates themselves stay')});
  await later(86400000+11*60*1000,async()=>{await h.api.tidy();assert.equal((await h.call('get','/api/uploads/:id','A',{}, {id:plain.remote})).statusCode,400)});});
-test('files from before the clean-up started are kept as they were',async()=>{const since=Date.now();const legacy={id:'b'.repeat(32),owner:'A',size:3,sha:'c'.repeat(64),name:'old.png',mime:'image/png',received:3,chunks:[{offset:0,data:'YWJj'}],done:true,created:since-5*86400000};
- const pool={query:async sql=>sql.startsWith('SELECT kind')?{rows:[{kind:'upload',id:legacy.id,data:JSON.stringify(legacy)},{kind:'meta',id:'cleanup_since',data:JSON.stringify(since)}]}:{rows:[]}};const h=setup(pool);await h.api.init();
- await later(2*86400000,async()=>{await h.api.tidy();assert.equal((await h.call('get','/api/uploads/:id','A',{}, {id:legacy.id})).statusCode,200)});});
+test('files from before this rule follow it too: ended updates let go, files someone has not saved stay',async()=>{const saved=[];const old=Date.now()-5*86400000;
+ const file=(id,name)=>({id,owner:'A',size:3,sha:'c'.repeat(64),name,mime:'image/png',received:3,chunks:[{offset:0,data:'YWJj'}],done:true,created:old});
+ const ended=file('b'.repeat(32),'old-status.png'),sent=file('d'.repeat(32),'old-chat.png');
+ const pool={query:async(sql,args)=>{saved.push([sql,args]);return sql.startsWith('SELECT kind')?{rows:[{kind:'upload',id:ended.id,data:JSON.stringify(ended)},{kind:'upload',id:sent.id,data:JSON.stringify(sent)},{kind:'grant',id:sent.id+':B',data:'0'}]}:{rows:[]}}};
+ const h=setup(pool);await h.api.init();await h.api.tidy();
+ assert.equal((await h.call('get','/api/uploads/:id','A',{}, {id:ended.id})).statusCode,400,'media of an update that ended long ago');
+ assert.ok(saved.some(([sql,args])=>sql.startsWith('DELETE FROM rf_data')&&args[0]===ended.id));
+ assert.equal((await h.call('get','/api/files/:id','B',{}, {id:sent.id})).statusCode,200,'B may not have saved it yet');
+ await h.call('post','/api/files/:id/got','B',{}, {id:sent.id});
+ await later(11*60*1000,async()=>{await h.api.tidy();assert.equal((await h.call('get','/api/files/:id','B',{}, {id:sent.id})).statusCode,400)});});

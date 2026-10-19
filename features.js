@@ -8,7 +8,7 @@ module.exports=function install({app,authId,users,getPool}) {
   const LIFE=86400000, SETTLE=10*60*1000, MAX=8*1024*1024, CHUNK=128*1024, PHOTO_MAX=256*1024, PNG=Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]);
   const id=()=>crypto.randomBytes(16).toString('hex');
   const blocked=(a,b)=>blocks.has(a+':'+b)||blocks.has(b+':'+a);
-  let since=Date.now(),swept=0; // files from before the server cleaned up after itself are kept as they were
+  let swept=0,sweeping=null;
   const index=(map,key,make)=>{const at=key.indexOf(':'),file=key.slice(0,at);if(!map.has(file))map.set(file,make());return [map.get(file),key.slice(at+1)]};
   const share=key=>{const [people,to]=index(sharedWith,key,()=>new Set());people.add(to)};
   const hold=(key,when)=>{const [people,who]=index(holders,key,()=>new Map());people.set(who,when)};
@@ -20,23 +20,24 @@ module.exports=function install({app,authId,users,getPool}) {
   async function init() {
     const db=getPool(); if(!db)return;
     await db.query('CREATE TABLE IF NOT EXISTS rf_data(kind TEXT,id TEXT,data TEXT,PRIMARY KEY(kind,id))');
-    let start=0;
     for(const row of (await db.query('SELECT kind,id,data FROM rf_data')).rows) {
-      try { const value=JSON.parse(row.data);if(row.kind==='status'&&value.expires>Date.now())statuses.set(row.id,value);if(row.kind==='upload')uploads.set(row.id,value);if(row.kind==='grant'){grants.set(row.id,value);share(row.id)}if(row.kind==='got')hold(row.id,Number(value));if(row.kind==='block')blocks.add(row.id);if(row.kind==='photo')photos.set(row.id,value);if(row.kind==='meta'&&row.id==='cleanup_since')start=Number(value); }catch{}
+      try { const value=JSON.parse(row.data);if(row.kind==='status'&&value.expires>Date.now())statuses.set(row.id,value);if(row.kind==='upload')uploads.set(row.id,value);if(row.kind==='grant'){grants.set(row.id,value);share(row.id)}if(row.kind==='got')hold(row.id,Number(value));if(row.kind==='block')blocks.add(row.id);if(row.kind==='photo')photos.set(row.id,value); }catch{}
     }
-    if(start)since=start;else await persist('meta','cleanup_since',since);
   }
   async function cleanup(force=false){const now=Date.now();for(const [key,s] of statuses)if(s.expires<=now){statuses.delete(key);await remove('status',key)};for(const [key,u] of uploads)if(!u.done&&u.created<now-LIFE&&!busy.has(key)){uploads.delete(key);await remove('upload',key)};while(reports.length&&reports[0].created<now-3600000)reports.shift();
-    if(force||now-swept>=60000){swept=now;await sweep(now).catch(e=>console.error('File clean-up failed:',e.message))}}
+    // Requests never wait for the sweep; the periodic tidy-up (and tests) wait for a fresh one.
+    const run=()=>{swept=now;return sweeping=sweep(now).catch(e=>console.error('File clean-up failed:',e.message)).finally(()=>{sweeping=null})};
+    if(force){await sweeping;await run()}else if(!sweeping&&now-swept>=60000)run()}
   // A finished file stays on the server only while someone still needs it: a person it was sent to who has not saved
   // it on their phone yet, or an update on show to someone who has not. Phones keep their own copies, so nobody
   // notices it leave. It waits a little after its last use, so a send or download under way finishes first; a file
-  // that was never sent anywhere waits a day.
+  // that was never sent anywhere (or an update's media once the update ended) waits a day. Files from before this
+  // rule follow it too: a person they were sent to still keeps access until their phone says it has saved them.
   async function sweep(now){
     const showing=new Map();
     for(const s of statuses.values())if(s.kind!=='text'&&s.expires>now){const file=media(s);if(!showing.has(file))showing.set(file,[]);showing.get(file).push(s)}
     for(const u of [...uploads.values()]){
-      if(!u.done||busy.has(u.id)||(u.created<since&&!holders.has(u.id)))continue;
+      if(!u.done||busy.has(u.id))continue;
       const shows=showing.get(u.id)||[],has=to=>holders.get(u.id)?.has(to),counts=(owner,to)=>users.has(to)&&!blocked(owner,to);
       const waiting=[...(sharedWith.get(u.id)||[])].some(to=>{const g=grants.get(u.id+':'+to);return(g===0||g>now)&&counts(u.owner,to)&&!has(to)})
         ||shows.some(s=>!s.ownCopy||s.audience.some(to=>counts(s.owner,to)&&!has(to)));
@@ -44,9 +45,10 @@ module.exports=function install({app,authId,users,getPool}) {
       if(!waiting&&now-(used.get(u.id)||u.created)>=(known?SETTLE:LIFE))await drop(u);
     }
   }
+  // Gone from memory first, so a request arriving meanwhile finds no file (a sender then uploads it again).
   async function drop(u){
-    const db=getPool();if(db)await db.query("DELETE FROM rf_data WHERE (kind='upload' AND id=$1) OR (kind IN ('grant','got') AND id LIKE $2)",[u.id,u.id+':%']);
     uploads.delete(u.id);for(const to of sharedWith.get(u.id)||[])grants.delete(u.id+':'+to);sharedWith.delete(u.id);holders.delete(u.id);used.delete(u.id);
+    const db=getPool();if(db)await db.query("DELETE FROM rf_data WHERE (kind='upload' AND id=$1) OR (kind IN ('grant','got') AND id LIKE $2)",[u.id,u.id+':%']);
   }
   const wrap=fn=>async(req,res)=>{const me=authId(req);if(!me)return res.status(401).json({error:'Login required'});try{await cleanup();await fn(req,res,me)}catch(e){res.status(e.code||400).json({error:e.message||'Request failed'})}};
   const ensure=(v,message)=>{if(!v)throw new Error(message)};
