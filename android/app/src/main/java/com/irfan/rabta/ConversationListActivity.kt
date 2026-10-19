@@ -101,6 +101,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
     private lateinit var backgroundStrip: LinearLayout
     /** Green "Tap to return to call" while a call goes on behind the chats. */
     private lateinit var callBar: CallBar
+    private lateinit var voiceBar: VoiceBar
     private lateinit var searchToggle: TextView
     private lateinit var chatsBadge: TextView
     private var searchOpen=false
@@ -143,11 +144,11 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         if(activeTab==0) loadMoments(force=true)
         AppUpdate.check(this)
         backgroundStrip.visibility=if(BackgroundRun.shouldOffer(this)) View.VISIBLE else View.GONE;BackgroundRun.followUp(this)
-        callBar.start()
+        callBar.start();voiceBar.start()
     }
     override fun onPause() {
         resumed=false;if(::nearbyPanel.isInitialized)nearbyPanel.pause()
-        if(::callBar.isInitialized)callBar.stop()
+        if(::callBar.isInitialized) { callBar.stop();voiceBar.stop() }
         RabtaEvents.remove(this);uiHandler.removeCallbacks(connectionTick);uiHandler.removeCallbacks(searchTask);uiHandler.removeCallbacks(callSearchTask);uiHandler.removeCallbacks(askBackground)
         super.onPause()
     }
@@ -179,6 +180,9 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         setContentView(root)
         callBar=CallBar(this)
         root.addView(callBar.view,LinearLayout.LayoutParams(-1,-2))
+        // A voice message still playing after its chat closed, with pause and stop, as in WhatsApp.
+        voiceBar=VoiceBar(this)
+        root.addView(voiceBar.view,LinearLayout.LayoutParams(-1,-2))
         val header=LinearLayout(this).apply {
             gravity=Gravity.CENTER_VERTICAL;setPadding(dp(18),dp(8),dp(8),dp(4))
         }

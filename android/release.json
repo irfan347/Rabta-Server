@@ -1,4 +1,4 @@
 {
   "minVersionCode": 0,
-  "notes": "Photos fill their bubble and open full screen when tapped.\nVideos show their picture with a play button; the size in the corner downloads them, and they play inside Rabta.\nHold a message to select it: reply, star, delete or forward it, also several at once. Photos, videos and voice messages have a forward button beside them.\nOnly one voice message plays at a time.\nThe chats list shows a photo or video icon for photos and videos."
+  "notes": "Chats no longer hang: photos load in the background and only what changed is redrawn, also while a video is sending.\nOne tap anywhere on a photo or video opens it.\nVoice message waves show at once, the newest first.\nA voice message keeps playing when you leave its chat; a bar in the chats pauses or stops it.\nThe video player shows while a video loads, and offers another app when it can't play one."
 }
