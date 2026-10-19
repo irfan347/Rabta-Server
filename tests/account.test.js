@@ -167,3 +167,25 @@ test('device records and username changes are written to the database', async ()
   await s.call('POST', '/api/me/username', { token: created.token, body: { username: 'ali_new' } });
   assert.ok(s.queries.some(([sql, a]) => sql.startsWith('INSERT INTO ru_reserved') && a[0] === 'ali'));
 });
+
+test('one account per phone: the phone that has an account cannot make another; signing in stays open', async () => {
+  const s = server(true); const p = 'a'.repeat(64), q = 'b'.repeat(64), r = 'c'.repeat(64);
+  const signUp = (username, phone) => s.call('POST', '/api/register', { body: { username, pin: '123456', name: username, ...(phone ? { phone } : {}) } });
+  assert.equal((await signUp('first', p)).status, 200);
+  const again = await signUp('second', p);
+  assert.equal(again.status, 409); assert.equal(again.username, 'first'); assert.match(again.error, /@first/);
+  assert.equal((await signUp('second', q)).status, 200, 'Another phone may make an account');
+  assert.ok(s.queries.some(([sql, args]) => /INSERT INTO ru_phones/.test(sql) && args[0] === p), 'The phone is stored with the account');
+
+  // An account made before the rule (an older app sent no phone) learns its phone once the updated app connects.
+  const older = await signUp('older');
+  assert.equal(older.status, 200, 'Older apps can still make accounts');
+  assert.equal((await s.call('POST', '/api/me/phone', { token: older.token, body: { phone: r } })).status, 200);
+  assert.equal((await signUp('newer', r)).status, 409, 'That phone now counts as having an account');
+
+  // Signing in to any existing account on the phone still works, and is remembered.
+  assert.equal((await login(s, 'second', null, { phone: p })).status, 200);
+  assert.equal((await signUp('third', p)).username, 'second', 'The account used most recently is named');
+  assert.equal((await s.call('POST', '/api/me/phone', { token: older.token, body: { phone: 'not-a-phone' } })).status, 400);
+  assert.equal((await s.call('POST', '/api/me/phone', { body: { phone: r } })).status, 401);
+});

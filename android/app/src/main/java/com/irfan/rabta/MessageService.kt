@@ -282,7 +282,7 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
     override fun onIncomingCall(fromId: String, fromName: String, callId:String) { showCallNotification(fromId, fromName, false,callId) }
     override fun onVideoOffer(fromId: String, fromName: String, callId: String, sdp: String) { showCallNotification(fromId, fromName, true, callId, sdp) }
     // Connected: the server learns this phone's push token, so it can wake Rabta once it is closed.
-    override fun onConnected() { Push.sync(this) }
+    override fun onConnected() { Push.sync(this); PhoneId.sync(this) }
 
     override fun onCallEnd(fromId: String,callId:String) { if(callId==ringingId) cancelRinging(); missed(this,callId) }
     override fun onVideoEnd(callId:String) { if(callId==ringingId) cancelRinging(); missed(this,callId) }

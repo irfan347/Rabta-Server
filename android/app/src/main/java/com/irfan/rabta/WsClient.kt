@@ -187,12 +187,13 @@ object WsClient {
     private fun withDevice(body: JSONObject, purpose: String, cb: (Boolean,String,JSONObject?)->Unit): String? =
         runCatching { body.put("device", DeviceIdentity.proof(purpose)).toString() }.getOrElse { handler.post { cb(false, "This phone can't sign in securely. Restart it and try again.", null) }; null }
     fun register(ctx: Context, srv: String, un: String, pin: String, name: String, cb: (Boolean,String,JSONObject?)->Unit) {
-        val body = withDevice(JSONObject().put("username",un).put("pin",pin).put("name",name), "register:$un", cb) ?: return
+        // The phone's hash lets the server keep one account per phone (see PhoneId).
+        val body = withDevice(JSONObject().put("username",un).put("pin",pin).put("name",name).put("phone",PhoneId.of(ctx)), "register:$un", cb) ?: return
         post(srv, "/api/register", body, null, cb)
     }
     /** A 202 response with "pending" means a trusted phone must approve this one; see [pollLogin]. */
     fun login(ctx: Context, srv: String, un: String, pin: String, recoveryCode: String? = null, cb: (Boolean,String,JSONObject?)->Unit) {
-        val body = withDevice(JSONObject().put("username",un).put("pin",pin).apply { if (recoveryCode != null) put("recoveryCode", recoveryCode) }, "login:$un", cb) ?: return
+        val body = withDevice(JSONObject().put("username",un).put("pin",pin).put("phone",PhoneId.of(ctx)).apply { if (recoveryCode != null) put("recoveryCode", recoveryCode) }, "login:$un", cb) ?: return
         post(srv, "/api/login", body, null, cb)
     }
     fun pollLogin(srv: String, requestId: String, cb: (Boolean,String,JSONObject?)->Unit) {
