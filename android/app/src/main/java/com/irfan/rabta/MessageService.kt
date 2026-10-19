@@ -310,7 +310,7 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
         val builder = Notification.Builder(this, CALL_CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_rabta)
             .setContentTitle(if (isVideo) "Incoming Video Call" else "Incoming Call")
-            .setContentText("$fromName is ${if (isVideo) "video " else ""}calling...")
+            .setContentText("${Names.of(this, fromId, fromName)} is ${if (isVideo) "video " else ""}calling...")
             .setTimeoutAfter(45000)
             .setOnlyAlertOnce(true)
             .setCategory(Notification.CATEGORY_CALL)
@@ -318,7 +318,7 @@ class MessageService : Service(), RabtaEvents.Listener, Router.UiListener {
             .setAutoCancel(false)
             .setOngoing(true)
         if (Build.VERSION.SDK_INT >= 31) builder.setStyle(Notification.CallStyle.forIncomingCall(
-            android.app.Person.Builder().setName(fromName.ifBlank { "Rabta contact" }).setImportant(true).setIcon(ChatNotifications.photo(fromId)).build(), decline, answer).setIsVideo(isVideo))
+            android.app.Person.Builder().setName(Names.of(this, fromId, fromName.ifBlank { "Rabta contact" })).setImportant(true).setIcon(ChatNotifications.photo(fromId)).build(), decline, answer).setIsVideo(isVideo))
         else {
             val icon = android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_stat_rabta)
             builder.addAction(Notification.Action.Builder(icon, "Decline", decline).build()).addAction(Notification.Action.Builder(icon, "Answer", answer).build())

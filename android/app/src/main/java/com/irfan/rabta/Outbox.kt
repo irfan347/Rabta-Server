@@ -39,11 +39,14 @@ object Outbox : RabtaEvents.Listener {
         val (d, c) = current() ?: return
         val id = ByteArray(6).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02X".format(it) }
         val time = System.currentTimeMillis()
+        // Message yourself: the note is kept on this phone and nothing is sent anywhere.
+        val note = !group && peerId == Session.id
         worker.execute {
-            d.saveMessage(id, peerId, Session.id, body, time, true, MessageDelivery.QUEUED, type)
+            d.saveMessage(id, peerId, Session.id, body, time, true, if (note) MessageDelivery.READ else MessageDelivery.QUEUED, type)
             val preview = when (type) { "image" -> "Photo"; "voice" -> VoiceAudio.label(context, body).let { if (it.isEmpty()) "🎤 Voice message" else "🎤 Voice message · $it" }; "video" -> "Video"; "file" -> Attachments.name(body); "sticker" -> "Sticker"; "rich" -> org.json.JSONObject(body).optString("text"); else -> body }
             d.upsertConversation(peerId, peerName, preview, time, false, group)
             RabtaEvents.postHistoryChanged(peerId)
+            if (note) return@execute
             c.attempt(DeliveryCoordinator.Outgoing(id, peerId, group, body, type, time)); reschedule()
         }
     }

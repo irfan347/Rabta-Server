@@ -6,13 +6,24 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
 /** [account] is set only by [get]; a Db constructed directly (isolated test fixtures) keeps the legacy file name. */
-class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(ctx, fileFor(account), null, 6) {
+class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(ctx, fileFor(account), null, 7) {
 
-    data class Conversation(val peerId: String, val peerName: String, val lastMsg: String, val lastTime: Long, val unread: Int, val isGroup: Boolean = false)
+    /**
+     * [peerName] is the name the chat was stored under (their own Rabta name); [nickname] is yours for them, kept on
+     * this phone only. Show [shownName]; store and send with [peerName].
+     */
+    data class Conversation(val peerId: String, val peerName: String, val lastMsg: String, val lastTime: Long, val unread: Int, val isGroup: Boolean = false,
+                            val pinned: Long = 0, val archived: Boolean = false, val nickname: String = "") {
+        val shownName get() = nickname.ifBlank { peerName }
+    }
     data class Message(val id: String, val convId: String, val fromId: String, val fromName: String, val body: String, val sentAt: Long, val mine: Boolean, val status: String, val msgType: String)
     data class Group(val id: String, val name: String, val members: List<String>)
     /** Someone you have connected with; kept when their chat is cleared or deleted. */
-    data class Contact(val peerId: String, val name: String, val username: String, val addedAt: Long) { val peerName get() = name }
+    data class Contact(val peerId: String, val name: String, val username: String, val addedAt: Long, val nickname: String = "") {
+        val peerName get() = name
+        /** Your name for them when you gave one, otherwise their own. */
+        val shownName get() = nickname.ifBlank { name }
+    }
 
     override fun onCreate(db: SQLiteDatabase) = createAll(db)
     override fun onUpgrade(db: SQLiteDatabase, o: Int, n: Int) {
@@ -27,16 +38,19 @@ class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(
         createAll(db)
         // Additive: everyone you already chat with one-to-one becomes a contact; chats and messages are untouched.
         if (o < 6) db.execSQL("INSERT OR IGNORE INTO contacts(peer_id,name,added_at) SELECT peer_id,peer_name,last_time FROM conversations WHERE is_group=0")
+        // Additive: pinned and archived chats, and your own names for contacts. Existing rows keep their data.
+        if (o < 7) for (column in listOf("conversations ADD COLUMN pinned INTEGER DEFAULT 0", "conversations ADD COLUMN archived INTEGER DEFAULT 0", "contacts ADD COLUMN nickname TEXT DEFAULT ''"))
+            try { db.execSQL("ALTER TABLE $column") } catch (_: Exception) {}   // already there: created by createAll above
     }
 
     private fun createAll(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE IF NOT EXISTS message_meta(id TEXT PRIMARY KEY, starred INTEGER DEFAULT 0, reactions TEXT DEFAULT '{}')")
-        db.execSQL("CREATE TABLE IF NOT EXISTS conversations(peer_id TEXT PRIMARY KEY, peer_name TEXT, last_msg TEXT, last_time INTEGER DEFAULT 0, unread INTEGER DEFAULT 0, is_group INTEGER DEFAULT 0)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS conversations(peer_id TEXT PRIMARY KEY, peer_name TEXT, last_msg TEXT, last_time INTEGER DEFAULT 0, unread INTEGER DEFAULT 0, is_group INTEGER DEFAULT 0, pinned INTEGER DEFAULT 0, archived INTEGER DEFAULT 0)")
         db.execSQL("CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY, conv_id TEXT, from_id TEXT, from_name TEXT DEFAULT '', body TEXT, sent_at INTEGER, mine INTEGER DEFAULT 0, status TEXT DEFAULT 'sent', msg_type TEXT DEFAULT 'text')")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_msg_conv ON messages(conv_id, sent_at)")
         db.execSQL("CREATE TABLE IF NOT EXISTS groups(id TEXT PRIMARY KEY, name TEXT, members TEXT)")
         db.execSQL("CREATE TABLE IF NOT EXISTS calls(id INTEGER PRIMARY KEY AUTOINCREMENT, peer_id TEXT, peer_name TEXT, type TEXT, duration INTEGER DEFAULT 0, started_at INTEGER)")
-        db.execSQL("CREATE TABLE IF NOT EXISTS contacts(peer_id TEXT PRIMARY KEY, name TEXT, username TEXT DEFAULT '', added_at INTEGER DEFAULT 0)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS contacts(peer_id TEXT PRIMARY KEY, name TEXT, username TEXT DEFAULT '', added_at INTEGER DEFAULT 0, nickname TEXT DEFAULT '')")
     }
 
     companion object {
@@ -99,11 +113,35 @@ class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(
         if (username.isNotBlank()) db.execSQL("UPDATE contacts SET username=? WHERE peer_id=?", arrayOf(username, peerId))
     }
 
-    fun contacts(): List<Contact> = readableDatabase.rawQuery("SELECT peer_id,name,username,added_at FROM contacts ORDER BY lower(name)", null).use { c ->
-        generateSequence { if (c.moveToNext()) Contact(c.getString(0), c.getString(1) ?: c.getString(0), c.getString(2) ?: "", c.getLong(3)) else null }.toList()
+    fun contacts(): List<Contact> = readableDatabase.rawQuery(
+        "SELECT peer_id,name,username,added_at,nickname FROM contacts ORDER BY lower(CASE WHEN nickname<>'' THEN nickname ELSE name END)", null).use { c ->
+        generateSequence { if (c.moveToNext()) Contact(c.getString(0), c.getString(1) ?: c.getString(0), c.getString(2) ?: "", c.getLong(3), c.getString(4) ?: "") else null }.toList()
     }
 
     fun removeContact(peerId: String) = writableDatabase.execSQL("DELETE FROM contacts WHERE peer_id=?", arrayOf(peerId))
+
+    /** Your own name for [peerId], on this phone only; blank removes it. Someone not yet a contact becomes one. */
+    fun setNickname(peerId: String, nickname: String, theirName: String = "") {
+        val clean = nickname.replace(Regex("[\\u0000-\\u001f]"), " ").trim().take(40)
+        writableDatabase.insertWithOnConflict("contacts", null, ContentValues().apply { put("peer_id",peerId);put("name",theirName.ifBlank { peerId });put("added_at",System.currentTimeMillis()) }, SQLiteDatabase.CONFLICT_IGNORE)
+        writableDatabase.execSQL("UPDATE contacts SET nickname=? WHERE peer_id=?", arrayOf(clean, peerId))
+    }
+    /** Every nickname you have given, by Rabta ID. */
+    fun nicknames(): Map<String, String> = readableDatabase.rawQuery("SELECT peer_id,nickname FROM contacts WHERE nickname<>''", null).use { c ->
+        buildMap { while (c.moveToNext()) put(c.getString(0), c.getString(1)) }
+    }
+    fun contact(peerId: String): Contact? = readableDatabase.rawQuery("SELECT peer_id,name,username,added_at,nickname FROM contacts WHERE peer_id=?", arrayOf(peerId)).use { c ->
+        if (c.moveToFirst()) Contact(c.getString(0), c.getString(1) ?: c.getString(0), c.getString(2) ?: "", c.getLong(3), c.getString(4) ?: "") else null
+    }
+
+    /** Pinned chats stay on top, newest pin first; 0 unpins. */
+    fun setPinned(peerId: String, pinned: Boolean) =
+        writableDatabase.execSQL("UPDATE conversations SET pinned=? WHERE peer_id=?", arrayOf(if (pinned) System.currentTimeMillis() else 0L, peerId))
+    /** Archived chats leave the main list, messages and all, and stay archived when new messages arrive. */
+    fun setArchived(peerId: String, archived: Boolean) =
+        writableDatabase.execSQL("UPDATE conversations SET archived=?,pinned=CASE WHEN ? THEN 0 ELSE pinned END WHERE peer_id=?", arrayOf(if (archived) 1 else 0, if (archived) 1 else 0, peerId))
+    /** Mark as unread puts a badge back on a read chat; reading the chat clears it again. */
+    fun markUnread(peerId: String) = writableDatabase.execSQL("UPDATE conversations SET unread=1 WHERE peer_id=? AND unread=0", arrayOf(peerId))
 
     /** Clear chat: its messages leave this phone, the chat stays in the list (empty). */
     fun clearChat(convId: String) = writableDatabase.run {
@@ -131,8 +169,9 @@ class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(
 
     fun conversations(): List<Conversation> {
         val list = mutableListOf<Conversation>()
-        readableDatabase.rawQuery("SELECT peer_id,peer_name,last_msg,last_time,unread,is_group FROM conversations ORDER BY last_time DESC", null).use { c ->
-            while (c.moveToNext()) list.add(Conversation(c.getString(0), c.getString(1), c.getString(2) ?: "", c.getLong(3), c.getInt(4), c.getInt(5) == 1))
+        readableDatabase.rawQuery("SELECT c.peer_id,c.peer_name,c.last_msg,c.last_time,c.unread,c.is_group,c.pinned,c.archived,k.nickname FROM conversations c LEFT JOIN contacts k ON k.peer_id=c.peer_id AND c.is_group=0 " +
+            "ORDER BY c.pinned>0 DESC, c.pinned DESC, c.last_time DESC", null).use { c ->
+            while (c.moveToNext()) list.add(Conversation(c.getString(0), c.getString(1), c.getString(2) ?: "", c.getLong(3), c.getInt(4), c.getInt(5) == 1, c.getLong(6), c.getInt(7) == 1, c.getString(8) ?: ""))
         }
         return list
     }
@@ -212,13 +251,15 @@ class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(
         readableDatabase.rawQuery("""
             SELECT c.peer_id,c.peer_name,c.last_msg,c.last_time,c.unread,c.is_group,
               (SELECT m.body FROM messages m WHERE m.conv_id=c.peer_id AND m.msg_type='text'
-               AND instr(lower(m.body),lower(?))>0 ORDER BY m.sent_at DESC LIMIT 1) AS hit
-            FROM conversations c WHERE instr(lower(c.peer_name),lower(?))>0 OR EXISTS
+               AND instr(lower(m.body),lower(?))>0 ORDER BY m.sent_at DESC LIMIT 1) AS hit,
+              c.pinned,c.archived,k.nickname
+            FROM conversations c LEFT JOIN contacts k ON k.peer_id=c.peer_id AND c.is_group=0
+            WHERE instr(lower(c.peer_name),lower(?))>0 OR instr(lower(coalesce(k.nickname,'')),lower(?))>0 OR EXISTS
               (SELECT 1 FROM messages m WHERE m.conv_id=c.peer_id AND m.msg_type='text'
                AND instr(lower(m.body),lower(?))>0)
-            ORDER BY c.last_time DESC
-        """.trimIndent(), arrayOf(q,q,q)).use { c ->
-            while(c.moveToNext()) result.add(Conversation(c.getString(0),c.getString(1),c.getString(6) ?: c.getString(2) ?: "",c.getLong(3),c.getInt(4),c.getInt(5)==1))
+            ORDER BY c.pinned>0 DESC, c.pinned DESC, c.last_time DESC
+        """.trimIndent(), arrayOf(q,q,q,q)).use { c ->
+            while(c.moveToNext()) result.add(Conversation(c.getString(0),c.getString(1),c.getString(6) ?: c.getString(2) ?: "",c.getLong(3),c.getInt(4),c.getInt(5)==1,c.getLong(7),c.getInt(8)==1,c.getString(9) ?: ""))
         }
         return result
     }

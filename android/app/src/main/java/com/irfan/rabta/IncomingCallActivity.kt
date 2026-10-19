@@ -90,7 +90,7 @@ class IncomingCallActivity : ThemedActivity(), RabtaEvents.Listener {
         }, LinearLayout.LayoutParams(dp(88),dp(88)).apply { gravity = Gravity.CENTER })
 
         root.addView(TextView(this).apply {
-            text = fromName; textSize = 24f; typeface = Typeface.DEFAULT_BOLD
+            text = Names.of(this@IncomingCallActivity, fromId, fromName); textSize = 24f; typeface = Typeface.DEFAULT_BOLD
             setTextColor(AppTheme.text(this@IncomingCallActivity)); gravity = Gravity.CENTER
             setPadding(0, dp(20), 0, dp(8))
         })

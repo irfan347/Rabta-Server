@@ -44,6 +44,10 @@ class VideoCallActivity : ThemedActivity(), CallWatcher {
     private var localView: SurfaceViewRenderer? = null
     private var remoteView: SurfaceViewRenderer? = null
     private lateinit var statusTv: TextView
+    /** Name and call time: at the top, out of the way of the face, and only for a moment once the call connects. */
+    private lateinit var info: LinearLayout
+    private var infoForConnected = false
+    private val fadeInfo = Runnable { if (connected()) showInfo(false) }
     private lateinit var muteBtn: TextView
     private lateinit var speakerBtn: TextView
     private lateinit var shareBtn: TextView
@@ -148,7 +152,7 @@ class VideoCallActivity : ThemedActivity(), CallWatcher {
     private fun pip(inPip: Boolean) {
         if (!::controls.isInitialized) return
         val chrome = if (inPip) View.GONE else View.VISIBLE
-        controls.visibility = chrome; localView?.visibility = if (inPip || VideoCall.sharing) View.GONE else View.VISIBLE
+        controls.visibility = chrome; info.visibility = chrome; localView?.visibility = if (inPip || VideoCall.sharing) View.GONE else View.VISIBLE
         if (inPip) sharingNote.visibility = View.GONE else render()
     }
 
@@ -180,13 +184,22 @@ class VideoCallActivity : ThemedActivity(), CallWatcher {
         root.addView(localView, FrameLayout.LayoutParams(dp(110), dp(160)).apply {
             gravity = Gravity.TOP or Gravity.END; topMargin = dp(56); marginEnd = dp(16) })
 
-        // Name + status (center)
-        val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
-        info.addView(TextView(this).apply { text = VideoCall.peerName; textSize = 24f; typeface = Typeface.DEFAULT_BOLD; setTextColor(Color.WHITE); gravity = Gravity.CENTER })
-        statusTv = TextView(this).apply { textSize = 14f; setTextColor(0xCCFFFFFF.toInt()); gravity = Gravity.CENTER }
+        // Name + call time, top left beside your own preview: they fade 3 s after the call connects; a tap brings them back.
+        info = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(10), dp(16), dp(10))
+            background = GradientDrawable().apply { setColor(0x8C080D14.toInt()); cornerRadius = dp(18).toFloat() }
+        }
+        info.addView(TextView(this).apply {
+            text = Names.of(this@VideoCallActivity, VideoCall.peerId, VideoCall.peerName); textSize = 20f; typeface = Typeface.DEFAULT_BOLD; setTextColor(Color.WHITE)
+            maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
+        })
+        statusTv = TextView(this).apply { textSize = 14f; setTextColor(0xCCFFFFFF.toInt()); maxLines = 1 }
         info.addView(statusTv)
-        root.addView(info, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            gravity = Gravity.CENTER; bottomMargin = dp(160) })
+        root.addView(info, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            gravity = Gravity.TOP or Gravity.START; topMargin = dp(56); marginStart = dp(16); marginEnd = dp(142) })
+        infoForConnected = false
+        root.setOnClickListener { if (connected()) peekInfo() }
+        remoteView?.setOnClickListener { if (connected()) peekInfo() }
 
         // While your screen is shared, your camera preview gives way to this note.
         sharingNote = LinearLayout(this).apply {
@@ -217,11 +230,30 @@ class VideoCallActivity : ThemedActivity(), CallWatcher {
             gravity = Gravity.BOTTOM; bottomMargin = dp(48) })
     }
 
+    private fun connected() = VideoCall.connectedAt > 0 && VideoCall.status == "Connected"
+
+    /** Shows the name and time for 3 s while the call is connected. */
+    private fun peekInfo() {
+        showInfo(true)
+        handler.removeCallbacks(fadeInfo); handler.postDelayed(fadeInfo, 3000)
+    }
+    /** Fades rather than removes, so a screen reader still reads the name and time. */
+    private fun showInfo(show: Boolean) {
+        if (!::info.isInitialized) return
+        val alpha = if (show) 1f else 0f
+        if (android.animation.ValueAnimator.areAnimatorsEnabled()) info.animate().alpha(alpha).setDuration(220).start() else info.alpha = alpha
+    }
+
     private fun render() {
         handler.removeCallbacks(tick)
         if (!::statusTv.isInitialized || !VideoCall.active) return
         val s = VideoCall.seconds()
-        statusTv.text = if (VideoCall.connectedAt > 0 && VideoCall.status == "Connected") "Connected · %d:%02d".format(s / 60, s % 60) else VideoCall.status
+        val connected = connected()
+        statusTv.text = if (connected) "%d:%02d".format(s / 60, s % 60) else VideoCall.status
+        statusTv.contentDescription = if (connected) "Call time ${statusTv.text}" else VideoCall.status
+        // Calling, ringing or reconnecting stays on screen; once connected the name and time show for 3 s only.
+        if (connected && !infoForConnected) { infoForConnected = true; peekInfo() }
+        else if (!connected) { infoForConnected = false; handler.removeCallbacks(fadeInfo); showInfo(true) }
         val muted = VideoCall.muted
         UiIcons.set(muteBtn, if (muted) "muted" else "mic", label = if (muted) "Unmute microphone" else "Mute microphone")
         muteBtn.background = oval(if (muted) AppTheme.ACCENT else 0xEE172230.toInt()); muteBtn.isSelected = muted
