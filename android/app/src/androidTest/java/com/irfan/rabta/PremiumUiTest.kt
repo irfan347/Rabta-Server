@@ -166,6 +166,8 @@ class PremiumUiTest {
         val worker=Router::class.java.getDeclaredField("worker").apply {isAccessible=true}.get(router) as java.util.concurrent.ExecutorService
         assertTrue(worker.awaitTermination(5,TimeUnit.SECONDS))
     }
+    /** Rabta's real MessageService has run its onDestroy, which detaches whatever Nearby router is attached. */
+    private fun serviceGone()=MessageService::class.java.getDeclaredField("running").apply {isAccessible=true}.get(null)==null
     @Test fun nearbySearchFiltersLiveObservedPeersAndBackPreservesOptIn()=fixture {_,account ->
         val a=launch(NearbyActivity::class.java) as NearbyActivity
         waitUi("Nearby lifecycle resumed") {androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED).contains(a)}
@@ -178,14 +180,16 @@ class PremiumUiTest {
         waitUi("Real foreground service stopped before attaching an isolated radio fixture") {
             @Suppress("DEPRECATION")
             val services=(ctx.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).getRunningServices(Int.MAX_VALUE)
-            services.none {it.service.className==MessageService::class.java.name}
+            // Android stops listing the service before the app has run its onDestroy: a late one would detach the fixture.
+            services.none {it.service.className==MessageService::class.java.name}&&serviceGone()
         }
         val radio=Radio();radio.peers.addAll(listOf(RadarPeer("a","AAAABBBBCCCC","Ali"),RadarPeer("b","DDDDEEEEFFFF","Samira")))
         val router=Router(ctx,object:Router.UiListener {}) {radio}
         ui {RadarPrefs.setEnabled(ctx,true);router.start(account,"Irfan");MeshBridge.attach(router)}
         try {
             awaitRadio(router,radio)
-            waitUi("Real peers appear") {radio.active&&labels(a).contains("Ali")&&labels(a).contains("Samira")}
+            try { waitUi("Real peers appear") {radio.active&&labels(a).contains("Ali")&&labels(a).contains("Samira")} }
+            catch(e:AssertionError) { var seen="";ui {seen="real service running: ${!serviceGone()}, Nearby shows: ${labels(a)}"};throw AssertionError("${e.message} ($seen)") }
             val search=all(a.window.decorView).filterIsInstance<EditText>().first {it.contentDescription=="Search nearby users"}
             ui {search.setText("aLI")}
             waitUi("Case-insensitive nearby search") {labels(a).contains("Ali")&&!labels(a).contains("Samira")}

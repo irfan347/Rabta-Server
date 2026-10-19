@@ -43,6 +43,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
     private val navItems=mutableListOf<LinearLayout>()
     private val queries=mutableMapOf<Int,String>()
     private var resumed=false
+    private val askBackground=Runnable { if(resumed&&!isFinishing) BackgroundRun.askOnce(this) }
     private var callVersion=0
     private lateinit var conversationSearchRow: LinearLayout
     private lateinit var callSearchRow: LinearLayout
@@ -90,8 +91,8 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
             val color=if(MeshBridge.peersConnected>0) AppTheme.teal(this) else AppTheme.violet(this)
             connectionDot.background=pill(color)
         }
-        // NOVA keeps the header clean: the strip appears only while the server is not online.
-        if(::connectionStrip.isInitialized) connectionStrip.visibility=if(WsClient.connected) View.GONE else View.VISIBLE
+        // NOVA keeps the header clean: the strip appears only while the server is not online, not for a quick reconnect.
+        if(::connectionStrip.isInitialized) connectionStrip.visibility=if(WsClient.showsOffline()) View.VISIBLE else View.GONE
         if(::myAvatarView.isInitialized) myAvatarView.foreground=if(WsClient.connected) onlineDot() else null
     }
     private lateinit var connectionStrip: LinearLayout
@@ -130,6 +131,9 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         AccountUi.ensureTrustedPhone(this)
         resumed=true;refreshAvatar();ProfilePhoto.sync { if(!isDestroyed) refreshAvatar() };MessageService.start(this);RabtaEvents.add(this)
         uiHandler.removeCallbacks(connectionTick);uiHandler.post(connectionTick)
+        // Once the chats are on screen (and any permission question is answered): Android's "keep Rabta running?"
+        // question, asked once, so messages and calls arrive while Rabta is closed.
+        uiHandler.removeCallbacks(askBackground);uiHandler.postDelayed(askBackground,1500)
         when(activeTab) { 1->nearbyPanel.resume();3->loadCalls();else->loadConvs() }
         if(activeTab==0) loadMoments(force=true)
         AppUpdate.check(this)
@@ -139,7 +143,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
     override fun onPause() {
         resumed=false;if(::nearbyPanel.isInitialized)nearbyPanel.pause()
         if(::callBar.isInitialized)callBar.stop()
-        RabtaEvents.remove(this);uiHandler.removeCallbacks(connectionTick);uiHandler.removeCallbacks(searchTask);uiHandler.removeCallbacks(callSearchTask)
+        RabtaEvents.remove(this);uiHandler.removeCallbacks(connectionTick);uiHandler.removeCallbacks(searchTask);uiHandler.removeCallbacks(callSearchTask);uiHandler.removeCallbacks(askBackground)
         super.onPause()
     }
     override fun onDestroy() { RabtaEvents.remove(this);uiHandler.removeCallbacksAndMessages(null);super.onDestroy() }

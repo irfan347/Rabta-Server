@@ -73,6 +73,30 @@ class ContactsTest {
         }
     }
 
+    /**
+     * The reported problem: with Rabta closed no message or call arrived, because nobody had found the setting that lets
+     * it run. The chats screen now asks Android's question by itself, once. A stand-in takes the question here, so
+     * Android's real screen never opens.
+     */
+    @Test fun chatsScreenAsksOnceToKeepRabtaRunning() = fixture { _ ->
+        org.junit.Assume.assumeFalse("Rabta already runs in the background on this phone", BackgroundRun.allowed(ctx))
+        val prefs = ctx.getSharedPreferences("background_run", 0)
+        val asked = java.util.concurrent.atomic.AtomicInteger(); val android = BackgroundRun.ask
+        fun openChats() = inst.startActivitySync(Intent(ctx, ConversationListActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        try {
+            BackgroundRun.ask = { asked.incrementAndGet() }
+            prefs.edit().remove("asked").commit()
+            val first = openChats()
+            try { waitUi("Android is asked to keep Rabta running") { asked.get() == 1 } } finally { ui { first.finish() } }
+            val again = openChats()
+            try { Thread.sleep(2_500) } finally { ui { again.finish() } }
+            assertEquals("Asked once, not every time the chats open", 1, asked.get())
+        } finally {
+            BackgroundRun.ask = android
+            prefs.edit().putBoolean("asked", true).remove("auto_start_pending").commit()
+        }
+    }
+
     /** The request: people you connect with are kept in Contacts; a chat can be cleared or deleted and they stay there. */
     @Test fun contactsKeepPeopleWhoseChatIsClearedOrDeleted() = fixture { db ->
         val friend = "CT1100000002"; val other = "CT1100000003"; val now = System.currentTimeMillis()

@@ -14,7 +14,7 @@ android {
         versionCode = if (ciRun != null) 1000 + ciRun else 34
         versionName = "2.0.${ciRun ?: 0}"
         manifestPlaceholders["appLabel"] = "Rabta"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = "com.irfan.rabta.RabtaTestRunner"
     }
     // One stable key for every test build, so a new Rabta Test APK installs over the previous one.
     // CI restores it from GitHub Secrets; without it, Android's per-machine debug key is used as before.

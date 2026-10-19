@@ -357,14 +357,9 @@ class CallsScreenTest {
         }
     }
 
-    /**
-     * The reported bug: with Rabta closed its connection died unnoticed (no messages, no calls), and opening Rabta took
-     * a minute to reconnect. The keep-alive alarm (and opening Rabta) now checks the connection and replaces a dead one.
-     */
-    @Test fun keepAliveReplacesAConnectionThatStoppedAnswering()=fixture { _ ->
-        val opened=java.util.concurrent.atomic.AtomicInteger();val answering=java.util.concurrent.atomic.AtomicBoolean(true)
-        val server=MockWebServer()
-        server.dispatcher=object:Dispatcher() {
+    /** The fixture account's server: counts connections in [opened] and answers Rabta's ping only while [answering]. */
+    private fun pingServer(opened:java.util.concurrent.atomic.AtomicInteger,answering:java.util.concurrent.atomic.AtomicBoolean)=MockWebServer().apply {
+        dispatcher=object:Dispatcher() {
             override fun dispatch(request:RecordedRequest):MockResponse {
                 if(request.path!="/ws")return MockResponse().setResponseCode(404)
                 return MockResponse().withWebSocketUpgrade(object:WebSocketListener() {
@@ -373,7 +368,16 @@ class CallsScreenTest {
                 })
             }
         }
-        server.start();val url=server.url("/").toString().trimEnd('/')
+        start()
+    }
+
+    /**
+     * The reported bug: with Rabta closed its connection died unnoticed (no messages, no calls), and opening Rabta took
+     * a minute to reconnect. The keep-alive alarm (and opening Rabta) now checks the connection and replaces a dead one.
+     */
+    @Test fun keepAliveReplacesAConnectionThatStoppedAnswering()=fixture { _ ->
+        val opened=java.util.concurrent.atomic.AtomicInteger();val answering=java.util.concurrent.atomic.AtomicBoolean(true)
+        val server=pingServer(opened,answering);val url=server.url("/").toString().trimEnd('/')
         ui { Session.serverUrl=url;WsClient.connect(Session) }
         fun keepAlive()=ctx.sendBroadcast(Intent(ctx,StartReceiver::class.java).setAction(MessageService.KEEP_ALIVE))
         fun waitFor(ms:Long,check:()->Boolean) { val until=System.currentTimeMillis()+ms;while(!check()) { if(System.currentTimeMillis()>until) fail("Connection did not reach the expected state");Thread.sleep(100) } }
@@ -386,6 +390,33 @@ class CallsScreenTest {
             // The connection stops answering (its network died while the phone slept): the next check replaces it.
             answering.set(false);Thread.sleep(21_000);keepAlive()
             waitFor(20_000) { opened.get()==2&&WsClient.connected }
+        } finally {
+            ui { WsClient.disconnect();MessageService.stop(ctx) }
+            server.shutdown()
+        }
+    }
+
+    /**
+     * The reported problem: opening Rabta showed "Connecting to server" for seconds. A connection that went quiet while
+     * Rabta was closed gets a short check when Rabta opens and is replaced at once, without the offline strip showing.
+     */
+    @Test fun openingRabtaReplacesAQuietConnectionQuicklyAndUnseen()=fixture { _ ->
+        val opened=java.util.concurrent.atomic.AtomicInteger();val answering=java.util.concurrent.atomic.AtomicBoolean(true)
+        val server=pingServer(opened,answering);val url=server.url("/").toString().trimEnd('/')
+        ui { Session.serverUrl=url;WsClient.connect(Session) }
+        try {
+            waitUi { WsClient.connected }
+            // Rabta was closed for a while and its connection died unnoticed.
+            answering.set(false);Thread.sleep(21_000)
+            val opening=System.currentTimeMillis();var shownOffline=false
+            ui { WsClient.wake(onScreen=true) }
+            while(!(opened.get()==2&&WsClient.connected)) {
+                ui { shownOffline=shownOffline||WsClient.showsOffline() }
+                // Before: a 6 s check, then a 2 s wait before connecting again.
+                assertTrue("New connection within seconds of opening Rabta",System.currentTimeMillis()-opening<7_000)
+                Thread.sleep(50)
+            }
+            assertFalse("A quick reconnect does not show the offline strip",shownOffline)
         } finally {
             ui { WsClient.disconnect();MessageService.stop(ctx) }
             server.shutdown()

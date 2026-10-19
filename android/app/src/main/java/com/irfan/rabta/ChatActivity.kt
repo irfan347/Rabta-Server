@@ -808,16 +808,17 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         }
     }
     private fun updateStatus() {
-        // Like WhatsApp: the subtitle is about the contact (online, last seen); our own link only shows while it is down.
-        val connected=WsClient.connected
+        // Like WhatsApp: the subtitle is about the contact (online, last seen); our own link only shows while it is down,
+        // and not during a quick reconnect.
+        val offline=WsClient.showsOffline()
         statusTv.text=when {
-            !connected -> L.t(this,"Connecting…")
+            offline -> L.t(this,"Connecting…")
             isGroup -> groupSize?.let { "$it members" } ?: L.t(this,"Group")
             presence.isNotBlank() -> presence
             else -> L.t(this,"tap here for contact info")
         }
-        statusTv.contentDescription=if(connected) statusTv.text else "Your connection: ${ConnectionStatus.text(this)}"
-        offlineBanner.visibility=if(connected||callShown) View.GONE else View.VISIBLE
+        statusTv.contentDescription=if(!offline) statusTv.text else "Your connection: ${ConnectionStatus.text(this)}"
+        offlineBanner.visibility=if(!offline||callShown) View.GONE else View.VISIBLE
         offlineBanner.text=L.t(this,if(isGroup) "Waiting for network · Group messages need internet  ›" else "Waiting for network · Nearby text still works  ›")
         offlineBanner.contentDescription="${offlineBanner.text}. Tap for connection details"
     }

@@ -118,7 +118,7 @@ open class ThemedActivity : androidx.fragment.app.FragmentActivity() {
         super.onResume()
         if(appliedDark!=AppTheme.dark(this)||appliedSettings!=L.signature(this)+AppTheme.signature(this)) { recreate();return }
         // Back on screen: connected at once, not after the reconnect timer that stood still while the phone slept.
-        if(Session.loggedIn) WsClient.wake()
+        if(Session.loggedIn) WsClient.wake(onScreen=true)
         if(Privacy.prefs(this).getBoolean("lock",false)) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         if(AppLock.needed(this)&&!unlocking) {
             unlocking=true;window.decorView.alpha=0f
