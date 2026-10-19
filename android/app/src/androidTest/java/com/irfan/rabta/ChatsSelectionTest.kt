@@ -77,6 +77,11 @@ class ChatsSelectionTest {
     }
 
     private fun fixture(run: (Db) -> Unit) {
+        // Permissions first, so Android's permission screen never covers the chats under test.
+        val permissions = mutableListOf("RECORD_AUDIO", "ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION")
+        if (android.os.Build.VERSION.SDK_INT >= 31) permissions += listOf("BLUETOOTH_SCAN", "BLUETOOTH_ADVERTISE", "BLUETOOTH_CONNECT")
+        if (android.os.Build.VERSION.SDK_INT >= 33) permissions += listOf("NEARBY_WIFI_DEVICES", "POST_NOTIFICATIONS")
+        permissions.forEach { android.os.ParcelFileDescriptor.AutoCloseInputStream(inst.uiAutomation.executeShellCommand("pm grant ${ctx.packageName} android.permission.$it")).use { s -> s.readBytes() } }
         val name = "chats-select-${java.util.UUID.randomUUID()}.db"
         val isolated = object : ContextWrapper(ctx) {
             override fun getApplicationContext(): Context = this
@@ -119,7 +124,7 @@ class ChatsSelectionTest {
 
             hold("Bravo"); press("Archive")
             waitUi("Archived chats leave the list") { db.conversations().single { it.peerId == bravo }.archived && !shown("Bravo") && shown("Archived") }
-            tap("Archived", exact = true)
+            click("Archived")
             waitUi("Archived lists them") { shown("Bravo") && !shown("Charlie") }
             hold("Bravo"); press("Unarchive")
             waitUi("Unarchived chats come back") { !db.conversations().single { it.peerId == bravo }.archived }
