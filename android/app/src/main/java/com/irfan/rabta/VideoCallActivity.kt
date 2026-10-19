@@ -158,7 +158,7 @@ class VideoCallActivity : ThemedActivity(), CallWatcher {
         val chrome = if (inPip) View.GONE else View.VISIBLE
         controls.visibility = chrome; info.visibility = chrome; effectsBtn.visibility = if (inPip || VideoCall.sharing) View.GONE else View.VISIBLE
         if (inPip) showEffects(false)
- localView?.visibility = if (inPip || VideoCall.sharing) View.GONE else View.VISIBLE
+        localView?.visibility = if (inPip || VideoCall.sharing) View.GONE else View.VISIBLE
         if (inPip) sharingNote.visibility = View.GONE else render()
     }
 

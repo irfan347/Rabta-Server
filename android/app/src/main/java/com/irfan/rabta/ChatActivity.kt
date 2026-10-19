@@ -1081,6 +1081,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     private fun endCall() { VoiceCall.end() }
 
     override fun onRequestPermissionsResult(r:Int, p:Array<out String>, g:IntArray) {
+        super.onRequestPermissionsResult(r, p, g)
         val ok = g.isNotEmpty()&&g[0]==PackageManager.PERMISSION_GRANTED
         when(r) { 99->if(ok) startCall(pendingInitiate) else toast("Mic permission chahiye"); 98->if(ok) toast("Ab mic button hold karein"); 97->if(ok) takePhoto() else toast("Camera permission is needed to take a photo"); 96->attachSheet?.reload() }
     }
