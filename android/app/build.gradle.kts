@@ -73,5 +73,7 @@ dependencies {
     implementation("com.google.firebase:firebase-messaging:24.0.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.github.webrtc-sdk:android:114.5735.07")
+    // Background blur in video calls: finds the person on the phone itself (bundled model, no network).
+    implementation("com.google.mlkit:segmentation-selfie:16.0.0-beta6")
 }
 

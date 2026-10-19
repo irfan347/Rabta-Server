@@ -52,6 +52,10 @@ class VideoCallActivity : ThemedActivity(), CallWatcher {
     private lateinit var speakerBtn: TextView
     private lateinit var shareBtn: TextView
     private lateinit var controls: LinearLayout
+    /** Filters and background blur for your camera: a button under your preview opens a strip of live previews. */
+    private lateinit var effectsBtn: android.widget.ImageView
+    private lateinit var effects: android.widget.HorizontalScrollView
+    private val tiles = mutableMapOf<String, android.widget.ImageView>()
     private lateinit var sharingNote: LinearLayout
     private var pending: Intent? = null
     private var askingShare = false
@@ -133,7 +137,7 @@ class VideoCallActivity : ThemedActivity(), CallWatcher {
     override fun onStart() { super.onStart(); started = true; if (VideoCall.active && localView != null) VideoCall.visible(true) }
     // Locked, closed or Rabta in the background: the camera pauses there and resumes on return, the voice goes on.
     override fun onStop() { super.onStop(); started = false; if (VideoCall.active && !isChangingConfigurations) VideoCall.visible(false) }
-    override fun onDestroy() { handler.removeCallbacksAndMessages(null); releaseViews(); super.onDestroy() }
+    override fun onDestroy() { VideoEffects.onSnapshot = null; handler.removeCallbacksAndMessages(null); releaseViews(); super.onDestroy() }
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() { if (!minimize()) finish() }
@@ -152,7 +156,9 @@ class VideoCallActivity : ThemedActivity(), CallWatcher {
     private fun pip(inPip: Boolean) {
         if (!::controls.isInitialized) return
         val chrome = if (inPip) View.GONE else View.VISIBLE
-        controls.visibility = chrome; info.visibility = chrome; localView?.visibility = if (inPip || VideoCall.sharing) View.GONE else View.VISIBLE
+        controls.visibility = chrome; info.visibility = chrome; effectsBtn.visibility = if (inPip || VideoCall.sharing) View.GONE else View.VISIBLE
+        if (inPip) showEffects(false)
+ localView?.visibility = if (inPip || VideoCall.sharing) View.GONE else View.VISIBLE
         if (inPip) sharingNote.visibility = View.GONE else render()
     }
 
@@ -213,6 +219,14 @@ class VideoCallActivity : ThemedActivity(), CallWatcher {
         root.addView(sharingNote, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; topMargin = dp(64) })
 
+        effectsBtn = UiIcons.image(this, "sparkle", Color.WHITE, 22, L.t(this, "Filters and background blur")).apply {
+            isFocusable = true; background = oval(0xB3172230.toInt()); setOnClickListener { showEffects(effects.visibility != View.VISIBLE) }
+        }
+        root.addView(effectsBtn, FrameLayout.LayoutParams(dp(44), dp(44)).apply { gravity = Gravity.TOP or Gravity.END; topMargin = dp(226); marginEnd = dp(49) })
+        effects = buildEffects()
+        root.addView(effects, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            gravity = Gravity.BOTTOM; bottomMargin = dp(116); marginStart = dp(8); marginEnd = dp(8) })
+
         // Controls
         controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
         fun cBtn(icon: String, bg: Int, act: () -> Unit) = TextView(this).apply {
@@ -231,6 +245,62 @@ class VideoCallActivity : ThemedActivity(), CallWatcher {
     }
 
     private fun connected() = VideoCall.connectedAt > 0 && VideoCall.status == "Connected"
+
+    /** The strip: Blur first (on or off), then one tile per filter, each showing your camera with that look. */
+    private fun buildEffects() = android.widget.HorizontalScrollView(this).apply {
+        isHorizontalScrollBarEnabled = false; visibility = View.GONE
+        background = GradientDrawable().apply { setColor(0xE6101820.toInt()); cornerRadius = dp(22).toFloat() }
+        val row = LinearLayout(this@VideoCallActivity).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(10), dp(10), dp(10), dp(8)) }
+        fun tile(key: String, label: String, run: () -> Unit) = row.addView(LinearLayout(this@VideoCallActivity).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; isFocusable = true; setPadding(dp(5), 0, dp(5), 0)
+            setOnClickListener { run(); renderEffects() }
+            val image = android.widget.ImageView(this@VideoCallActivity).apply {
+                scaleType = android.widget.ImageView.ScaleType.CENTER_CROP; clipToOutline = true; importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                background = GradientDrawable().apply { setColor(0xFF223040.toInt()); cornerRadius = dp(16).toFloat() }
+                setPadding(dp(3), dp(3), dp(3), dp(3))
+            }
+            tiles[key] = image
+            addView(image, LinearLayout.LayoutParams(dp(60), dp(76)))
+            addView(RabtaUi.text(this@VideoCallActivity, label, 11f, true, Color.WHITE).apply { gravity = Gravity.CENTER; maxLines = 1; setPadding(0, dp(5), 0, 0); importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO },
+                LinearLayout.LayoutParams(dp(68), -2))
+            tag = label
+        })
+        tile("blur", "Blur") { VideoEffects.blur = !VideoEffects.blur }
+        VideoFilter.values().forEach { f -> tile(f.name, f.label) { VideoEffects.filter = f } }
+        addView(row)
+    }
+
+    private fun showEffects(show: Boolean) {
+        if (!::effects.isInitialized) return
+        effects.visibility = if (show) View.VISIBLE else View.GONE
+        // Live previews only while the strip is open; the camera thread sends a small snapshot about twice a second.
+        VideoEffects.onSnapshot = if (show) { snap -> handler.post { previews(snap) } } else null
+        if (show) { renderEffects(); RabtaUi.enter(effects) }
+    }
+
+    private fun previews(snap: I420Planes) {
+        if (!::effects.isInitialized || effects.visibility != View.VISIBLE) return
+        fun bitmap(p: I420Planes) = android.graphics.Bitmap.createBitmap(VideoLook.argb(p), p.w, p.h, android.graphics.Bitmap.Config.ARGB_8888)
+        VideoFilter.values().forEach { f -> tiles[f.name]?.setImageBitmap(bitmap(VideoLook.copy(snap).also { VideoLook.colour(it, f) })) }
+        // Blur's tile: the picture softened all over (the call itself keeps you sharp).
+        val plain = bitmap(snap)
+        val tiny = android.graphics.Bitmap.createScaledBitmap(plain, maxOf(2, plain.width / 8), maxOf(2, plain.height / 8), true)
+        tiles["blur"]?.setImageBitmap(android.graphics.Bitmap.createScaledBitmap(tiny, plain.width, plain.height, true))
+    }
+
+    private fun renderEffects() {
+        if (!::effects.isInitialized) return
+        val row = effects.getChildAt(0) as LinearLayout
+        for (i in 0 until row.childCount) {
+            val item = row.getChildAt(i) as LinearLayout
+            val key = tiles.entries.firstOrNull { it.value === item.getChildAt(0) }?.key ?: continue
+            val on = if (key == "blur") VideoEffects.blur else VideoEffects.filter.name == key
+            (item.getChildAt(0).background as GradientDrawable).setStroke(dp(2), if (on) AppTheme.ACCENT else Color.TRANSPARENT)
+            (item.getChildAt(1) as TextView).setTextColor(if (on) AppTheme.ACCENT else Color.WHITE)
+            item.contentDescription = if (key == "blur") "${L.t(this, "Background blur")}, ${L.t(this, if (on) "on" else "off")}" else "${item.tag} ${L.t(this, "filter")}${if (on) ", ${L.t(this, "selected")}" else ""}"
+        }
+        effectsBtn.background = oval(if (VideoEffects.blur || VideoEffects.filter != VideoFilter.NORMAL) AppTheme.ACCENT else 0xB3172230.toInt())
+    }
 
     /** Shows the name and time for 3 s while the call is connected. */
     private fun peekInfo() {
