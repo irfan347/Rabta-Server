@@ -54,6 +54,25 @@ class ConversationTest {
         }
         ui { val v=list!!;v.performItemClick(v.getChildAt(index-v.firstVisiblePosition),index,v.getItemIdAtPosition(index)) }
     }
+    /** The view described as [label] that is on screen, e.g. an action in the selection bar. */
+    private fun press(a:ChatActivity,label:String) {
+        var target:View?=null
+        waitUi { target=all(a.window.decorView).lastOrNull { it.isShown&&it.contentDescription?.toString()==label };target!=null }
+        ui { target!!.performClick() }
+    }
+    private fun launch(peerId:String,name:String)=inst.startActivitySync(Intent(ctx,ChatActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("peerId",peerId).putExtra("peerName",name)) as ChatActivity
+    private fun windows()=WindowInspector.getGlobalWindowViews().flatMap { all(it) }
+    private fun jpeg(w:Int,h:Int)=java.io.ByteArrayOutputStream().also { android.graphics.Bitmap.createBitmap(w,h,android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.rgb(200,60,40)) }.compress(android.graphics.Bitmap.CompressFormat.JPEG,80,it) }.toByteArray()
+    private fun b64(bytes:ByteArray)=android.util.Base64.encodeToString(bytes,android.util.Base64.NO_WRAP)
+    /** [seconds] of silence as a WAV voice note. */
+    private fun wav(seconds:Int):String {
+        val samples=16000*seconds;val buffer=java.nio.ByteBuffer.allocate(44+samples*2).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        buffer.put("RIFF".toByteArray()).putInt(36+samples*2).put("WAVEfmt ".toByteArray()).putInt(16).putShort(1).putShort(1)
+        buffer.putInt(16000).putInt(32000).putShort(2).putShort(16).put("data".toByteArray()).putInt(samples*2)
+        repeat(samples) { buffer.putShort(0) }
+        return b64(buffer.array())
+    }
+
     @Test fun replyCopyDeleteAndStatesUseSavedMessageIds() {
         prepare();val db=Db.get(ctx);val now=System.currentTimeMillis()
         db.saveMessage("convo-incoming",peer,peer,"Original message",now-86400000,false,"received")
@@ -73,12 +92,15 @@ class ConversationTest {
                 for(v in views().filter { it.tag?.toString()?.startsWith("bubble:")==true })assertTrue(v.width<=(v.parent as View).width)
                 incoming().performLongClick()
             }
-            choose("Reply")
+            // Holding a message selects it, and the header offers its actions, as in WhatsApp.
+            waitUi { views().any { it.isShown&&it.contentDescription=="Cancel selection" } }
+            press(a,"Reply")
             waitUi { views().filterIsInstance<TextView>().any { it.isShown&&it.text.contains("Reply to")&&it.text.contains("Original message") } }
-            ui { views().first { it.contentDescription=="Cancel reply" }.performClick();incoming().performLongClick() }
+            ui { assertFalse("Replying ends the selection",views().any { it.isShown&&it.contentDescription=="Cancel selection" });views().first { it.contentDescription=="Cancel reply" }.performClick();incoming().performLongClick() }
+            press(a,"More options")
             choose("Copy")
             ui { assertEquals("Original message",(ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).primaryClip!!.getItemAt(0).text.toString());incoming().performLongClick() }
-            choose("Delete for me")
+            press(a,"Delete")
             waitUi { WindowInspector.getGlobalWindowViews().flatMap { all(it) }.filterIsInstance<android.widget.Button>().any { it.text=="Delete for me" } }
             ui { WindowInspector.getGlobalWindowViews().flatMap { all(it) }.filterIsInstance<android.widget.Button>().first { it.text=="Delete for me" }.performClick() }
             waitUi { views().filterIsInstance<TextView>().any { it.text=="Message deleted" } }
@@ -166,5 +188,127 @@ class ConversationTest {
                 assertTrue("Calls sit in time order after this week's message",texts().indexOfFirst { it.text.toString()=="This week" }<texts().indexOfFirst { it.text.toString()=="Voice call" })
             }
         } finally { ui { a.finish() };db.deleteCall(answered);db.deleteCall(missed) }
+    }
+
+    /** Starting a voice message pauses the one playing, as in WhatsApp. */
+    @Test fun onlyOneVoiceMessagePlaysAtATime() {
+        prepare();val db=Db.get(ctx);val chat="convo-voices-peer";val now=System.currentTimeMillis()
+        db.upsertConversation(chat,"Voices contact","",now,false)
+        db.saveMessage("convo-voice-first",chat,chat,wav(6),now,false,"received","voice")
+        db.saveMessage("convo-voice-second",chat,Session.id,wav(6),now+1,true,"sent","voice")
+        val a=launch(chat,"Voices contact")
+        try {
+            fun voices()=all(a.window.decorView).filterIsInstance<VoiceMessageView>()
+            fun state(v:VoiceMessageView)=all(v).mapNotNull { it.contentDescription?.toString() }.firstOrNull { it.endsWith("voice message") }
+            waitUi { voices().size==2 }
+            ui { all(voices()[0]).first { it.contentDescription=="Play voice message" }.performClick() }
+            waitUi { state(voices()[0])=="Pause voice message" }
+            ui { all(voices()[1]).first { it.contentDescription=="Play voice message" }.performClick() }
+            waitUi { state(voices()[1])=="Pause voice message" }
+            ui { assertEquals("The first one paused for the second","Resume voice message",state(voices()[0])) }
+        } finally { ui { a.finish() };db.deleteChat(chat) }
+    }
+
+    /** A photo fills its bubble in its own shape instead of sitting small in a box, and a tap shows it full screen. */
+    @Test fun aPhotoFillsItsBubbleAndOpensFullScreen() {
+        prepare();val db=Db.get(ctx);val chat="convo-photo-peer"
+        db.upsertConversation(chat,"Photo contact","",System.currentTimeMillis(),false)
+        db.saveMessage("convo-tall-photo",chat,chat,b64(jpeg(300,600)),System.currentTimeMillis(),false,"received","image")
+        val a=launch(chat,"Photo contact")
+        try {
+            waitUi { all(a.window.decorView).any { it.tag=="photo:convo-tall-photo"&&it.height>0 } }
+            ui {
+                val photo=all(a.window.decorView).first { it.tag=="photo:convo-tall-photo" }
+                assertEquals("As wide as WhatsApp's photos",RabtaUi.dp(a,250),photo.width)
+                assertEquals("A tall photo is as tall as allowed, not boxed in",RabtaUi.dp(a,330),photo.height)
+                assertEquals(android.widget.ImageView.ScaleType.CENTER_CROP,all(photo).filterIsInstance<android.widget.ImageView>().first().scaleType)
+                photo.performClick()
+            }
+            waitUi { windows().any { it is ZoomImageView&&it.isShown } }
+            ui { windows().last { it.isShown&&it.contentDescription=="Close photo" }.performClick() }
+            waitUi { windows().none { it is ZoomImageView&&it.isShown } }
+        } finally { ui { a.finish() };db.deleteChat(chat) }
+    }
+
+    /** A video shows its picture before it is downloaded; the size in the corner downloads it, then shows its length. */
+    @Test fun aVideoShowsItsPictureAndTheCornerDownloadsIt() {
+        prepare();val db=Db.get(ctx);val chat="convo-video-peer"
+        val bytes="a video someone sent ${java.util.UUID.randomUUID()}".toByteArray()
+        val sha=java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+        val remote=(1..32).map { "0123456789abcdef".random() }.joinToString("")
+        val downloads=java.util.concurrent.atomic.AtomicInteger()
+        val server=MockWebServer().apply { dispatcher=object:Dispatcher() {
+            override fun dispatch(r:RecordedRequest):MockResponse = when(r.path) {
+                "/api/files/$remote" -> { downloads.incrementAndGet();MockResponse().setBody(okio.Buffer().write(bytes)) }
+                "/api/files/$remote/got" -> MockResponse().setBody("{\"ok\":true}")
+                else -> MockResponse().setResponseCode(404)
+            }
+        };start() }
+        val url=server.url("/").toString().trimEnd('/')
+        ui { Session.serverUrl=url }
+        val body=JSONObject().put("remote",remote).put("name","clip.mp4").put("mime","video/mp4").put("size",bytes.size).put("sha256",sha)
+            .put("thumb",b64(jpeg(160,90))).put("w",160).put("h",90).put("ms",15000).toString()
+        db.upsertConversation(chat,"Video contact","",System.currentTimeMillis(),false)
+        db.saveMessage("convo-video",chat,chat,body,System.currentTimeMillis(),false,"received","video")
+        val a=launch(chat,"Video contact")
+        try {
+            fun video()=all(a.window.decorView).first { it.tag=="video:convo-video" } as VideoBubble
+            waitUi { all(a.window.decorView).any { it.tag=="video:convo-video"&&it.height>0 } }
+            ui {
+                val v=video()
+                assertEquals(RabtaUi.dp(a,250),v.width)
+                assertTrue("Shaped like the video (wide)",v.height<v.width)
+                assertTrue("The picture came with the message",all(v).filterIsInstance<android.widget.ImageView>().any { it.drawable!=null&&it.scaleType==android.widget.ImageView.ScaleType.CENTER_CROP })
+                assertEquals("Download video, ${Attachments.details(body)}",v.chip.contentDescription)
+                assertEquals("Play video",v.centre.contentDescription)
+                assertEquals(0,downloads.get())
+                v.chip.performClick()
+            }
+            waitUi { video().chip.contentDescription=="Video, 0:15" }
+            assertEquals(1,downloads.get())
+            assertArrayEquals(bytes,Transfers.onPhone(ctx,body)!!.readBytes())
+        } finally {
+            ui { a.finish() }
+            Transfers.onPhone(ctx,body)?.delete()
+            ctx.getSharedPreferences("downloads_${Session.id}",0).edit().remove(remote).remove("got:$remote").commit()
+            server.shutdown();db.deleteChat(chat)
+        }
+    }
+
+    /** Hold messages to select them; Forward sends them to the chats chosen, and media have a forward button beside them. */
+    @Test fun heldMessagesForwardToAnotherChat() {
+        prepare();val db=Db.get(ctx);val chat="convo-forward-from";val target="convo-forward-to";val now=System.currentTimeMillis()
+        db.upsertConversation(chat,"Forward source","",now,false)
+        db.upsertConversation(target,"Forward contact","",now-5000,false)
+        db.saveMessage("convo-fwd-first",chat,chat,"First to pass on",now,false,"received")
+        db.saveMessage("convo-fwd-second",chat,Session.id,"Second to pass on",now+1,true,"sent")
+        db.saveMessage("convo-fwd-photo",chat,chat,b64(jpeg(120,90)),now+2,false,"received","image")
+        val a=launch(chat,"Forward source")
+        try {
+            fun views()=all(a.window.decorView)
+            fun selecting()=views().any { it.isShown&&it.contentDescription=="Cancel selection" }
+            waitUi { views().any { it.tag=="bubble:convo-fwd-second" }&&views().any { it.tag=="forward:convo-fwd-photo"&&it.isShown } }
+            ui {
+                assertTrue("Text has no forward button",views().none { it.tag=="forward:convo-fwd-first" })
+                views().first { it.tag=="bubble:convo-fwd-first" }.performLongClick()
+            }
+            waitUi { selecting() }
+            ui {
+                assertFalse("Forward buttons step aside while selecting",views().first { it.tag=="forward:convo-fwd-photo" }.isShown)
+                views().first { it.tag=="bubble:convo-fwd-second" }.performLongClick()
+            }
+            waitUi { views().filterIsInstance<TextView>().any { it.isShown&&it.text=="2" } }
+            ui { assertFalse("Reply is for one message",views().any { it.isShown&&it.contentDescription=="Reply" }) }
+            press(a,"Forward")
+            var row:View?=null
+            waitUi { row=windows().firstOrNull { it.isShown&&it.contentDescription=="Forward contact, not selected" };row!=null }
+            ui { row!!.performClick() }
+            var send:View?=null
+            waitUi { send=windows().lastOrNull { it.isShown&&it.contentDescription=="Send" };send!=null }
+            ui { send!!.performClick() }
+            waitUi { db.messages(target).count { it.mine }==2 }
+            assertEquals(setOf("First to pass on","Second to pass on"),db.messages(target).filter { it.mine }.map { it.body }.toSet())
+            waitUi { !selecting() }
+        } finally { ui { a.finish() };db.deleteChat(chat);db.deleteChat(target) }
     }
 }

@@ -107,6 +107,25 @@ class ChatsSelectionTest {
         }
     }
 
+    /** Like WhatsApp, a chat whose last message is a photo or a video reads "Photo" or "Video" after its icon. */
+    @Test fun aPhotoOrVideoLastMessageShowsItsIcon() = fixture { db ->
+        val now = System.currentTimeMillis()
+        db.upsertConversation("CS1100000005", "Photo friend", "📷 Photo", now - 2000, false)
+        db.upsertConversation("CS1100000006", "Video friend", "🎥 Video", now - 1000, false)
+        val list = inst.startActivitySync(Intent(ctx, ConversationListActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        try {
+            waitUi("Chats are listed") { shown("Photo friend") && shown("Video friend") }
+            ui {
+                val previews = windows().filterIsInstance<TextView>().filter { it.isShown && it.text.toString().trim() in setOf("Photo", "Video") }
+                assertEquals(2, previews.size)
+                previews.forEach { v ->
+                    val text = v.text as? android.text.Spanned
+                    assertTrue("${v.text.trim()} has its icon", text != null && text.getSpans(0, text.length, android.text.style.ImageSpan::class.java).isNotEmpty())
+                }
+            }
+        } finally { ui { list.finish() } }
+    }
+
     /** Hold a chat, then Pin keeps it on top, Archive moves it under "Archived" (and back), Mute silences it. */
     @Test fun holdingAChatPinsArchivesAndMutesIt() = fixture { db ->
         val now = System.currentTimeMillis()

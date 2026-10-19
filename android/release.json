@@ -1,4 +1,4 @@
 {
   "minVersionCode": 0,
-  "notes": "Calls no longer drop when the internet blinks: they wait up to half a minute for the connection to come back.\nBack from a video call now goes to the chat with that person, also after using the small window.\nMessages and calls reach a phone in the background more reliably, and Rabta no longer closes by itself when it wakes up in the background."
+  "notes": "Photos fill their bubble and open full screen when tapped.\nVideos show their picture with a play button; the size in the corner downloads them, and they play inside Rabta.\nHold a message to select it: reply, star, delete or forward it, also several at once. Photos, videos and voice messages have a forward button beside them.\nOnly one voice message plays at a time.\nThe chats list shows a photo or video icon for photos and videos."
 }

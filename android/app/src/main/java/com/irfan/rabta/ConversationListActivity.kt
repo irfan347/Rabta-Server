@@ -833,7 +833,10 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         RabtaUi.enter(card)
     }
 
-    /** Voice notes get a lime mic icon, as in WhatsApp; older rows saved before durations were added read "Voice message". */
+    /**
+     * Voice notes get a lime mic icon, photos a camera and videos a video camera, as in WhatsApp; older rows saved before
+     * durations were added read "Voice message", and older photo and video rows just "Photo" or "Video".
+     */
     private fun preview(last:String, mineStatus:String?=null):CharSequence {
         if(last.isEmpty()) return "No messages yet"
         val out=android.text.SpannableStringBuilder()
@@ -842,6 +845,8 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
             val color=when { mineStatus==MessageDelivery.READ -> AppTheme.readTick(this); MessageDelivery.retryable(mineStatus) -> AppTheme.error(this); else -> SUB }
             out.append(UiIcons.inline(this,MessageDelivery.tickIcon(mineStatus),color,17)).append(" ")
         }
+        val media=when { last=="Photo"||last=="📷 Photo" -> "photo" to "Photo"; last=="Video"||last=="🎥 Video" -> "video" to "Video"; else -> null }
+        if(media!=null) return out.append(UiIcons.inline(this,media.first,SUB,16)).append(" ").append(L.t(this,media.second))
         val voice=last=="Voice note"||last.startsWith("🎤 ")
         if(!voice) return out.append(last)
         val label=last.removePrefix("🎤 ").let { if(it=="Voice note") "Voice message" else it }

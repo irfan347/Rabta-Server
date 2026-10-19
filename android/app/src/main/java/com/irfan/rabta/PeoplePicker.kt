@@ -24,11 +24,11 @@ import android.widget.Toast
 /**
  * Choose several people: search by name, @username or Rabta ID (someone who is not a contact yet is found on the
  * server), the people you talk to most first, then everyone A–Z. Chosen people sit as removable chips on top.
- * Used by New group and by the status audience ("except…", "only share with…").
+ * Used by New group, by the status audience ("except…", "only share with…") and, with [groups], by Forward.
  */
 class PeoplePicker(private val a: Activity, preselected: Collection<String> = emptyList(), private val max: Int = Int.MAX_VALUE,
-                   private val limitNote: String = "", private val changed: (Int) -> Unit = {}) {
-    private data class Person(val id: String, val name: String, val username: String, val recent: Long)
+                   private val limitNote: String = "", private val groups: Boolean = false, private val changed: (Int) -> Unit = {}) {
+    private data class Person(val id: String, val name: String, val username: String, val recent: Long, val group: Boolean = false)
     private fun dp(n: Int) = RabtaUi.dp(a, n)
     private val handler = Handler(Looper.getMainLooper())
     private var people: List<Person> = emptyList()
@@ -79,8 +79,9 @@ class PeoplePicker(private val a: Activity, preselected: Collection<String> = em
                 val lastChat = chats.associate { it.peerId to it.lastTime }
                 val fromContacts = db.contacts().map { Person(it.peerId, it.shownName, it.username, lastChat[it.peerId] ?: 0L) }
                 val known = fromContacts.map { it.id }.toSet()
+                val groupChats = if (groups) db.conversations().filter { it.isGroup }.map { Person(it.peerId, it.shownName, "", it.lastTime, true) } else emptyList()
                 (fromContacts + chats.filter { it.peerId !in known }.map { Person(it.peerId, it.shownName, "", it.lastTime) })
-                    .filter { !People.isSelf(it.id) && !Privacy.blocked(a, it.id) }
+                    .filter { !People.isSelf(it.id) && !Privacy.blocked(a, it.id) } + groupChats
             }
             a.runOnUiThread {
                 if (a.isDestroyed) return@runOnUiThread
@@ -122,7 +123,7 @@ class PeoplePicker(private val a: Activity, preselected: Collection<String> = em
         addView(People.avatar(a, p.id, p.name, dp(46)), LinearLayout.LayoutParams(dp(46), dp(46)))
         val texts = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), 0, dp(8), 0) }
         texts.addView(RabtaUi.text(a, p.name, 16f, true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
-        texts.addView(RabtaUi.text(a, if (p.username.isNotBlank()) "@${p.username}" else "Rabta contact", 13f, color = AppTheme.sub(a)).apply { maxLines = 1 })
+        texts.addView(RabtaUi.text(a, when { p.group -> L.t(a, "Group"); p.username.isNotBlank() -> "@${p.username}"; else -> "Rabta contact" }, 13f, color = AppTheme.sub(a)).apply { maxLines = 1 })
         addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
         val box = ImageView(a).apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO; scaleType = ImageView.ScaleType.CENTER }
         boxes.getOrPut(p.id) { mutableListOf() }.add(box)
@@ -193,7 +194,12 @@ class PeoplePicker(private val a: Activity, preselected: Collection<String> = em
         /**
          * Full-screen chooser for people, e.g. who is left out of (or let into) a status. [done] gets the chosen IDs.
          */
-        fun dialog(a: Activity, title: String, preselected: Collection<String>, done: (List<String>) -> Unit) {
+        fun dialog(a: Activity, title: String, preselected: Collection<String>, done: (List<String>) -> Unit) =
+            pick(a, title, preselected) { done(it.keys.toList()) }
+
+        /** The same chooser, also offering group chats when [groups]; [done] gets the chosen IDs with their names, in order. */
+        fun pick(a: Activity, title: String, preselected: Collection<String> = emptyList(), groups: Boolean = false, max: Int = Int.MAX_VALUE,
+                 limitNote: String = "", icon: String = "check", label: String = "Done", done: (LinkedHashMap<String, String>) -> Unit) {
             val d = Dialog(a, android.R.style.Theme_DeviceDefault_NoActionBar)
             fun dp(n: Int) = RabtaUi.dp(a, n)
             val root = FrameLayout(a).apply { setBackgroundColor(AppTheme.bg(a)) }
@@ -208,12 +214,12 @@ class PeoplePicker(private val a: Activity, preselected: Collection<String> = em
             titles.addView(count)
             head.addView(titles, LinearLayout.LayoutParams(0, -2, 1f))
             column.addView(head)
-            val picker = PeoplePicker(a, preselected) { n -> count.text = if (n == 0) L.t(a, "No one selected") else "$n ${L.t(a, "selected")}" }
+            val picker = PeoplePicker(a, preselected, max, limitNote, groups) { n -> count.text = if (n == 0) L.t(a, "No one selected") else "$n ${L.t(a, "selected")}" }
             column.addView(picker.view, LinearLayout.LayoutParams(-1, 0, 1f))
             root.addView(column, FrameLayout.LayoutParams(-1, -1))
-            root.addView(UiIcons.image(a, "check", AppTheme.onPrimary(a), 28, L.t(a, "Done")).apply {
+            root.addView(UiIcons.image(a, icon, AppTheme.onPrimary(a), 28, L.t(a, label)).apply {
                 isFocusable = true; elevation = dp(6).toFloat(); background = RabtaUi.ripple(a, AppTheme.primary(a), 999)
-                setOnClickListener { d.dismiss(); done(picker.selected.keys.toList()) }
+                setOnClickListener { d.dismiss(); done(LinkedHashMap(picker.selected)) }
             }, FrameLayout.LayoutParams(dp(60), dp(60), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(20), dp(24)) })
             d.setContentView(root)
             d.window?.apply { setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT); setBackgroundDrawable(android.graphics.drawable.ColorDrawable(AppTheme.bg(a))) }

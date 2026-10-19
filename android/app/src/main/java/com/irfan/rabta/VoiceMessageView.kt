@@ -116,6 +116,21 @@ class VoiceMessageView(context:Context,private val body:String,private val sende
     companion object {
         /** One background reader for every voice note on screen, oldest request first. */
         private val prepWorker=java.util.concurrent.Executors.newSingleThreadExecutor()
+        /** The note playing now: starting another pauses it, as in WhatsApp. */
+        private var playing:java.lang.ref.WeakReference<VoiceMessageView>?=null
+        /** Something else is about to play (a video): the note playing pauses. */
+        fun pauseAll() { playing?.get()?.yieldTo() }
+    }
+    /** This note is about to play: the one playing (or still loading) stops for it. */
+    private fun claim() {
+        val other=playing?.get()
+        if(other!=null&&other!==this) other.yieldTo()
+        playing=java.lang.ref.WeakReference(this)
+    }
+    private fun yieldTo() {
+        val p=player
+        if(prepared&&p!=null&&p.isPlaying) { p.pause();removeCallbacks(tick);icon("play","Resume voice message") }
+        else if(loading) stop()
     }
     private fun icon(name:String,label:String) { UiIcons.set(play,name,AppTheme.accent(context),30,label) }
     private fun toggle() {
@@ -123,9 +138,10 @@ class VoiceMessageView(context:Context,private val body:String,private val sende
         val current=player
         if(prepared&&current!=null) {
             if(current.isPlaying) { current.pause();removeCallbacks(tick);icon("play","Resume voice message") }
-            else { current.start();icon("pause","Pause voice message");post(tick) }
+            else { claim();current.start();icon("pause","Pause voice message");post(tick) }
             return
         }
+        claim()
         loading=true;time.text="Loading…";play.isEnabled=false
         val version=++generation
         val ready=temporary
@@ -155,6 +171,7 @@ class VoiceMessageView(context:Context,private val body:String,private val sende
     }
     private fun failed() { stop();time.text="Audio unavailable · Tap to retry" }
     fun stop() {
+        if(playing?.get()===this) playing=null
         generation++;removeCallbacks(tick);loading=false;prepared=false
         player?.let { runCatching { it.release() } };player=null
         temporary?.delete();temporary=null
