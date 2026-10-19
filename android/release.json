@@ -1,4 +1,4 @@
 {
   "minVersionCode": 0,
-  "notes": "Opening Rabta connects faster: a connection that dropped while Rabta was closed is replaced within seconds, and a quick reconnect no longer shows \"Connecting to server\".\nRabta now asks once to keep running in the background. Tap Allow so messages and calls reach you while it is closed."
+  "notes": "Messages and calls now reach you even when Rabta is closed or stopped by your phone: Rabta's server wakes it through Google's push service, like WhatsApp. No message text goes through Google.\nOpening Rabta connects faster, and Rabta asks once to keep running in the background. Tap Allow."
 }

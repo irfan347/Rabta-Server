@@ -69,6 +69,8 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("com.google.android.gms:play-services-nearby:19.3.0")
+    // Wake pushes while Rabta is closed (see Push.kt); set up from res/values/firebase.xml, no Gradle plugin.
+    implementation("com.google.firebase:firebase-messaging:24.0.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.github.webrtc-sdk:android:114.5735.07")
 }
