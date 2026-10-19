@@ -93,18 +93,20 @@ object ChatNotifications {
         val b = Notification.Builder(c, MessageService.MSG_CHANNEL).setSmallIcon(R.drawable.ic_stat_rabta)
             .setContentIntent(PendingIntent.getActivity(c, id(convId), chat(c, convId, title, isGroup), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
             .setAutoCancel(true).setCategory(Notification.CATEGORY_MESSAGE).setShowWhen(true).setWhen(lines.last().at)
+        // Shown with your own names for people; the chat itself keeps their real name ([title]).
+        val shown = if (isGroup) title else Names.of(c, convId, title)
         when {
-            Privacy.hidePreviews(c) -> b.setContentTitle(title).setContentText(if (lines.size > 1) "${lines.size} new messages" else "New message")
+            Privacy.hidePreviews(c) -> b.setContentTitle(shown).setContentText(if (lines.size > 1) "${lines.size} new messages" else "New message")
             Build.VERSION.SDK_INT >= 28 -> b.setStyle(Notification.MessagingStyle(Person.Builder().setName("You").setKey(Session.id).build()).apply {
                 if (isGroup) { conversationTitle = title; isGroupConversation = true }
-                lines.forEach { addMessage(Notification.MessagingStyle.Message(it.text, it.at, Person.Builder().setName(it.fromName).setKey(it.fromId).setIcon(photo(it.fromId)).build())) }
+                lines.forEach { addMessage(Notification.MessagingStyle.Message(it.text, it.at, Person.Builder().setName(Names.of(c, it.fromId, it.fromName)).setKey(it.fromId).setIcon(photo(it.fromId)).build())) }
             })
-            else -> b.setContentTitle(title).setContentText(lines.last().text)
-                .setStyle(Notification.InboxStyle().also { style -> lines.forEach { style.addLine(if (isGroup) "${it.fromName}: ${it.text}" else it.text) } })
+            else -> b.setContentTitle(shown).setContentText(lines.last().text)
+                .setStyle(Notification.InboxStyle().also { style -> lines.forEach { style.addLine(if (isGroup) "${Names.of(c, it.fromId, it.fromName)}: ${it.text}" else it.text) } })
         }
         if (!isGroup) photo(fromId)?.let { b.setLargeIcon(it) }
         b.addAction(button(c, "Reply", action(c, REPLY, convId, title, isGroup, mutable = true))
-            .addRemoteInput(RemoteInput.Builder(KEY_REPLY).setLabel("Reply to $title").build())
+            .addRemoteInput(RemoteInput.Builder(KEY_REPLY).setLabel("Reply to $shown").build())
             .apply { if (Build.VERSION.SDK_INT >= 28) setSemanticAction(Notification.Action.SEMANTIC_ACTION_REPLY) }.build())
         b.addAction(button(c, "Mark as read", action(c, READ, convId, title, isGroup))
             .apply { if (Build.VERSION.SDK_INT >= 28) setSemanticAction(Notification.Action.SEMANTIC_ACTION_MARK_AS_READ) }.build())
@@ -127,10 +129,16 @@ object ChatNotifications {
 
     /** Like WhatsApp's notification button: no popups from this chat for 8 hours. */
     fun mute(c: Context, convId: String) {
-        Privacy.prefs(c).edit().putLong("mute_$convId", System.currentTimeMillis() + MUTE_MS).apply()
-        clear(c, convId)
+        muteFor(c, convId, MUTE_MS)
         Toast.makeText(c, "Muted for 8 hours", Toast.LENGTH_SHORT).show()
     }
+    /** No popups from this chat for [ms] (the chats list offers 8 hours, a week or always). */
+    fun muteFor(c: Context, convId: String, ms: Long) {
+        val until = if (ms >= Long.MAX_VALUE / 4) Long.MAX_VALUE / 2 else System.currentTimeMillis() + ms
+        Privacy.prefs(c).edit().putLong("mute_$convId", until).apply()
+        clear(c, convId)
+    }
+    fun unmute(c: Context, convId: String) = Privacy.prefs(c).edit().remove("mute_$convId").apply()
 
     /** Sends a reply typed in the notification through the usual outbox, then treats the chat as read. */
     fun reply(c: Context, convId: String, title: String, isGroup: Boolean, text: String) {
@@ -148,7 +156,7 @@ object ChatNotifications {
         val callBack = PendingIntent.getActivity(c, missedId(peerId), chat(c, peerId, peerName, false).setData(Uri.parse("rabta://call/$kind/$peerId")).putExtra("requestedCallKind", kind),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val b = Notification.Builder(c, MISSED_CHANNEL).setSmallIcon(R.drawable.ic_stat_rabta)
-            .setContentTitle(peerName).setContentText(if (video) "Missed video call" else "Missed voice call")
+            .setContentTitle(Names.of(c, peerId, peerName)).setContentText(if (video) "Missed video call" else "Missed voice call")
             .setShowWhen(true).setWhen(System.currentTimeMillis()).setAutoCancel(true).setContentIntent(open)
             .addAction(button(c, "Call back", callBack).build()).addAction(button(c, "Message", open).build())
         if (Build.VERSION.SDK_INT >= 30) b.setCategory(Notification.CATEGORY_MISSED_CALL)

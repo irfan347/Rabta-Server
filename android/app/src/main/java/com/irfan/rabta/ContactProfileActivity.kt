@@ -31,6 +31,9 @@ class ContactProfileActivity : ThemedActivity() {
     private lateinit var presence: TextView
     private lateinit var mediaBox: LinearLayout
     private lateinit var safety: LinearLayout
+    private lateinit var nameTv: TextView
+    private lateinit var theirName: TextView
+    private lateinit var naming: LinearLayout
     private var showAll = false
     private fun dp(n: Int) = RabtaUi.dp(this, n)
 
@@ -64,7 +67,11 @@ class ContactProfileActivity : ThemedActivity() {
             }, FrameLayout.LayoutParams(-1, -1))
             avatar.setOnClickListener { startActivity(Intent(this, ProfilePhotoActivity::class.java).putExtra("peerId", peerId).putExtra("peerName", peerName)) }
         }
-        body.addView(RabtaUi.text(this, peerName, 26f, true).apply { gravity = Gravity.CENTER; setPadding(0, dp(14), 0, 0); maxLines = 2 })
+        nameTv = RabtaUi.text(this, peerName, 26f, true).apply { gravity = Gravity.CENTER; setPadding(0, dp(14), 0, 0); maxLines = 2 }
+        body.addView(nameTv)
+        // With your own name for them, their Rabta name stays visible underneath.
+        theirName = RabtaUi.text(this, "", 14f, color = AppTheme.sub(this)).apply { gravity = Gravity.CENTER; visibility = View.GONE }
+        body.addView(theirName)
         username = RabtaUi.text(this, "", 15f, color = AppTheme.sub(this)).apply { gravity = Gravity.CENTER; visibility = View.GONE }
         body.addView(username)
         presence = RabtaUi.text(this, "", 13f, color = AppTheme.sub(this)).apply { gravity = Gravity.CENTER; visibility = View.GONE; setPadding(0, dp(2), 0, 0) }
@@ -85,6 +92,8 @@ class ContactProfileActivity : ThemedActivity() {
         actions.addView(tile("search", "Search") { act("search") }, LinearLayout.LayoutParams(0, dp(72), 1f))
         body.addView(actions, LinearLayout.LayoutParams(-1, -2))
 
+        naming = group(); body.addView(naming, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
+        renderName()
         mediaBox = group(); body.addView(mediaBox, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
         safety = group(); body.addView(safety, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
         val danger = group(); body.addView(danger, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
@@ -94,6 +103,16 @@ class ContactProfileActivity : ThemedActivity() {
         row(danger, "report", AppTheme.error(this), "Report $peerName", "Tell Rabta about a problem with this contact", AppTheme.error(this)) { MessageActions.report(this, peerId) }
         renderBlock(danger)
         loadMedia(); loadSafety(); loadAccount()
+    }
+
+    /** Your own name for them (only on this phone), or theirs when you gave none. */
+    private fun renderName() {
+        val nickname = Names.nickname(this, peerId)
+        nameTv.text = nickname.ifBlank { peerName }
+        theirName.text = "~ $peerName ${L.t(this, "on Rabta")}"; theirName.visibility = if (nickname.isBlank() || nickname == peerName) View.GONE else View.VISIBLE
+        naming.removeAllViews()
+        row(naming, "edit", AppTheme.accent(this), if (nickname.isBlank()) L.t(this, "Add your name for them") else "${L.t(this, "Your name for them")}: $nickname",
+            L.t(this, "Only you see it, everywhere in Rabta")) { People.editName(this, peerId, peerName) { renderName() } }
     }
 
     /** Calls and search happen in the chat: hand the request back (or open the chat when started elsewhere). */

@@ -97,7 +97,16 @@ class ContactsTest {
         }
     }
 
-    /** The request: people you connect with are kept in Contacts; a chat can be cleared or deleted and they stay there. */
+    private fun press(description: String) {
+        var target: View? = null
+        waitUi("'$description' is shown") { target = windows().lastOrNull { it.isShown && it.contentDescription?.toString() == description }; target != null }
+        ui { target!!.performClick() }
+    }
+
+    /**
+     * People you connect with are kept as contacts. Holding a chat selects it; More › Clear chat empties it and Delete
+     * removes it, and the person stays. Contacts live behind "+" (Select contact), no longer in the chat filters.
+     */
     @Test fun contactsKeepPeopleWhoseChatIsClearedOrDeleted() = fixture { db ->
         val friend = "CT1100000002"; val other = "CT1100000003"; val now = System.currentTimeMillis()
         db.saveMessage("CTMSG0000001", friend, friend, "Hello there", now - 60_000, false, "received")
@@ -108,28 +117,24 @@ class ContactsTest {
         try {
             waitUi("The chat is listed") { shown("Saved friend") }
             assertFalse("Chats hold chats only", shown("Only contact"))
+            assertTrue("Contacts are no longer a chat filter", windows().none { it.contentDescription == "Contacts filter" })
 
-            ui { windows().first { it.contentDescription == "Contacts filter" }.performClick() }
-            waitUi("Contacts lists everyone connected") { shown("Saved friend") && shown("Only contact") && shown("@only_contact") && shown("Add contact") }
-            ui { windows().first { it.contentDescription == "All filter" }.performClick() }
-            // The list reloads in the background; until then the contact row is on screen, and holding it opens the contact's sheet.
-            waitUi("Chats are listed again") { shown("Saved friend") && !shown("Add contact") && !shown("Only contact") }
-
-            // Clear chat: the messages go, the chat stays.
-            hold("Saved friend"); tap("Clear chat"); tap("Clear chat", exact = true)
+            // Clear chat: hold, More, Clear chat. The messages go, the chat stays.
+            hold("Saved friend"); press("More"); tap("Clear chat"); tap("Clear", exact = true)
             waitUi("Clearing empties the chat but keeps it listed") { db.messages(friend).isEmpty() && shown("Saved friend") && shown("No messages yet") }
 
-            // Delete chat: the chat goes, the person stays in Contacts.
-            hold("Saved friend"); tap("Delete chat"); tap("Delete chat", exact = true)
+            // Delete: hold, Delete. The chat goes, the person stays a contact.
+            hold("Saved friend"); press("Delete"); tap("Delete", exact = true)
             waitUi("Deleting removes the chat") { db.conversations().none { it.peerId == friend } && !shown("Saved friend") }
             assertTrue("The person stays a contact", db.contacts().any { it.peerId == friend })
-            ui { windows().first { it.contentDescription == "Contacts filter" }.performClick() }
-            waitUi("Still in Contacts") { shown("Saved friend") && shown("Only contact") }
+        } finally { ui { list.finish() } }
 
-            // Delete contact: gone from Contacts.
+        val pick = inst.startActivitySync(Intent(ctx, SelectContactActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        try {
+            waitUi("Select contact lists everyone connected") { shown("Saved friend") && shown("Only contact") && shown("New group") && shown("New contact") && shown("2 contacts") }
             hold("Only contact"); tap("Delete contact"); tap("Delete", exact = true)
             waitUi("The deleted contact is gone") { db.contacts().none { it.peerId == other } && !shown("Only contact") && shown("Saved friend") }
-        } finally { ui { list.finish() } }
+        } finally { ui { pick.finish() } }
     }
 
     /** A contact you delete stays deleted while their chat goes on; a new chat with them saves them again. */

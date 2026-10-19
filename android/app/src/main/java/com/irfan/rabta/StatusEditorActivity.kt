@@ -134,7 +134,7 @@ class StatusEditorActivity : ThemedActivity() {
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() { if (::emoji.isInitialized && emoji.open) emoji.hide() else super.onBackPressed() }
 
-    private fun showAudience() { audiencePill.text = StatusPost.audienceLabel(audience); audiencePill.contentDescription = "${audiencePill.text}. Change who can see" }
+    private fun showAudience() { audiencePill.text = StatusPost.audienceLabel(this, audience); audiencePill.contentDescription = "${audiencePill.text}. Change who can see" }
 
     private fun roundIcon(icon: String, label: String, run: () -> Unit) = UiIcons.image(this, icon, Color.WHITE, 22, label).apply {
         isFocusable = true; background = RabtaUi.ripple(this@StatusEditorActivity, 0x66000000, 999); setOnClickListener { run() }
@@ -256,7 +256,7 @@ class StatusEditorActivity : ThemedActivity() {
 
     private fun send() {
         if (sending) return
-        if (audience.isEmpty()) { StatusPost.chooseAudience(this, audience) { audience = it; showAudience(); if (it.isNotEmpty()) send() }; return }
+        if (audience.isEmpty()) { StatusPost.chooseAudience(this, audience, "Share") { audience = it; showAudience(); if (it.isNotEmpty()) send() }; return }
         sending = true
         val text = caption.text.toString().trim()
         if (kind == "video") {

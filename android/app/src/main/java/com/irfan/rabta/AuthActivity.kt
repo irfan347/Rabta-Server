@@ -254,7 +254,11 @@ class AuthActivity : ThemedActivity() {
         statusText.text = ""; setLoading(true)
         WsClient.register(this, Config.SERVER, un, pinField.text.toString().trim(), name) { ok, msg, data ->
             setLoading(false)
-            if (ok && data != null) saveAndGo(data) else { statusText.text = msg; statusText.setTextColor(AppTheme.error(this)) }
+            if (ok && data != null) { saveAndGo(data); return@register }
+            // One account per phone: this phone already has one, so sign-in opens with its username filled in.
+            val existing = Regex("\\(@([a-z0-9_]{3,20})\\)").find(msg)?.groupValues?.get(1)
+            if (existing != null) { setMode(false); usernameField.setText(existing); pinField.setText("") }
+            statusText.text = msg; statusText.setTextColor(AppTheme.error(this))
         }
     }
 

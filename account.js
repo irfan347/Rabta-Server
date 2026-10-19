@@ -17,6 +17,7 @@ const RECOVERY_ALPHABET = 'ABCDEFGHJKMNPQRSTVWXYZ23456789';
 
 module.exports = function install({ app, users, getPool, authToken, makeToken, checkPin, sendTo, closeDevice }) {
   const devices = new Map();   // userId -> Map(deviceId -> {id,key,name,created,seen})
+  const phones = new Map();    // phone hash -> Map(userId -> last used)
   const reserved = new Map();  // old username -> {user, until}
   const requests = new Map();  // requestId -> {id,user,device,expires,status}
   const usedProofs = new Map(); // signature -> expiry, so a signed proof is accepted once
@@ -38,6 +39,7 @@ module.exports = function install({ app, users, getPool, authToken, makeToken, c
       ALTER TABLE ru_users ADD COLUMN IF NOT EXISTS recovery_hash TEXT;
       CREATE TABLE IF NOT EXISTS ru_devices(user_id TEXT NOT NULL, device_id TEXT NOT NULL, public_key TEXT NOT NULL, name TEXT, created_at BIGINT, last_seen BIGINT, PRIMARY KEY(user_id, device_id));
       CREATE TABLE IF NOT EXISTS ru_reserved(username TEXT PRIMARY KEY, user_id TEXT NOT NULL, until BIGINT NOT NULL);
+      CREATE TABLE IF NOT EXISTS ru_phones(phone TEXT NOT NULL, user_id TEXT NOT NULL, created_at BIGINT, last_seen BIGINT, PRIMARY KEY(phone, user_id));
     `);
     for (const r of (await db.query('SELECT id,username_changed_at,recovery_hash FROM ru_users')).rows) {
       const u = users.get(r.id); if (u) { u.username_changed_at = r.username_changed_at == null ? null : Number(r.username_changed_at); u.recovery_hash = r.recovery_hash; }
@@ -47,6 +49,33 @@ module.exports = function install({ app, users, getPool, authToken, makeToken, c
       devices.get(r.user_id).set(r.device_id, { id: r.device_id, key: r.public_key, name: r.name, created: Number(r.created_at), seen: Number(r.last_seen) });
     }
     for (const r of (await db.query('SELECT * FROM ru_reserved WHERE until > $1', [Date.now()])).rows) reserved.set(r.username, { user: r.user_id, until: Number(r.until) });
+    for (const r of (await db.query('SELECT * FROM ru_phones')).rows) {
+      if (!phones.has(r.phone)) phones.set(r.phone, new Map());
+      phones.get(r.phone).set(r.user_id, Number(r.last_seen) || 0);
+    }
+  }
+
+  // ---------- one account per phone ----------
+  // The app sends a hash of its Android ID, which stays the same for Rabta on that phone, also across reinstalls
+  // (a factory reset changes it). A phone that already has an account cannot create another; signing in to any
+  // account stays open. Accounts made before this rule learn their phone when the updated app connects.
+  const PHONE_RE = /^[a-f0-9]{64}$/;
+  const phoneOf = v => (typeof v === 'string' && PHONE_RE.test(v)) ? v : null;
+  /** Remembers that [userId] is used on this phone; memory first, so a second sign-up at once is refused too. */
+  async function linkPhone(raw, userId) {
+    const phone = phoneOf(raw); if (!phone || !users.has(userId)) return false;
+    if (!phones.has(phone)) phones.set(phone, new Map());
+    const now = Date.now(); phones.get(phone).set(userId, now);
+    const db = getPool();
+    if (db) await db.query('INSERT INTO ru_phones(phone,user_id,created_at,last_seen) VALUES($1,$2,$3,$3) ON CONFLICT(phone,user_id) DO UPDATE SET last_seen=$3', [phone, userId, now]);
+    return true;
+  }
+  function unlinkPhone(raw, userId) { const phone = phoneOf(raw); if (phone) phones.get(phone)?.delete(userId); }
+  /** The account this phone already has (the one used most recently), or null. */
+  function phoneAccount(raw) {
+    const phone = phoneOf(raw); if (!phone) return null;
+    const used = [...(phones.get(phone) || new Map())].filter(([id]) => users.has(id)).sort((a, b) => b[1] - a[1]);
+    return used.length ? users.get(used[0][0]) : null;
   }
 
   // ---------- usernames and display names ----------
@@ -97,6 +126,13 @@ module.exports = function install({ app, users, getPool, authToken, makeToken, c
     reserved.set(old, { user: u.id, until: now + USERNAME_RESERVE }); reserved.delete(name);
     u.username = name; u.username_changed_at = now;
     res.json({ username: name, nextUsernameChangeAt: now + USERNAME_COOLDOWN });
+  }));
+
+  // An already signed-in app tells the server which phone it is on (once per account and phone).
+  app.post('/api/me/phone', route(async (req, res) => {
+    const auth = authToken(req); ensure(auth, 401, 'Login required');
+    ensure(phoneOf(req.body?.phone), 400, 'Invalid phone');
+    await linkPhone(req.body.phone, auth.id); res.json({ ok: true });
   }));
 
   app.post('/api/me/name', route(async (req, res) => {
@@ -264,5 +300,5 @@ module.exports = function install({ app, users, getPool, authToken, makeToken, c
   const pendingFor = userId => [...requests.values()].filter(r => r.user === userId && r.status === 'pending' && r.expires > Date.now())
     .map(r => ({ type: 'device_request', request: { id: r.id, name: r.device.name, at: Date.now(), expires: r.expires } }));
 
-  return { init, usernameStatus, cleanName, signIn, registered, tokenAllowed, pendingFor };
+  return { init, usernameStatus, cleanName, signIn, registered, tokenAllowed, pendingFor, linkPhone, unlinkPhone, phoneAccount };
 };

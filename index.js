@@ -95,22 +95,28 @@ app.post('/api/register', async (req, res) => {
   const name = account.cleanName(req.body?.name || username) || username;
   if (!UN_RE.test(username)) return res.status(400).json({ error: 'Username 3-20 letters/numbers only' });
   if (!/^\d{4,8}$/.test(pin)) return res.status(400).json({ error: 'PIN must be 4-8 digits' });
+  // One account per phone: this phone already has one, so it signs in to that instead.
+  const owner = account.phoneAccount(req.body?.phone);
+  if (owner) return res.status(409).json({ error: `This phone already has a Rabta account (@${owner.username}). Sign in to it instead.`, username: owner.username });
   const status = account.usernameStatus(username);
   if (!status.available) return res.status(409).json({ error: status.error });
   const id = crypto.randomBytes(6).toString('hex').toUpperCase();
   const user = { id, username, pass_hash: hashPin(pin), name, created_at: Date.now(), last_seen: Date.now() };
   memUsers.set(id, user); // reserves the username while the insert is in flight
+  // ...and the phone, in memory at once; saving it never fails the sign-up.
+  const phoneSaved = account.linkPhone(req.body?.phone, id).catch(e => console.error('Phone link failed:', e.message));
   if (pool) {
     try {
       await pool.query('INSERT INTO ru_users(id,username,pass_hash,name,created_at,last_seen) VALUES($1,$2,$3,$4,$5,$6)',
         [id, username, user.pass_hash, name, user.created_at, user.last_seen]);
     } catch (e) {
-      memUsers.delete(id);
+      memUsers.delete(id); account.unlinkPhone(req.body?.phone, id);
       if (e.code === '23505') return res.status(409).json({ error: 'Username already used' });
       console.error('Account storage failed:', e.message);
       return res.status(503).json({ error: 'Account could not be saved, please try again' });
     }
   }
+  await phoneSaved;
   try { res.json(await account.registered(user, req.body?.device)); }
   catch (e) { console.error('Device registration failed:', e.message); res.json({ id, username, name, token: makeToken(id) }); }
 });
@@ -130,6 +136,7 @@ app.post('/api/login', async (req, res) => {
   }
   try {
     const [status, body, failed] = await account.signIn(user, req.body);
+    if (status === 200) await account.linkPhone(req.body?.phone, user.id).catch(e => console.error('Phone link failed:', e.message));
     if (failed) { const cur = (f && f.until > Date.now()) ? f : { count: 0, until: Date.now() + 15 * 60 * 1000 }; cur.count++; loginFails.set(username, cur); }
     else if (status === 200) loginFails.delete(username);
     res.status(status).json(body);

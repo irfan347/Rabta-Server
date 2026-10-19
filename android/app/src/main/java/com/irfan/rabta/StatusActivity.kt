@@ -141,10 +141,21 @@ class StatusActivity : ThemedActivity() {
         background=RabtaUi.shape(this@StatusActivity,AppTheme.surface(this@StatusActivity),20,AppTheme.line(this@StatusActivity));clipToOutline=true;isFocusable=true
         layoutParams=LinearLayout.LayoutParams(dp(112),dp(188)).apply {marginEnd=dp(10)}
     }
-    private fun nameLabel(text:String)=RabtaUi.text(this,text,13f,true,android.graphics.Color.WHITE).apply {
-        maxLines=2;ellipsize=android.text.TextUtils.TruncateAt.END
-        setPadding(dp(10),dp(24),dp(8),dp(10))
-        background=android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.BOTTOM_TOP,intArrayOf(0xCC000000.toInt(),0x00000000))
+    /** The name on one line over a soft shade, and under it how long ago the latest update went up. */
+    private fun nameLabel(text:String,time:Long=0L)=RabtaUi.text(this,"",13f,true,android.graphics.Color.WHITE).apply {
+        maxLines=2;setPadding(dp(10),dp(28),dp(8),dp(10))
+        background=android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.BOTTOM_TOP,intArrayOf(0xD9000000.toInt(),0x00000000))
+        val name=android.text.TextUtils.ellipsize(text,paint,dp(92).toFloat(),android.text.TextUtils.TruncateAt.END)
+        this.text=if(time<=0) name else android.text.SpannableStringBuilder(name).append("\n").append(ago(time),
+            android.text.style.AbsoluteSizeSpan(11,true),android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE).also {
+            it.setSpan(android.text.style.ForegroundColorSpan(0xCCFFFFFF.toInt()),name.length+1,it.length,android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            it.setSpan(android.text.style.TypefaceSpan("sans-serif"),name.length+1,it.length,android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        contentDescription=if(time<=0) text else "$text, ${ago(time)}"
+    }
+    private fun ago(time:Long):String {
+        val minutes=((System.currentTimeMillis()-time)/60000).coerceAtLeast(0)
+        return when { minutes<1 -> L.t(this,"Just now");minutes<60 -> "${minutes}m ${L.t(this,"ago")}";else -> "${minutes/60}h ${L.t(this,"ago")}" }
     }
     private fun plusBadge(size:Int)=TextView(this).apply {
         UiIcons.set(this,"plus",AppTheme.onPrimary(this@StatusActivity),size*2/3,"Add");gravity=Gravity.CENTER;importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -210,14 +221,14 @@ class StatusActivity : ThemedActivity() {
 
     private fun statusCard(list:List<JSONObject>,seen:Set<String>,open:()->Unit)=card().apply {
         val latest=list.last()
-        val name=latest.optString("name").ifBlank {"Rabta contact"}
+        val name=Names.of(this@StatusActivity,latest.optString("owner"),latest.optString("name").ifBlank {"Rabta contact"})
         tag="status:${latest.optString("id")}";contentDescription="View $name"
         setOnClickListener {open()}
         addView(preview(latest,open),FrameLayout.LayoutParams(-1,-1))
         val ring=StatusRingView(this@StatusActivity).apply {total=list.size;this.seen=list.count {it.optString("id") in seen}}
         ring.addView(StatusPost.avatar(this@StatusActivity,latest.optString("owner"),name,36),FrameLayout.LayoutParams(-1,-1))
         addView(ring,FrameLayout.LayoutParams(dp(44),dp(44)).apply {leftMargin=dp(6);topMargin=dp(6)})
-        addView(nameLabel(name),FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM))
+        addView(nameLabel(name,latest.optLong("created")),FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM))
     }
 
     private fun manage(status: JSONObject) {

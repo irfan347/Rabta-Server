@@ -67,6 +67,16 @@ class PremiumUiTest {
         }while(System.currentTimeMillis()<until)
         fail("Real UI action unavailable: $value")
     }
+    /** Clicks the control described as [description] (an icon button has no text) in the active window. */
+    private fun press(description:String) {
+        val until=System.currentTimeMillis()+8000
+        do {
+            val node=inst.uiAutomation.rootInActiveWindow?.findAccessibilityNodeInfosByText(description)?.firstOrNull {it.contentDescription?.toString()==description}
+            if(node?.isClickable==true&&node.performAction(AccessibilityNodeInfo.ACTION_CLICK))return
+            Thread.sleep(80)
+        }while(System.currentTimeMillis()<until)
+        fail("Real UI action unavailable: $description")
+    }
     private fun setDialogText(value:String) {
         fun editor(n:AccessibilityNodeInfo):AccessibilityNodeInfo? {
             if(n.className?.toString()==EditText::class.java.name)return n
@@ -217,7 +227,7 @@ class PremiumUiTest {
     }
     @Test fun statusPreviewsViewerAndCreationUseAuthenticatedApiAndSelectedAudience()=fixture {db,account ->
         val server=MockWebServer();val posted=AtomicReference<JSONObject>();val views=AtomicInteger();val files=AtomicInteger();val allow=AtomicBoolean(true)
-        val peer="AAAABBBBCCCC";db.upsertConversation(peer,"Ali","",1,false)
+        val peer="AAAABBBBCCCC";db.upsertConversation(peer,"Ali","",1,false);db.upsertConversation("DDDDEEEEFFFF","Sara","",2,false)
         val bitmap=Bitmap.createBitmap(24,24,Bitmap.Config.ARGB_8888).apply {eraseColor(0xFF35C9BC.toInt())}
         val output=java.io.ByteArrayOutputStream();bitmap.compress(Bitmap.CompressFormat.PNG,100,output);bitmap.recycle();val bytes=output.toByteArray()
         val hash=java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString(""){"%02x".format(it)}
@@ -258,7 +268,8 @@ class PremiumUiTest {
                 assertTrue("Emoji open in the keyboard's place",all(text.window.decorView).any {it is EmojiPanel&&it.isShown})
                 all(text.window.decorView).first {it.contentDescription=="Send status"}.performClick()
             }
-            click("Ali");click("Done")
+            // Who can see it: only Ali, chosen in the people picker; Sara is left out.
+            click("Only share with…");click("Ali");press("Done");click("Share")
             waitUi("Creation reaches real API") {posted.get()!=null}
             assertEquals("text",posted.get().getString("kind"));assertEquals("A real private moment",posted.get().getString("body"));assertEquals(listOf(peer),(0 until posted.get().getJSONArray("audience").length()).map {posted.get().getJSONArray("audience").getString(it)})
             assertTrue("Chosen colour is sent",Regex("#[0-9A-F]{6}").matches(posted.get().getString("bg")));assertEquals("serif",posted.get().getString("font"))

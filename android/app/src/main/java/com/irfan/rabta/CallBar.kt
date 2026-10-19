@@ -29,8 +29,8 @@ class CallBar(private val a: Activity, private val hiddenHere: () -> Boolean = {
 
     fun refresh() {
         val (icon, words) = when {
-            VoiceCall.active && !hiddenHere() -> "phone" to "${VoiceCall.peerName.ifBlank { "Voice call" }} · ${if (VoiceCall.connectedAt > 0) clock(VoiceCall.seconds()) else VoiceCall.status}"
-            VideoCall.active && !VideoCall.shown -> "video" to "${VideoCall.peerName.ifBlank { "Video call" }} · ${if (VideoCall.connectedAt > 0) clock(VideoCall.seconds()) else VideoCall.status}"
+            VoiceCall.active && !hiddenHere() -> "phone" to "${Names.of(a, VoiceCall.peerId, VoiceCall.peerName.ifBlank { "Voice call" })} · ${if (VoiceCall.connectedAt > 0) clock(VoiceCall.seconds()) else VoiceCall.status}"
+            VideoCall.active && !VideoCall.shown -> "video" to "${Names.of(a, VideoCall.peerId, VideoCall.peerName.ifBlank { "Video call" })} · ${if (VideoCall.connectedAt > 0) clock(VideoCall.seconds()) else VideoCall.status}"
             else -> null to ""
         }
         val showing = icon != null

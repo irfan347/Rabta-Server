@@ -111,6 +111,8 @@ object VideoCall : RabtaEvents.Listener {
         factory = f
         helper = SurfaceTextureHelper.create("CamThread", e.eglBaseContext)
         val source = f.createVideoSource(false); videoSource = source
+        // Filters and background blur work on the camera's frames before they are sent (see VideoEffects).
+        VideoEffects.reset(); source.setVideoProcessor(VideoEffects)
         val enumerator = Camera2Enumerator(ctx)
         val camId = enumerator.deviceNames.firstOrNull { enumerator.isFrontFacing(it) } ?: enumerator.deviceNames.firstOrNull()
         if (camId != null) camera = Camera2Capturer(ctx, camId, null).apply { initialize(helper, ctx, source.capturerObserver) }
@@ -314,6 +316,7 @@ object VideoCall : RabtaEvents.Listener {
         runCatching { camera?.dispose() }; camera = null
         runCatching { localVideo?.dispose() }; localVideo = null
         runCatching { localAudio?.dispose() }; localAudio = null
+        runCatching { videoSource?.setVideoProcessor(null) }; VideoEffects.reset()
         runCatching { videoSource?.dispose() }; videoSource = null
         runCatching { audioSource?.dispose() }; audioSource = null
         runCatching { helper?.dispose() }; helper = null

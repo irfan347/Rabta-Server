@@ -20,7 +20,8 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.Toast
 
-/** A photo that fits the screen and can be pinched, panned and double-tapped to zoom. */
+/** A photo that fits the screen and can be pinched, panned and double-tapped to zoom. Rabta's screens don't use AppCompat. */
+@android.annotation.SuppressLint("AppCompatCustomView")
 class ZoomImageView(c: Context) : ImageView(c) {
     private val base = Matrix()
     private val user = Matrix()
