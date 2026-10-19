@@ -58,6 +58,12 @@ object Attachments {
         return save(c,bytes,o.optString("name","attachment"),o.optString("mime","application/octet-stream"))
     }
     fun discard(c:Context,body:String) { runCatching { file(c,body).delete() } }
+    /** A file on this phone with exactly these bytes (e.g. restored from a backup), as a local body; null when there is none. */
+    fun find(c:Context,size:Long,sha256:String,name:String,mime:String):String? {
+        if(size !in 1..MAX_BYTES.toLong()||!Regex("[a-f0-9]{64}").matches(sha256))return null
+        val match=root(c).listFiles()?.firstOrNull { it.length()==size&&Regex("[a-f0-9-]{36}").matches(it.name)&&runCatching { hash(it.readBytes())==sha256 }.getOrDefault(false) } ?: return null
+        return JSONObject().put("v",1).put("local",match.name).put("name",safeName(name)).put("mime",mime.take(100)).put("size",size).put("sha256",sha256).toString()
+    }
     fun name(body:String)=runCatching { JSONObject(body).getString("name") }.getOrDefault("Attachment")
     fun details(body:String):String=runCatching { val n=JSONObject(body).getLong("size"); if(n>=1024*1024) "%.1f MB".format(n/1048576.0) else "${(n+1023)/1024} KB" }.getOrDefault("")
     fun open(a:Activity,body:String) {
