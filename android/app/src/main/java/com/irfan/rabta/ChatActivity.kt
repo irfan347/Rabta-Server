@@ -62,7 +62,6 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     private lateinit var replyBar:LinearLayout
     private lateinit var replyPreview:TextView
     private lateinit var offlineBanner:TextView
-    private val voiceViews=mutableListOf<VoiceMessageView>()
     private var draftReplyId:String?=null
     private var firstHistory=true
     private var scrollAfterSend=false
@@ -133,6 +132,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     private var resumed = false
     private val callWatcher = CallWatcher { syncCall() }
     private lateinit var callBar: CallBar
+    private lateinit var voiceBar: VoiceBar
     private var lastTypingSent = 0L
 
     private val statusTick = object : Runnable {
@@ -188,15 +188,16 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         super.onResume(); if (!::db.isInitialized) return
         openPeer = peerId; ChatNotifications.clear(this, peerId)
         uiHandler.post(statusTick); uiHandler.post(presenceTick); RabtaEvents.add(this)
-        resumed = true; VoiceCall.watch(callWatcher); callBar.start(); syncCall()
+        resumed = true; VoiceCall.watch(callWatcher); callBar.start(); voiceBar.start(); syncCall()
         titleTv.text = shownName   // e.g. after you named them in Contact info
         if (!firstHistory) loadHistory()   // e.g. a video call just ended: its bubble joins the chat
         Thread { try { db.clearUnread(peerId) } catch (_: Exception) {} }.start()
         if (!isGroup && !self) WsClient.sendRead(peerId, "all")
     }
     override fun onPause() {
-        voiceViews.forEach { it.stop() }; super.onPause(); openPeer = null; uiHandler.removeCallbacks(statusTick); uiHandler.removeCallbacks(presenceTick); if(recording) stopVoiceRecord(false)
-        resumed = false; if (::callBar.isInitialized) { VoiceCall.unwatch(callWatcher); callBar.stop(); uiHandler.removeCallbacks(callTick); earpiece(false) }
+        // A voice message playing goes on, as in WhatsApp; the bar in the chats shows it.
+        super.onPause(); openPeer = null; uiHandler.removeCallbacks(statusTick); uiHandler.removeCallbacks(presenceTick); if(recording) stopVoiceRecord(false)
+        resumed = false; if (::callBar.isInitialized) { VoiceCall.unwatch(callWatcher); callBar.stop(); voiceBar.stop(); uiHandler.removeCallbacks(callTick); earpiece(false) }
     }
     override fun onDestroy() {
         // The call is not this screen's: it goes on, and the green bar or its notice leads back to it.
@@ -316,6 +317,9 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         root.addView(selectionBar)
         callBar=CallBar(this,{ callShown && VoiceCall.with(peerId) }) { if(VoiceCall.with(peerId)) { showCallScreen();true } else false }
         root.addView(callBar.view,LinearLayout.LayoutParams(-1,-2))
+        // A voice message from another chat still playing; one from this chat shows in its own bubble.
+        voiceBar=VoiceBar(this) { peerId }
+        root.addView(voiceBar.view,LinearLayout.LayoutParams(-1,-2))
         // One slim line while offline (tap for the full connection details), not a block of text.
         offlineBanner=RabtaUi.text(this,"",12f,color=AppTheme.sub(this)).apply {
             minHeight=dp(36);gravity=Gravity.CENTER;setPadding(dp(16),dp(6),dp(16),dp(6));maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END
@@ -601,7 +605,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
                 val unchanged=result.getOrNull()?.let { it==renderedHistory&&query==renderedQuery&&calls==renderedCalls }?:false
                 if(unchanged) { if(forceScroll)scrollBottom(true);return@post }
                 result.getOrNull()?.let { items -> if(query==renderedQuery&&calls==renderedCalls&&update(items,forceScroll||atBottom)) return@post }
-                voiceViews.forEach { it.stop() };voiceViews.clear();chatBox.removeAllViews();shownMessages.clear();messageRows.clear();forwardButtons.clear();footers.clear();continuedOf.clear()
+                chatBox.removeAllViews();shownMessages.clear();messageRows.clear();forwardButtons.clear();footers.clear();continuedOf.clear()
                 result.onFailure {
                     renderedHistory=null;renderedQuery=null;renderedCalls=null;selectedIds.clear();updateSelection()
                     chatBox.addView(RabtaUi.empty(this,"chats","Could not load messages","Your saved conversation is still on this phone.","Retry") { loadHistory() })
@@ -659,7 +663,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             previous=m
         }
         renderedHistory=items
-        voiceViews.removeAll { !it.isAttachedToWindow };forwardButtons.removeAll { !it.isAttachedToWindow }
+        forwardButtons.removeAll { !it.isAttachedToWindow }
         selectedIds.retainAll(shownMessages.keys);updateSelection()
         if(toBottom||scrollAfterSend) scrollBottom(true)
         scrollAfterSend=false
@@ -767,11 +771,12 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
                 else bubble.addView(textLine("Photo unavailable"))
             }
             "voice" -> {
-                val voice=VoiceMessageView(this,m.body,if(m.mine) Session.name else Names.of(this,m.fromId,m.fromName.ifBlank { peerName }),if(m.mine) myPhoto else null,if(m.mine) SENT else RECV,m.id)
+                val voice=VoiceMessageView(this,m.body,if(m.mine) Session.name else Names.of(this,m.fromId,m.fromName.ifBlank { peerName }),if(m.mine) myPhoto else null,if(m.mine) SENT else RECV,
+                    m.id,VoicePlayer.Origin(peerId,peerName,isGroup))
                 if(!m.mine) (if(isGroup) m.fromId else peerId).takeIf { it.isNotBlank() }?.let { who ->
                     ProfileHelper.loadIfNeeded(who,Session.serverUrl,Session.token) { bmp -> if(!isDestroyed) voice.setPhoto(bmp) }
                 }
-                voiceViews.add(voice);bubble.addView(voice,LinearLayout.LayoutParams(dp(250),-2))
+                bubble.addView(voice,LinearLayout.LayoutParams(dp(250),-2))
             }
             "video" -> {
                 // Like WhatsApp: the picture, play in the middle, download and size in the corner, the time on the picture.
@@ -1135,6 +1140,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     private fun startVoiceRecord() {
         if(recording || VoiceCall.active || !hasMic()) return
         if(!WsClient.connected) { toast("Voice messages need internet");return }
+        VoicePlayer.pause()   // recording over a voice message playing would record it too
         if(!MediaHelper.startRecording(this)) { toast("Recording shuru nahi hui"); return }
         recording=true; recordingLocked=false; recordingPaused=false; pausedTotal=0
         recordingStarted=android.os.SystemClock.elapsedRealtime()
@@ -1231,7 +1237,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             callShown=true
             if(panelOpen()) hidePanel()
             headerBar.visibility=View.GONE; (headerBar.parent as View).setBackgroundColor(DARK); RabtaUi.systemBars(this,true)
-            voiceViews.forEach { it.stop() };replyBar.visibility=View.GONE;offlineBanner.visibility=View.GONE
+            VoicePlayer.stop();replyBar.visibility=View.GONE;offlineBanner.visibility=View.GONE
             callOverlay.visibility=View.VISIBLE; chatScroll.visibility=View.GONE; composerBar.visibility=View.GONE; searchField.visibility=View.GONE
         }
         syncCall()

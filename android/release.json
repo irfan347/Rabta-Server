@@ -1,4 +1,4 @@
 {
   "minVersionCode": 0,
-  "notes": "Chats no longer hang: photos load in the background and only what changed is redrawn, also while a video is sending.\nOne tap anywhere on a photo or video opens it.\nVoice message waves show at once, the newest first.\nThe video player shows while a video loads, and offers another app when it can't play one."
+  "notes": "Chats no longer hang: photos load in the background and only what changed is redrawn, also while a video is sending.\nOne tap anywhere on a photo or video opens it.\nVoice message waves show at once, the newest first.\nA voice message keeps playing when you leave its chat; a bar in the chats pauses or stops it.\nThe video player shows while a video loads, and offers another app when it can't play one."
 }

@@ -169,7 +169,7 @@ class ConversationTest {
             ui { all(a.window.decorView).first { it.contentDescription=="Play voice message" }.performClick() }
             waitUi { all(a.window.decorView).filterIsInstance<SeekBar>().any { it.isEnabled&&it.max in 900..1100 } }
             ui { val view=all(a.window.decorView).filterIsInstance<VoiceMessageView>().first();view.stop();assertFalse(all(view).filterIsInstance<SeekBar>().first().isEnabled) }
-        } finally { ui { a.finish();WsClient.disconnect() };MessageService.stop(ctx) }
+        } finally { ui { a.finish();WsClient.disconnect();VoicePlayer.stop() };MessageService.stop(ctx) }
     }
 
     /** WhatsApp-style timeline: day chips, call bubbles and a status reply's quote card with its big emoji. */
@@ -216,7 +216,7 @@ class ConversationTest {
             ui { all(voices()[1]).first { it.contentDescription=="Play voice message" }.performClick() }
             waitUi { state(voices()[1])=="Pause voice message" }
             ui { assertEquals("The first one paused for the second","Resume voice message",state(voices()[0])) }
-        } finally { ui { a.finish() };db.deleteChat(chat) }
+        } finally { ui { a.finish();VoicePlayer.stop() };db.deleteChat(chat) }
     }
 
     /** A photo fills its bubble in its own shape instead of sitting small in a box, and a tap shows it full screen. */
@@ -360,5 +360,28 @@ class ConversationTest {
             waitUi { all(a.window.decorView).any { it.tag=="message:convo-upd-new" } }
             ui { assertSame("A new message is added to the chat as drawn",old,row("convo-upd-old"));assertSame(mine,row("convo-upd-mine")) }
         } finally { ui { a.finish() };db.deleteChat(chat) }
+    }
+
+    /** As in WhatsApp, a voice message goes on after its chat closes, and a bar in other chats pauses or stops it. */
+    @Test fun aVoiceMessageGoesOnAfterItsChatCloses() {
+        prepare();val db=Db.get(ctx);val chat="convo-voice-away";val other="convo-voice-other";val now=System.currentTimeMillis()
+        db.upsertConversation(chat,"Away contact","",now,false);db.upsertConversation(other,"Other contact","",now,false)
+        db.saveMessage("convo-voice-away-1",chat,chat,wav(8),now,false,"received","voice")
+        val a=launch(chat,"Away contact")
+        var b:ChatActivity?=null
+        try {
+            waitUi { all(a.window.decorView).any { it is VoiceMessageView } }
+            ui { all(a.window.decorView).first { it.contentDescription=="Play voice message" }.performClick() }
+            waitUi { VoicePlayer.playing }
+            ui { a.finish() }
+            b=launch(other,"Other contact")
+            fun bar()=all(b!!.window.decorView).firstOrNull { it.isShown&&it.contentDescription?.startsWith("Voice message from")==true }
+            waitUi { bar()!=null }
+            ui { assertTrue("Still playing after its chat closed",VoicePlayer.playing);assertEquals("convo-voice-away-1",VoicePlayer.key) }
+            ui { all(b!!.window.decorView).first { it.isShown&&it.contentDescription=="Pause voice message" }.performClick() }
+            waitUi { !VoicePlayer.playing&&VoicePlayer.key=="convo-voice-away-1" }
+            ui { all(b!!.window.decorView).first { it.isShown&&it.contentDescription=="Stop voice message" }.performClick() }
+            waitUi { VoicePlayer.key.isEmpty()&&bar()==null }
+        } finally { ui { a.finish();b?.finish();VoicePlayer.stop() };db.deleteChat(chat);db.deleteChat(other) }
     }
 }

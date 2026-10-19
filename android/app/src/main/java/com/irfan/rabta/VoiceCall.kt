@@ -51,6 +51,7 @@ object VoiceCall : RabtaEvents.Listener {
     fun start(c: Context, peer: String, name: String, initiate: Boolean, voiceId: String) {
         if (active) end()   // answering another call ends this one, like a phone
         if (VideoCall.active) VideoCall.hangUp()
+        VoicePlayer.callStarted()
         val ctx = c.applicationContext; app = ctx
         peerId = peer; peerName = name; connectedAt = 0L; muted = false; speaker = false
         runCatching {

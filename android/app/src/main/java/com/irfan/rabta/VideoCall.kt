@@ -80,6 +80,7 @@ object VideoCall : RabtaEvents.Listener {
     fun start(c: Context, peer: String, name: String, caller: Boolean, id: String, offerSdp: String?) {
         if (active) hangUp()
         if (VoiceCall.active) VoiceCall.end()
+        VoicePlayer.callStarted()
         val ctx = c.applicationContext; app = ctx
         peerId = peer; peerName = name; callId = id; isCaller = caller
         connectedAt = 0L; muted = false; speakerOn = true; sharing = false; outcome = "cancelled"; frontCamera = true; pendingIce.clear(); answered = false
