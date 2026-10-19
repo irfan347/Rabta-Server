@@ -1,4 +1,4 @@
 {
   "minVersionCode": 0,
-  "notes": "Calls no longer drop when the internet blinks: they wait up to half a minute for the connection to come back.\nBack from a video call now goes to the chat with that person, also after using the small window."
+  "notes": "Calls no longer drop when the internet blinks: they wait up to half a minute for the connection to come back.\nBack from a video call now goes to the chat with that person, also after using the small window.\nMessages and calls reach a phone in the background more reliably, and Rabta no longer closes by itself when it wakes up in the background."
 }
