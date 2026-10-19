@@ -23,6 +23,51 @@ import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
+/**
+ * Chat photos (base64 in their message): their shape is read from the header, the picture decoded off the main thread
+ * at about the bubble's width and kept, so drawing a chat again costs nothing. The full photo is decoded when opened.
+ */
+object ChatImages {
+    private val shapes = LruCache<String, Pair<Int, Int>>(1000)
+    private val small = object : LruCache<String, Bitmap>((Runtime.getRuntime().maxMemory() / 8 / 1024).toInt().coerceIn(4 * 1024, 48 * 1024)) {
+        override fun sizeOf(key: String, value: Bitmap) = value.byteCount / 1024
+    }
+    private val worker = Executors.newFixedThreadPool(2)
+    private fun bytes(body: String) = runCatching { android.util.Base64.decode(body, android.util.Base64.NO_WRAP) }.getOrNull()
+    /** Width and height of message [id]'s photo, or null when it can't be read. */
+    fun shape(id: String, body: String): Pair<Int, Int>? {
+        shapes.get(id)?.let { return it }
+        val data = bytes(body) ?: return null
+        val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeByteArray(data, 0, data.size, o)
+        if (o.outWidth <= 0 || o.outHeight <= 0) return null
+        return (o.outWidth to o.outHeight).also { shapes.put(id, it) }
+    }
+    fun cached(id: String): Bitmap? = small.get(id)
+    /** The photo at about [width] px wide (never larger than it is); [done] runs on the main thread. */
+    fun load(a: Activity, id: String, body: String, width: Int, done: (Bitmap?) -> Unit) {
+        small.get(id)?.let { done(it); return }
+        worker.execute {
+            val bmp = decode(body, width)
+            if (bmp != null) small.put(id, bmp)
+            a.runOnUiThread { if (!a.isDestroyed) done(bmp) }
+        }
+    }
+    /** The whole photo, for full screen. */
+    fun full(a: Activity, body: String, done: (Bitmap?) -> Unit) = worker.execute {
+        val bmp = decode(body, 0)
+        a.runOnUiThread { if (!a.isDestroyed) done(bmp) }
+    }
+    private fun decode(body: String, width: Int): Bitmap? = runCatching {
+        val data = bytes(body) ?: return null
+        val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeByteArray(data, 0, data.size, o)
+        var sample = 1
+        if (width > 0) while (o.outWidth / (sample * 2) >= width) sample *= 2
+        android.graphics.BitmapFactory.decodeByteArray(data, 0, data.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
+    }.getOrNull()
+}
+
 /** A frame and the length of videos already on this phone, read once in the background and kept for redraws. */
 object VideoFrames {
     private val cache = LruCache<String, Pair<Bitmap?, Long>>(24)
@@ -154,14 +199,28 @@ class VideoBubble(private val a: Activity, private val key: String, private val 
     }
 }
 
-/** Full-screen video on black with play, pause and seeking, as in WhatsApp. [failed] runs when this phone can't play it. */
+/**
+ * Full-screen video on black with play, pause and seeking, as in WhatsApp. When this phone can't play it, it says so
+ * and offers another app ([elsewhere]) instead of leaving Rabta on its own.
+ */
 object VideoPlayer {
-    fun show(a: Activity, file: File, title: String, failed: () -> Unit) {
+    fun show(a: Activity, file: File, title: String, elsewhere: () -> Unit) {
         VoiceMessageView.pauseAll()
         val dialog = Dialog(a, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
         val root = FrameLayout(a).apply { setBackgroundColor(Color.BLACK) }
         val video = VideoView(a).apply { contentDescription = "Video from $title" }
         root.addView(video, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
+        val loading = ProgressBar(a).apply { indeterminateTintList = ColorStateList.valueOf(Color.WHITE) }
+        root.addView(loading, FrameLayout.LayoutParams(RabtaUi.dp(a, 48), RabtaUi.dp(a, 48), Gravity.CENTER))
+        val problem = LinearLayout(a).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; visibility = View.GONE
+            addView(RabtaUi.text(a, "This video can't play here", 16f, true, Color.WHITE).apply { gravity = Gravity.CENTER })
+            addView(RabtaUi.text(a, "Open with another app", 15f, true, AppTheme.accent(a)).apply {
+                gravity = Gravity.CENTER; minHeight = RabtaUi.dp(a, 48); setPadding(RabtaUi.dp(a, 20), 0, RabtaUi.dp(a, 20), 0); isFocusable = true
+                background = RabtaUi.ripple(a, Color.TRANSPARENT, 999); setOnClickListener { dialog.dismiss(); elsewhere() }
+            }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = RabtaUi.dp(a, 12) })
+        }
+        root.addView(problem, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
         val bar = LinearLayout(a).apply {
             gravity = Gravity.CENTER_VERTICAL; setPadding(RabtaUi.dp(a, 8), RabtaUi.dp(a, 24), RabtaUi.dp(a, 16), RabtaUi.dp(a, 8))
             background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0x99000000.toInt(), 0))
@@ -170,8 +229,8 @@ object VideoPlayer {
         bar.addView(RabtaUi.text(a, title, 17f, true, Color.WHITE))
         root.addView(bar, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
         video.setMediaController(MediaController(a))
-        video.setOnPreparedListener { video.start() }
-        video.setOnErrorListener { _, _, _ -> dialog.dismiss(); failed(); true }
+        video.setOnPreparedListener { loading.visibility = View.GONE; video.start() }
+        video.setOnErrorListener { _, _, _ -> loading.visibility = View.GONE; video.visibility = View.GONE; problem.visibility = View.VISIBLE; true }
         dialog.setOnDismissListener { video.stopPlayback() }
         dialog.setContentView(root); dialog.show()
         video.setVideoPath(file.absolutePath)

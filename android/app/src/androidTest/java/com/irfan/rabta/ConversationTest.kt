@@ -62,6 +62,16 @@ class ConversationTest {
     }
     private fun launch(peerId:String,name:String)=inst.startActivitySync(Intent(ctx,ChatActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("peerId",peerId).putExtra("peerName",name)) as ChatActivity
     private fun windows()=WindowInspector.getGlobalWindowViews().flatMap { all(it) }
+    /** A real finger tap at the fraction [fx],[fy] of [view], delivered by the screen like a person's. */
+    private fun tap(view:View,fx:Float=0.5f,fy:Float=0.5f) {
+        val at=IntArray(2);var w=0;var h=0
+        ui { view.getLocationOnScreen(at);w=view.width;h=view.height }
+        val x=at[0]+w*fx;val y=at[1]+h*fy;val t=android.os.SystemClock.uptimeMillis()
+        inst.sendPointerSync(android.view.MotionEvent.obtain(t,t,android.view.MotionEvent.ACTION_DOWN,x,y,0))
+        inst.sendPointerSync(android.view.MotionEvent.obtain(t,t+60,android.view.MotionEvent.ACTION_UP,x,y,0))
+    }
+    /** A real one-second 96×64 H.264 video (made with ffmpeg for this test). */
+    private val tinyVideo=android.util.Base64.decode("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",android.util.Base64.DEFAULT)
     private fun jpeg(w:Int,h:Int)=java.io.ByteArrayOutputStream().also { android.graphics.Bitmap.createBitmap(w,h,android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.rgb(200,60,40)) }.compress(android.graphics.Bitmap.CompressFormat.JPEG,80,it) }.toByteArray()
     private fun b64(bytes:ByteArray)=android.util.Base64.encodeToString(bytes,android.util.Base64.NO_WRAP)
     /** [seconds] of silence as a WAV voice note. */
@@ -216,24 +226,32 @@ class ConversationTest {
         db.saveMessage("convo-tall-photo",chat,chat,b64(jpeg(300,600)),System.currentTimeMillis(),false,"received","image")
         val a=launch(chat,"Photo contact")
         try {
-            waitUi { all(a.window.decorView).any { it.tag=="photo:convo-tall-photo"&&it.height>0 } }
+            fun photo()=all(a.window.decorView).first { it.tag=="photo:convo-tall-photo" }
+            // The picture is decoded off the main thread, then shown.
+            waitUi { all(a.window.decorView).any { it.tag=="photo:convo-tall-photo"&&it.height>0 }&&all(photo()).filterIsInstance<android.widget.ImageView>().first().drawable!=null }
             ui {
-                val photo=all(a.window.decorView).first { it.tag=="photo:convo-tall-photo" }
-                assertEquals("As wide as WhatsApp's photos",RabtaUi.dp(a,250),photo.width)
-                assertEquals("A tall photo is as tall as allowed, not boxed in",RabtaUi.dp(a,330),photo.height)
-                assertEquals(android.widget.ImageView.ScaleType.CENTER_CROP,all(photo).filterIsInstance<android.widget.ImageView>().first().scaleType)
-                photo.performClick()
+                assertEquals("As wide as WhatsApp's photos",RabtaUi.dp(a,250),photo().width)
+                assertEquals("A tall photo is as tall as allowed, not boxed in",RabtaUi.dp(a,330),photo().height)
+                assertEquals(android.widget.ImageView.ScaleType.CENTER_CROP,all(photo()).filterIsInstance<android.widget.ImageView>().first().scaleType)
             }
+            // A real tap anywhere on the picture opens it (the picture must not keep the tap to itself).
+            var picture:View?=null
+            ui { picture=photo() }
+            tap(picture!!,0.3f,0.3f)
             waitUi { windows().any { it is ZoomImageView&&it.isShown } }
             ui { windows().last { it.isShown&&it.contentDescription=="Close photo" }.performClick() }
             waitUi { windows().none { it is ZoomImageView&&it.isShown } }
+            ui { photo().performLongClick() }
+            waitUi { all(a.window.decorView).any { it.isShown&&it.contentDescription=="Cancel selection" } }
+            ui { a.onBackPressed() }
+            waitUi { all(a.window.decorView).none { it.isShown&&it.contentDescription=="Cancel selection" } }
         } finally { ui { a.finish() };db.deleteChat(chat) }
     }
 
     /** A video shows its picture before it is downloaded; the size in the corner downloads it, then shows its length. */
     @Test fun aVideoShowsItsPictureAndTheCornerDownloadsIt() {
         prepare();val db=Db.get(ctx);val chat="convo-video-peer"
-        val bytes="a video someone sent ${java.util.UUID.randomUUID()}".toByteArray()
+        val bytes=tinyVideo
         val sha=java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
         val remote=(1..32).map { "0123456789abcdef".random() }.joinToString("")
         val downloads=java.util.concurrent.atomic.AtomicInteger()
@@ -247,7 +265,7 @@ class ConversationTest {
         val url=server.url("/").toString().trimEnd('/')
         ui { Session.serverUrl=url }
         val body=JSONObject().put("remote",remote).put("name","clip.mp4").put("mime","video/mp4").put("size",bytes.size).put("sha256",sha)
-            .put("thumb",b64(jpeg(160,90))).put("w",160).put("h",90).put("ms",15000).toString()
+            .put("thumb",b64(jpeg(160,90))).put("w",160).put("h",90).put("ms",1000).toString()
         db.upsertConversation(chat,"Video contact","",System.currentTimeMillis(),false)
         db.saveMessage("convo-video",chat,chat,body,System.currentTimeMillis(),false,"received","video")
         val a=launch(chat,"Video contact")
@@ -264,9 +282,18 @@ class ConversationTest {
                 assertEquals(0,downloads.get())
                 v.chip.performClick()
             }
-            waitUi { video().chip.contentDescription=="Video, 0:15" }
+            waitUi { video().chip.contentDescription=="Video, 0:01" }
             assertEquals(1,downloads.get())
             assertArrayEquals(bytes,Transfers.onPhone(ctx,body)!!.readBytes())
+            // A real tap on the picture (not just its play button) plays it here, in Rabta's own player.
+            var clip:View?=null
+            ui { clip=video() }
+            tap(clip!!,0.25f,0.3f)
+            // The player opened: playing, or (on a phone without this codec) saying so with another app to try.
+            fun player()=windows().any { it.isShown&&(it is android.widget.VideoView||(it is TextView&&it.text=="This video can't play here")) }
+            waitUi { player() }
+            ui { windows().last { it.isShown&&it.contentDescription=="Close video" }.performClick() }
+            waitUi { !player() }
         } finally {
             ui { a.finish() }
             Transfers.onPhone(ctx,body)?.delete()
@@ -310,5 +337,28 @@ class ConversationTest {
             assertEquals(setOf("First to pass on","Second to pass on"),db.messages(target).filter { it.mine }.map { it.body }.toSet())
             waitUi { !selecting() }
         } finally { ui { a.finish() };db.deleteChat(chat);db.deleteChat(target) }
+    }
+
+    /** A new tick changes only its time line, and a new message is added without drawing the whole chat again. */
+    @Test fun aTickOrANewMessageDoesNotRedrawTheChat() {
+        prepare();val db=Db.get(ctx);val chat="convo-update-peer";val now=System.currentTimeMillis()
+        db.upsertConversation(chat,"Update contact","",now,false)
+        db.saveMessage("convo-upd-old",chat,chat,"Earlier words",now-60_000,false,"received")
+        db.saveMessage("convo-upd-mine",chat,Session.id,"My words",now,true,MessageDelivery.RELAYED)
+        val a=launch(chat,"Update contact")
+        try {
+            fun row(id:String)=all(a.window.decorView).first { it.tag=="message:$id" }
+            waitUi { all(a.window.decorView).any { it.tag=="message:convo-upd-mine" } }
+            var old:View?=null;var mine:View?=null
+            ui { old=row("convo-upd-old");mine=row("convo-upd-mine") }
+            assertTrue(db.updateStatus("convo-upd-mine",MessageDelivery.DELIVERED))
+            RabtaEvents.postHistoryChanged(chat)
+            waitUi { all(row("convo-upd-mine")).any { it.contentDescription?.contains("Delivered")==true } }
+            ui { assertSame("The tick changed in place",mine,row("convo-upd-mine"));assertSame("Other messages stay as drawn",old,row("convo-upd-old")) }
+            db.saveMessage("convo-upd-new",chat,chat,"Newer words",now+1000,false,"received")
+            RabtaEvents.postHistoryChanged(chat)
+            waitUi { all(a.window.decorView).any { it.tag=="message:convo-upd-new" } }
+            ui { assertSame("A new message is added to the chat as drawn",old,row("convo-upd-old"));assertSame(mine,row("convo-upd-mine")) }
+        } finally { ui { a.finish() };db.deleteChat(chat) }
     }
 }

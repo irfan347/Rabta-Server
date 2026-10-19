@@ -15,7 +15,8 @@ import java.io.File
  * WhatsApp-style voice note: play, a waveform decoded from the note itself, its real length, and the
  * sender's avatar with a mic badge. Duration and progress come from the decoder, never a fake waveform.
  */
-class VoiceMessageView(context:Context,private val body:String,private val sender:String="",photo:android.graphics.Bitmap?=null,badgeRing:Int=AppTheme.surface(context)):LinearLayout(context) {
+class VoiceMessageView(context:Context,private val body:String,private val sender:String="",photo:android.graphics.Bitmap?=null,badgeRing:Int=AppTheme.surface(context),
+                       private val key:String=""):LinearLayout(context) {
     private val mainHandler=android.os.Handler(android.os.Looper.getMainLooper())
     private var player:MediaPlayer?=null
     private var temporary:File?=null
@@ -92,30 +93,55 @@ class VoiceMessageView(context:Context,private val body:String,private val sende
         photoView.setImageBitmap(bitmap);photoView.visibility=View.VISIBLE
     }
     override fun onAttachedToWindow() { super.onAttachedToWindow();prepareInfo() }
-    /** Reads length and waveform in the background so they show before the first tap. */
+    /**
+     * Reads length and waveform in the background so they show before the first tap. They are facts about the note:
+     * kept once read (also on disk), so a chat drawn again or opened later shows them at once.
+     */
     private fun prepareInfo() {
-        // Length and waveform are facts about the note: once read they stay, even after playback is stopped.
         if(preparing||loading||(lengthMs>0&&wave.levels!=null))return
+        val id=factsKey()
+        facts.get(id)?.let { (length,levels) -> show(length,levels);return }
         preparing=true
+        val dir=File(context.cacheDir,"voice-facts")
         prepWorker.execute {
             val result=runCatching {
-                val f=VoiceAudio.tempFile(context,body)
-                try { VoiceAudio.durationMs(f.absolutePath) to VoiceAudio.envelope(f.absolutePath) } finally { f.delete() }
+                readFacts(dir,id) ?: run {
+                    val f=VoiceAudio.tempFile(context,body)
+                    try { VoiceAudio.durationMs(f.absolutePath) to VoiceAudio.envelope(f.absolutePath) } finally { f.delete() }
+                }.also { if(it.first>0) writeFacts(dir,id,it) }
             }
+            result.getOrNull()?.takeIf { it.first>0 }?.let { facts.put(id,it) }
             mainHandler.post {
                 preparing=false
                 val info=result.getOrNull()
                 if(info==null) { if(!prepared) time.text="Voice message";return@post }
-                val (length,levels)=info
-                if(length>0&&lengthMs<=0) lengthMs=length
-                if(levels!=null) wave.levels=levels
-                if(!prepared&&!loading) time.text=if(lengthMs>0) VoiceAudio.format(lengthMs) else "Voice message"
+                show(info.first,info.second)
             }
         }
     }
+    private fun show(length:Long,levels:FloatArray?) {
+        if(length>0&&lengthMs<=0) lengthMs=length
+        if(levels!=null) wave.levels=levels
+        if(!prepared&&!loading) time.text=if(lengthMs>0) VoiceAudio.format(lengthMs) else "Voice message"
+    }
+    private fun factsKey()=key.ifBlank { "n${body.length}-${Integer.toHexString(body.hashCode())}" }.replace(Regex("[^A-Za-z0-9_-]"),"_")
     companion object {
-        /** One background reader for every voice note on screen, oldest request first. */
-        private val prepWorker=java.util.concurrent.Executors.newSingleThreadExecutor()
+        /**
+         * Two background readers for the voice notes on screen, newest request first: a chat opens at its newest
+         * messages, so the notes in view get their waveform before older ones above.
+         */
+        private val prepWorker=java.util.concurrent.ThreadPoolExecutor(2,2,30,java.util.concurrent.TimeUnit.SECONDS,
+            object:java.util.concurrent.LinkedBlockingDeque<Runnable>() { override fun offer(e:Runnable)=offerFirst(e) })
+        /** Length and waveform of notes already read, by message. */
+        private val facts=android.util.LruCache<String,Pair<Long,FloatArray?>>(300)
+        private fun readFacts(dir:File,id:String):Pair<Long,FloatArray?>? = runCatching {
+            val parts=File(dir,id).takeIf { it.exists() }?.readText()?.split(';') ?: return null
+            val length=parts[0].toLong().takeIf { it>0 } ?: return null
+            length to parts.getOrNull(1)?.takeIf { it.isNotBlank() }?.split(',')?.map { it.toFloat() }?.toFloatArray()
+        }.getOrNull()
+        private fun writeFacts(dir:File,id:String,known:Pair<Long,FloatArray?>) {
+            runCatching { dir.mkdirs();File(dir,id).writeText(known.first.toString()+";"+(known.second?.joinToString(",") ?: "")) }
+        }
         /** The note playing now: starting another pauses it, as in WhatsApp. */
         private var playing:java.lang.ref.WeakReference<VoiceMessageView>?=null
         /** Something else is about to play (a video): the note playing pauses. */
