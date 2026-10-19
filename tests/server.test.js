@@ -135,11 +135,26 @@ test('database backlog larger than one batch is fully delivered and marked',asyn
   for(let i=1;i<=450;i++) rows.push({id:i,msg_id:hexId(i),from_id:f.alice.id,from_name:'alice',to_id:f.bob.id,body:'m'+i,type:'text',sent_at:i,delivered_at:null});
   f.onSql((sql,args)=>{
     if(sql.startsWith('SELECT * FROM ru_messages')){const limit=Number(/LIMIT (\d+)/.exec(sql)[1]);return rows.filter(r=>r.to_id===args[0]&&!r.delivered_at&&r.id>(args[1]||0)).slice(0,limit);}
-    if(sql.startsWith('UPDATE ru_messages SET delivered_at')) rows.filter(r=>args[1].includes(r.id)).forEach(r=>{r.delivered_at=args[0]});
+    if(sql.startsWith('UPDATE ru_messages SET delivered_at')) rows.filter(r=>args[1].includes(r.id)).forEach(r=>{r.delivered_at=args[0];if(/body=NULL/.test(sql))r.body=null});
   });
   const b=f.socket(f.bob);for(let i=0;i<5;i++) await settle();
   assert.equal(b.messages.filter(m=>m.type==='msg').length,450);
   assert.equal(rows.filter(r=>!r.delivered_at).length,0);
+  assert.equal(rows.filter(r=>r.body!==null).length,0,'delivered messages keep no content on the server');
+});
+test('a delivered message keeps no content on the server, and sending it again does not deliver it twice',async()=>{
+  const f=await fixture();const a=f.socket(f.alice);const m={type:'msg',id:'ABCDEF654321',to:f.bob.id,body:'voice-data',msgType:'voice'};
+  await a.send(m);const b=f.socket(f.bob);await settle();b.ws.close();
+  assert.deepEqual(b.messages.filter(x=>x.type==='msg').map(x=>x.body),['voice-data']);
+  await a.send(m);assert.equal(a.messages.at(-1).status,'stored');
+  const again=f.socket(f.bob);await settle();
+  assert.equal(again.messages.filter(x=>x.type==='msg').length,0,'recognised by its marker');
+});
+test('now and then the server forgets markers of messages delivered over 30 days ago, and only those',async()=>{
+  const f=await fixture(true);f.beat();await settle();
+  const forget=f.queries.find(([sql])=>sql.startsWith('DELETE FROM ru_messages'));
+  assert.ok(forget,'markers are cleaned up');assert.match(forget[0],/body IS NULL AND delivered_at < \$1/);
+  assert.ok(Math.abs(forget[1][0]-(Date.now()-30*24*60*60*1000))<60000);
 });
 test('recipient receipt reaches an online sender; server acks keep their existing meaning',async()=>{
   const f=await fixture();const a=f.socket(f.alice),b=f.socket(f.bob);

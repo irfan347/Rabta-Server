@@ -18,7 +18,7 @@ const UN_RE = /^[a-zA-Z0-9_]{3,20}$/;
 // ---------- storage ----------
 let pool = null;
 const memUsers = new Map();      // id -> {id,username,pass_hash,name,created_at}
-const memMessages = [];          // pending offline messages
+const memMessages = [];          // pending offline messages (delivered ones keep only their ids, see deliverPending)
 let memMsgId = 1;
 const memReceipts = [];          // recipient receipts waiting for an offline sender
 
@@ -220,9 +220,11 @@ async function deliverPending(userId, ws) {
     const written = await Promise.all(msgs.map(m => features.blocked(m.from_id, userId) ? true : // blocked senders are dropped, as before
       sendFrame(ws, { type: m.group_id ? 'group_msg' : 'msg', groupId: m.group_id || '', groupName: m.group_name || '', id: m.msg_id, from: m.from_id, fromName: m.from_name, body: m.body, msgType: m.type || 'text', t: Number(m.sent_at), offline: true })));
     const done = msgs.filter((_, i) => written[i]);
+    // The phone has these now, so the server lets go of their content (text, voice, photos). A small marker stays
+    // for a while so a copy the sender sends again is recognised and not delivered twice (see tidy).
     if (done.length) {
-      if (pool) await pool.query('UPDATE ru_messages SET delivered_at=$1 WHERE id=ANY($2::int[])', [Date.now(), done.map(m => m.id)]);
-      else done.forEach(m => { m.delivered_at = Date.now(); });
+      if (pool) await pool.query('UPDATE ru_messages SET delivered_at=$1, body=NULL WHERE id=ANY($2::int[])', [Date.now(), done.map(m => m.id)]);
+      else done.forEach(m => { m.delivered_at = Date.now(); m.body = null; });
     }
     if (done.length < msgs.length || msgs.length < PENDING_BATCH) return;
   }
@@ -386,6 +388,15 @@ setInterval(() => {
     try { socket.ping(); } catch (_) {}
   }
 }, HEARTBEAT_MS).unref?.();
+
+// Now and then the server forgets what phones already have: markers of delivered messages after 30 days, and files
+// everyone has saved (features.js). Messages delivered before this rule kept their content and are left as they were.
+const TIDY_MS = 30 * 60 * 1000, MARKER_MS = 30 * 24 * 60 * 60 * 1000;
+async function tidy() {
+  if (pool) await pool.query('DELETE FROM ru_messages WHERE body IS NULL AND delivered_at < $1', [Date.now() - MARKER_MS]);
+  await features.tidy();
+}
+setInterval(() => tidy().catch(e => console.error('Clean-up failed:', e.message)), TIDY_MS).unref?.();
 
 app.post('/api/groups', async (req, res) => {
   const creator = authId(req); if (!creator) return res.status(401).json({ error: 'login required' });
