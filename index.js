@@ -180,7 +180,7 @@ function sendFrame(socket, payload) {
 }
 function callState(call,state) { sendTo(call.from,{type:'call_state',from:call.to,callId:call.id,state}); }
 function endCall(call) {
-  clearTimeout(call.timer);
+  clearTimeout(call.timer); for(const t of Object.values(call.away||{})) clearTimeout(t);
   const type=call.video?'video_end':'call_end';
   sendTo(call.from,{type,from:call.to,callId:call.id});
   sendTo(call.to,{type,from:call.from,callId:call.id});
@@ -200,6 +200,21 @@ function beginCall(from,to,id,video,sdp) {
   (video?videoCalls:voiceCalls).set(id,call); callState(call,'calling'); deliverCall(call);
   // Not connected: wake the phone; once Rabta connects, the ringing call reaches it as above.
   if(online.get(to)?.readyState!==1) push.wake(to,'call');
+}
+// A phone whose connection drops in an answered call gets a moment to come back before the call ends: mobile networks
+// blink, and a video call's picture even goes on directly between the phones meanwhile. The other phone hears
+// 'reconnecting', then 'back' once the phone says the call goes on ('call_alive'). A call still ringing ends at once.
+const RETURN_MS=30000;
+function away(call,userId) {
+  if(!call.answered) { endCall(call); return; }
+  call.away=call.away||{}; clearTimeout(call.away[userId]);
+  const t=setTimeout(()=>endCall(call),RETURN_MS); t.unref?.(); call.away[userId]=t;
+  sendTo(call.from===userId?call.to:call.from,{type:'call_state',from:userId,callId:call.id,state:'reconnecting'});
+}
+function back(call,userId) {
+  if(!call.away?.[userId]) return;
+  clearTimeout(call.away[userId]); delete call.away[userId];
+  sendTo(call.from===userId?call.to:call.from,{type:'call_state',from:userId,callId:call.id,state:'back'});
 }
 function participantCall(msg,userId) {
   const call=voiceCalls.get(msg.callId)||videoCalls.get(msg.callId);
@@ -346,6 +361,11 @@ wss.on('connection', (ws, req) => {
       if(call && !call.video && call.answered && typeof msg.data==='string' && msg.data.length<=14000) sendTo(msg.to,{type:'call_audio',from:userId,callId:call.id,data:msg.data});
     } else if (msg.type === 'call_end' || msg.type === 'video_end') {
       const call=participantCall(msg,userId); if(call) endCall(call);
+    } else if (msg.type === 'call_alive') {
+      // Back online in a call: it goes on, or it ended meanwhile and this phone hears so now.
+      const call=participantCall(msg,userId);
+      if(call) back(call,userId);
+      else for(const type of ['call_end','video_end']) ws.send(JSON.stringify({type,from:String(msg.to||''),callId:String(msg.callId||'')}));
     } else if (msg.type === 'typing') {
       const tgt = online.get(msg.to); if (tgt && tgt.readyState === 1) tgt.send(JSON.stringify({ type: 'typing', from: userId }));
     } else if (msg.type === 'read') {
@@ -371,7 +391,7 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', () => {
-    if (online.get(userId) === ws) { online.delete(userId); updateLastSeen(userId); for(const call of [...voiceCalls.values(),...videoCalls.values()]) if(call.from===userId||call.to===userId) endCall(call); }
+    if (online.get(userId) === ws) { online.delete(userId); updateLastSeen(userId); for(const call of [...voiceCalls.values(),...videoCalls.values()]) if(call.from===userId||call.to===userId) away(call,userId); }
   });
   ws.on('error', () => { try { ws.close(); } catch (_) {} });
 });

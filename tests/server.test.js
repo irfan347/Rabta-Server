@@ -91,6 +91,45 @@ test('offline video offer and ICE wait for receiver and answer',async()=>{
   assert.equal(b.messages.at(-1).type,'ice_candidate');
 });
 
+// The reported problem: calls dropped whenever a phone's connection blinked.
+async function answeredCall(f,video=false){
+  const a=f.socket(f.alice),b=f.socket(f.bob);const id='112233445566';
+  if(video){await a.send({type:'video_offer',callId:id,to:f.bob.id,sdp:'offer'});await b.send({type:'video_answer',callId:id,to:f.alice.id,sdp:'answer'});}
+  else{await a.send({type:'call_init',callId:id,to:f.bob.id});await b.send({type:'call_accept',callId:id,to:f.alice.id});}
+  return {a,b,id};
+}
+test('an answered call goes on when a dropped phone comes back and says so',async()=>{
+  const f=await fixture();const {a,b,id}=await answeredCall(f);
+  a.ws.close();
+  assert.equal(b.messages.filter(m=>m.type==='call_end').length,0,'not ended at once');
+  assert.deepEqual(b.messages.at(-1),{type:'call_state',from:f.alice.id,callId:id,state:'reconnecting'});
+  const again=f.socket(f.alice);await again.send({type:'call_alive',callId:id,to:f.bob.id});
+  assert.equal(b.messages.at(-1).state,'back');
+  f.expire();   // the 30 s pause has long passed
+  await again.send({type:'call_audio',callId:id,to:f.bob.id,data:'AAAA'});
+  assert.equal(b.messages.at(-1).type,'call_audio','the call goes on');
+  assert.equal(b.messages.filter(m=>m.type==='call_end').length,0);
+});
+test('a phone that does not come back within the pause ends the call for the other one',async()=>{
+  const f=await fixture();const {a,b,id}=await answeredCall(f,true);
+  a.ws.close();assert.equal(b.messages.filter(m=>m.type==='video_end').length,0);
+  f.socket(f.alice);   // connected again, but its call is gone (an older app ends it on any drop)
+  f.expire();
+  assert.deepEqual(b.messages.at(-1),{type:'video_end',from:f.alice.id,callId:id});
+});
+test('a ringing call still ends at once when the caller drops',async()=>{
+  const f=await fixture();const a=f.socket(f.alice),b=f.socket(f.bob);const id='112233445566';
+  await a.send({type:'call_init',callId:id,to:f.bob.id});a.ws.close();
+  assert.equal(b.messages.at(-1).type,'call_end');
+});
+test('a phone back after its call ended hears that it ended',async()=>{
+  const f=await fixture();const {a,id}=await answeredCall(f);
+  a.ws.close();f.expire();
+  const again=f.socket(f.alice);await again.send({type:'call_alive',callId:id,to:f.bob.id});
+  assert.deepEqual(again.messages.slice(-2).map(m=>m.type),['call_end','video_end']);
+  assert.ok(again.messages.slice(-2).every(m=>m.callId===id&&m.from===f.bob.id));
+});
+
 const settle=()=>new Promise(r=>setImmediate(r));
 const hexId=n=>n.toString(16).toUpperCase().padStart(12,'0');
 test('offline messages stay pending when the socket write fails',async()=>{

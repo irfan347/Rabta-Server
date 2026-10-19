@@ -27,6 +27,9 @@ object VideoCall : RabtaEvents.Listener {
     var speakerOn = true; private set
     var sharing = false; private set
     var active = false; private set
+    /** The other phone took the call (caller: its answer arrived; callee: the answer went out). */
+    private var answered = false
+    private var cutOffPending = false
     /** A call screen is in view (full screen or picture-in-picture). */
     var shown = false; private set
 
@@ -68,6 +71,10 @@ object VideoCall : RabtaEvents.Listener {
     fun seconds() = if (connectedAt == 0L) 0L else (SystemClock.elapsedRealtime() - connectedAt) / 1000
 
     private val ringTimeout = Runnable { if (active && connectedAt == 0L) { outcome = "no answer"; hangUp() } }
+    // A dropped connection is not a hung-up call: once answered, the picture and voice go directly between the phones,
+    // and the server holds the call for half a minute while Rabta reconnects. Still cut off after that, it ends here.
+    private const val RECONNECT_MS = 30_000L
+    private val cutOff = Runnable { cutOffPending = false; if (active && !WsClient.connected) { outcome = "disconnected"; end() } }
 
     /** Calls [peer] when [caller], otherwise answers [offerSdp]. The screen checks the camera and microphone first. */
     fun start(c: Context, peer: String, name: String, caller: Boolean, id: String, offerSdp: String?) {
@@ -75,7 +82,7 @@ object VideoCall : RabtaEvents.Listener {
         if (VoiceCall.active) VoiceCall.end()
         val ctx = c.applicationContext; app = ctx
         peerId = peer; peerName = name; callId = id; isCaller = caller
-        connectedAt = 0L; muted = false; speakerOn = true; sharing = false; outcome = "cancelled"; frontCamera = true; pendingIce.clear()
+        connectedAt = 0L; muted = false; speakerOn = true; sharing = false; outcome = "cancelled"; frontCamera = true; pendingIce.clear(); answered = false
         logId = runCatching { Db.get(ctx).logCallStart(peer, name, if (caller) "outgoing video" else "incoming video") }.getOrDefault(-1L)
         runCatching {
             val am = ctx.getSystemService(AudioManager::class.java)
@@ -197,7 +204,7 @@ object VideoCall : RabtaEvents.Listener {
                 override fun onCreateSuccess(sdp: SessionDescription) {
                     p.setLocalDescription(sdpObserver(onSet = {
                         WsClient.sendRaw(JSONObject().put("type", "video_answer").put("to", to).put("callId", id).put("sdp", sdp.description).toString())
-                        handler.post { if (active && callId == id) status("Connecting…") }
+                        handler.post { if (active && callId == id) { answered = true; status("Connecting…") } }
                     }), sdp)
                 }
                 override fun onSetSuccess() {}
@@ -301,7 +308,7 @@ object VideoCall : RabtaEvents.Listener {
         stopSharing()
         active = false; shown = false
         RabtaEvents.remove(this)
-        ringback.stop(); handler.removeCallbacks(ringTimeout)
+        ringback.stop(); handler.removeCallbacks(ringTimeout); handler.removeCallbacks(cutOff); cutOffPending = false
         app?.let { ctx ->
             MessageService.callEnded(ctx)
             if (logId > 0) runCatching { val db = Db.get(ctx); if (connectedAt > 0) db.logCallEnd(logId, seconds().toInt()) else db.callOutcome(logId, "$outcome · video") }
@@ -335,10 +342,20 @@ object VideoCall : RabtaEvents.Listener {
             "busy" -> { outcome = "busy"; toast("Busy"); end() }
         }
     }
-    override fun onDisconnected() { if (active) { outcome = "disconnected"; end() } }
+    override fun onDisconnected() {
+        if (!active || WsClient.connected) return
+        if (!answered) { outcome = "disconnected"; end(); return }
+        if (!cutOffPending) { cutOffPending = true; handler.postDelayed(cutOff, RECONNECT_MS) }
+    }
+    override fun onConnected() {
+        if (!active) return
+        handler.removeCallbacks(cutOff); cutOffPending = false
+        // Connected again: the server keeps the call once it hears it goes on (or tells this phone it ended meanwhile).
+        if (answered) WsClient.sendRaw(JSONObject().put("type", "call_alive").put("to", peerId).put("callId", callId).toString())
+    }
     override fun onVideoAnswer(callId: String, sdp: String) {
         if (callId != this.callId) return
-        ringback.stop(); status("Connecting…")
+        answered = true; ringback.stop(); status("Connecting…")
         pc?.setRemoteDescription(sdpObserver(onSet = { flushIce() }), SessionDescription(SessionDescription.Type.ANSWER, sdp))
     }
     override fun onIceCandidateEvent(callId: String, sdpMid: String, sdpMLineIndex: Int, sdp: String) {

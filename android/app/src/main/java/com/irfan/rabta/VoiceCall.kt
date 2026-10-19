@@ -41,6 +41,11 @@ object VoiceCall : RabtaEvents.Listener {
     private fun toast(text: String) { app?.let { Toast.makeText(it, text, Toast.LENGTH_SHORT).show() } }
 
     private val noAnswer = Runnable { if (active && connectedAt == 0L) { end(outcome = "no answer"); toast("Call ka jawab nahi mila") } }
+    // A dropped connection is not a hung-up call: the server holds an answered call for half a minute, and the voice
+    // comes back once Rabta reconnects. A call that never connected, or one still cut off after that, ends here.
+    private const val RECONNECTING = "Reconnecting…"
+    private const val RECONNECT_MS = 30_000L
+    private val cutOff = Runnable { if (active && !WsClient.connected) { end(false, "disconnected"); toast("Call disconnected") } }
 
     /** Calls [peer], or with [initiate] false answers the call [voiceId]. The screen checks the microphone and connection first. */
     fun start(c: Context, peer: String, name: String, initiate: Boolean, voiceId: String) {
@@ -75,7 +80,7 @@ object VoiceCall : RabtaEvents.Listener {
     fun end(sendEnd: Boolean = true, outcome: String = "cancelled") {
         val net = call ?: return
         call = null; net.stop(sendEnd)
-        RabtaEvents.remove(this); handler.removeCallbacks(noAnswer)
+        RabtaEvents.remove(this); handler.removeCallbacks(noAnswer); handler.removeCallbacks(cutOff)
         app?.let { ctx ->
             MessageService.callEnded(ctx)
             val seconds = seconds().toInt()
@@ -104,7 +109,25 @@ object VoiceCall : RabtaEvents.Listener {
     }
     override fun onCallState(fromId: String, callId: String, state: String) {
         if (fromId != peerId || callId != id) return
-        if (state == "busy") { end(false, "busy"); toast("Busy") } else call?.state(state)
+        when (state) {
+            "busy" -> { end(false, "busy"); toast("Busy") }
+            // The other phone's connection dropped for a moment, and came back.
+            "reconnecting" -> if (connectedAt > 0) { status = RECONNECTING; changed() }
+            "back" -> if (connectedAt > 0 && status == RECONNECTING) { status = "Connected"; changed() }
+            else -> call?.state(state)
+        }
     }
-    override fun onDisconnected() { if (active) { end(false); toast("Call disconnected") } }
+    override fun onDisconnected() {
+        if (!active || WsClient.connected) return
+        if (connectedAt == 0L) { end(false); toast("Call disconnected"); return }
+        if (status == RECONNECTING) return
+        status = RECONNECTING; handler.postDelayed(cutOff, RECONNECT_MS); changed()
+    }
+    override fun onConnected() {
+        if (!active || connectedAt == 0L) return
+        handler.removeCallbacks(cutOff)
+        // Connected again: the server keeps the call once it hears it goes on (or tells this phone it ended meanwhile).
+        WsClient.sendRaw(org.json.JSONObject().put("type", "call_alive").put("to", peerId).put("callId", id).toString())
+        if (status == RECONNECTING) { status = "Connected"; changed() }
+    }
 }
