@@ -191,6 +191,8 @@ function beginCall(from,to,id,video,sdp) {
   const call={id,from,to,video,sdp,answered:false,expires:Date.now()+45000,ice:[]};
   call.timer=setTimeout(()=>endCall(call),45000);call.timer.unref?.();
   (video?videoCalls:voiceCalls).set(id,call); callState(call,'calling'); deliverCall(call);
+  // Not connected: wake the phone; once Rabta connects, the ringing call reaches it as above.
+  if(online.get(to)?.readyState!==1) push.wake(to,'call');
 }
 function participantCall(msg,userId) {
   const call=voiceCalls.get(msg.callId)||videoCalls.get(msg.callId);
@@ -230,6 +232,8 @@ async function storeMessage(fromId, fromName, toId, msgId, body, type, sentAt, g
     memMessages.push({ group_id: groupId, group_name: groupName, id: memMsgId++, msg_id: msgId, from_id: fromId, from_name: fromName, to_id: toId, body, type, sent_at: sentAt, delivered_at: null });
     while(memMessages.length > 2000 && memMessages[0].delivered_at) memMessages.shift();
   }
+  // Stored because the recipient is not connected: wake their phone so Rabta comes for it.
+  push.wake(toId);
 }
 
 // A receipt is sent by the recipient's app after it has stored a message; it is the only signal that
@@ -398,10 +402,11 @@ app.post('/api/groups', async (req, res) => {
   res.json({ id, name, members:[...members] });
 });
 
-app.get('/health', (req, res) => res.json({ ok: true, db: !!pool, online: online.size, users: memUsers.size }));
+app.get('/health', (req, res) => res.json({ ok: true, db: !!pool, online: online.size, users: memUsers.size, push: push.enabled() }));
 
 const features=require('./features')({app,authId,users:memUsers,getPool:()=>pool});
+const push=require('./push')({app,authId,getPool:()=>pool});
 const PORT = process.env.PORT || 3000;
-initDb().then(()=>features.init()).then(() => server.listen(PORT, () => console.log('Rabta server on', PORT)))
+initDb().then(()=>features.init()).then(()=>push.init()).then(() => server.listen(PORT, () => console.log('Rabta server on', PORT)))
   .catch(e => { console.error('Database initialization failed:', e.message); process.exitCode=1; });
 
