@@ -68,6 +68,9 @@ object BackgroundRun {
         request(a)
     }
 
+    /** Opens Android's question; device tests put a stand-in here, so Android's screen never covers one under test. */
+    internal var ask: (Activity) -> Unit = { allow(it) }
+
     /**
      * The chats screen asks by itself, once, so nobody has to find this setting before messages and calls can reach
      * them while Rabta is closed. Android lets no app allow itself: the person taps Allow. The strip and Settings stay.
@@ -75,7 +78,7 @@ object BackgroundRun {
     fun askOnce(a: Activity) {
         if (allowed(a) || prefs(a).getBoolean("asked", false)) return
         prefs(a).edit().putBoolean("asked", true).apply()
-        allow(a)
+        ask(a)
     }
 
     /** Chats screen resume: on phones with their own auto-start control, that step follows Android's question. */

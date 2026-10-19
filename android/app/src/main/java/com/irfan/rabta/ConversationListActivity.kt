@@ -43,6 +43,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
     private val navItems=mutableListOf<LinearLayout>()
     private val queries=mutableMapOf<Int,String>()
     private var resumed=false
+    private val askBackground=Runnable { if(resumed&&!isFinishing) BackgroundRun.askOnce(this) }
     private var callVersion=0
     private lateinit var conversationSearchRow: LinearLayout
     private lateinit var callSearchRow: LinearLayout
@@ -130,6 +131,9 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         AccountUi.ensureTrustedPhone(this)
         resumed=true;refreshAvatar();ProfilePhoto.sync { if(!isDestroyed) refreshAvatar() };MessageService.start(this);RabtaEvents.add(this)
         uiHandler.removeCallbacks(connectionTick);uiHandler.post(connectionTick)
+        // Once the chats are on screen (and any permission question is answered): Android's "keep Rabta running?"
+        // question, asked once, so messages and calls arrive while Rabta is closed.
+        uiHandler.removeCallbacks(askBackground);uiHandler.postDelayed(askBackground,1500)
         when(activeTab) { 1->nearbyPanel.resume();3->loadCalls();else->loadConvs() }
         if(activeTab==0) loadMoments(force=true)
         AppUpdate.check(this)
@@ -139,7 +143,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
     override fun onPause() {
         resumed=false;if(::nearbyPanel.isInitialized)nearbyPanel.pause()
         if(::callBar.isInitialized)callBar.stop()
-        RabtaEvents.remove(this);uiHandler.removeCallbacks(connectionTick);uiHandler.removeCallbacks(searchTask);uiHandler.removeCallbacks(callSearchTask)
+        RabtaEvents.remove(this);uiHandler.removeCallbacks(connectionTick);uiHandler.removeCallbacks(searchTask);uiHandler.removeCallbacks(callSearchTask);uiHandler.removeCallbacks(askBackground)
         super.onPause()
     }
     override fun onDestroy() { RabtaEvents.remove(this);uiHandler.removeCallbacksAndMessages(null);super.onDestroy() }
@@ -988,11 +992,10 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         if (sdk >= 31) { want += android.Manifest.permission.BLUETOOTH_SCAN; want += android.Manifest.permission.BLUETOOTH_ADVERTISE; want += android.Manifest.permission.BLUETOOTH_CONNECT }
         if (sdk >= 33) { want += android.Manifest.permission.NEARBY_WIFI_DEVICES; want += android.Manifest.permission.POST_NOTIFICATIONS }
         val miss = want.filter { checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
-        // Then Android's "keep Rabta running?" question, once, so messages and calls arrive while Rabta is closed.
-        if (miss.isNotEmpty()) requestPermissions(miss.toTypedArray(), 7) else BackgroundRun.askOnce(this)
+        if (miss.isNotEmpty()) requestPermissions(miss.toTypedArray(), 7)
     }
 
-    override fun onRequestPermissionsResult(r: Int, p: Array<out String>, g: IntArray) { super.onRequestPermissionsResult(r,p,g); if (r==7||r==NearbySetup.PERMISSIONS) { MessageService.start(this); if(::nearbyPanel.isInitialized)nearbyPanel.refresh() }; if (r==7) BackgroundRun.askOnce(this) }
+    override fun onRequestPermissionsResult(r: Int, p: Array<out String>, g: IntArray) { super.onRequestPermissionsResult(r,p,g); if (r==7||r==NearbySetup.PERMISSIONS) { MessageService.start(this); if(::nearbyPanel.isInitialized)nearbyPanel.refresh() } }
 
     override fun onActivityResult(req:Int,res:Int,data:Intent?) {
         super.onActivityResult(req,res,data)

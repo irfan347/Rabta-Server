@@ -9,7 +9,8 @@ import androidx.test.runner.AndroidJUnitRunner
  */
 class RabtaTestRunner : AndroidJUnitRunner() {
     override fun onCreate(arguments: Bundle?) {
-        super.onCreate(arguments)
+        // Before the tests start, which super.onCreate does.
         targetContext.getSharedPreferences("background_run", 0).edit().putBoolean("asked", true).commit()
+        super.onCreate(arguments)
     }
 }
