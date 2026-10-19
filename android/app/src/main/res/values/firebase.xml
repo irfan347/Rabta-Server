@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Firebase project "rabta-f263f" (from its google-services.json), read by Firebase when Rabta starts. These identify
+     the project and ship inside every APK; they are not secrets. The server's own key stays in FCM_SERVICE_ACCOUNT. -->
+<resources>
+    <string name="google_app_id" translatable="false">1:842342755342:android:c4b343c0027e4c3641e05f</string>
+    <string name="google_api_key" translatable="false">AIzaSyAThbreEZaZxbFiGPL3xV26fciIUXE23tk</string>
+    <string name="gcm_defaultSenderId" translatable="false">842342755342</string>
+    <string name="project_id" translatable="false">rabta-f263f</string>
+    <string name="google_storage_bucket" translatable="false">rabta-f263f.firebasestorage.app</string>
+</resources>

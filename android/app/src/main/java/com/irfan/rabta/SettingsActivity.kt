@@ -202,7 +202,7 @@ class SettingsActivity : ThemedActivity() {
         AlertDialog.Builder(this).setTitle("Sign out of Rabta?")
             .setMessage("Your chats and account data remain on this phone. You can sign in again with the same account.")
             .setNegativeButton("Cancel", null).setPositiveButton("Sign out") { _, _ ->
-                MessageService.stop(this); Session.logout(); WsClient.disconnect()
+                MessageService.stop(this); Push.forget(this); Session.logout(); WsClient.disconnect()
                 startActivity(Intent(this, AuthActivity::class.java)); finishAffinity()
             }.show()
     }

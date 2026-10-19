@@ -112,6 +112,8 @@ class ContactsTest {
             ui { windows().first { it.contentDescription == "Contacts filter" }.performClick() }
             waitUi("Contacts lists everyone connected") { shown("Saved friend") && shown("Only contact") && shown("@only_contact") && shown("Add contact") }
             ui { windows().first { it.contentDescription == "All filter" }.performClick() }
+            // The list reloads in the background; until then the contact row is on screen, and holding it opens the contact's sheet.
+            waitUi("Chats are listed again") { shown("Saved friend") && !shown("Add contact") && !shown("Only contact") }
 
             // Clear chat: the messages go, the chat stays.
             hold("Saved friend"); tap("Clear chat"); tap("Clear chat", exact = true)

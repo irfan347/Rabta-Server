@@ -238,6 +238,16 @@ object WsClient {
     }
     fun createGroup(srv: String, tok: String, name: String, members: List<String>, cb: (Boolean,String,JSONObject?)->Unit) =
         post(srv, "/api/groups", JSONObject().put("name",name).put("members", JSONArray(members)).toString(), tok, cb)
+    /** This phone's Firebase token, so the server can wake Rabta while it is closed (see [Push]). */
+    fun registerPush(srv: String, tok: String, token: String, cb: (Boolean)->Unit) =
+        post(srv, "/api/me/push", JSONObject().put("token",token).toString(), tok) { ok, _, _ -> cb(ok) }
+    fun unregisterPush(srv: String, tok: String, token: String) {
+        val rb = Request.Builder().url(srv.trimEnd('/')+"/api/me/push").delete(JSONObject().put("token",token).toString().toRequestBody("application/json".toMediaType())).header("Authorization","Bearer $tok")
+        http.newCall(rb.build()).enqueue(object:Callback{
+            override fun onFailure(c: Call, e: IOException) {}
+            override fun onResponse(c: Call, r: Response) { r.close() }
+        })
+    }
 
     private fun post(srv: String, path: String, body: String, tok: String?, cb: (Boolean,String,JSONObject?)->Unit) {
         val rb = Request.Builder().url(srv.trimEnd('/')+path).post(body.toRequestBody("application/json".toMediaType()))
