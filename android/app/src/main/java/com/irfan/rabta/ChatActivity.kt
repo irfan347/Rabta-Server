@@ -312,6 +312,8 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         }
         headerBar=hdr
         root.addView(hdr)
+        selectionBar=buildSelectionBar()
+        root.addView(selectionBar)
         callBar=CallBar(this,{ callShown && VoiceCall.with(peerId) }) { if(VoiceCall.with(peerId)) { showCallScreen();true } else false }
         root.addView(callBar.view,LinearLayout.LayoutParams(-1,-2))
         // One slim line while offline (tap for the full connection details), not a block of text.
@@ -540,7 +542,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         emojiBtn.contentDescription=if(panel) "Keyboard" else "Emoji"
     }
     @Deprecated("Deprecated in Java")
-    override fun onBackPressed() { if(callShown) hideCallScreen() else if(panelOpen()) hidePanel() else super.onBackPressed() }
+    override fun onBackPressed() { if(callShown) hideCallScreen() else if(selectedIds.isNotEmpty()) clearSelection() else if(panelOpen()) hidePanel() else super.onBackPressed() }
 
     private var captureUri:android.net.Uri?=null
     private fun takePhoto() {
@@ -596,9 +598,9 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
                 if(isDestroyed||isFinishing||version!=historyVersion)return@post
                 val unchanged=result.getOrNull()?.let { it==renderedHistory&&query==renderedQuery&&calls==renderedCalls }?:false
                 if(unchanged) { if(forceScroll)scrollBottom(true);return@post }
-                voiceViews.forEach { it.stop() };voiceViews.clear();chatBox.removeAllViews()
+                voiceViews.forEach { it.stop() };voiceViews.clear();chatBox.removeAllViews();shownMessages.clear();messageRows.clear();forwardButtons.clear()
                 result.onFailure {
-                    renderedHistory=null;renderedQuery=null;renderedCalls=null
+                    renderedHistory=null;renderedQuery=null;renderedCalls=null;selectedIds.clear();updateSelection()
                     chatBox.addView(RabtaUi.empty(this,"chats","Could not load messages","Your saved conversation is still on this phone.","Retry") { loadHistory() })
                 }.onSuccess { items ->
                     renderedHistory=items;renderedQuery=query;renderedCalls=calls
@@ -623,6 +625,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
                         items.firstOrNull { it.first.id==draftReplyId }?.first?.let { selectReply(it,false) }
                         draftReplyId=null
                     }
+                    selectedIds.retainAll(shownMessages.keys);updateSelection()
                     if(firstHistory||forceScroll||atBottom||scrollAfterSend) scrollBottom(!firstHistory) else chatScroll.post {
                         val anchorView=anchor?.let { saved ->(0 until chatBox.childCount).map { chatBox.getChildAt(it) }.firstOrNull { it.tag==saved.first } }
                         chatScroll.scrollTo(0,if(anchorView!=null&&anchor!=null) (anchorView.top-anchor.second).coerceAtLeast(0) else oldY)
@@ -634,6 +637,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     }
 
     private fun selectReply(m:Db.Message,focus:Boolean=true) {
+        clearSelection()
         replyTo=m
         val author=if(m.mine) "You" else Names.of(this,m.fromId,m.fromName.ifBlank { peerName })
         replyPreview.text="Reply to $author\n${MessageActions.preview(m)}"
@@ -677,6 +681,8 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     }
 
     private fun addBubble(m:Db.Message,meta:Pair<Boolean,String>,progress:Int?,continued:Boolean=false) {
+        shownMessages[m.id]=m
+        val author=if(m.mine) L.t(this,"You") else Names.of(this,m.fromId,m.fromName.ifBlank { peerName })
         val bubble=bubbleSurface(m.mine,!continued)
         bubble.tag="bubble:${m.id}"
         if(isGroup&&!m.mine&&!continued) bubble.addView(RabtaUi.text(this,Names.of(this,m.fromId,m.fromName.ifBlank { m.fromId }),13f,true,AppTheme.accent(this)).apply { setPadding(0,0,0,dp(2)) })
@@ -700,10 +706,19 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             }
             "image" -> {
                 val bmp=MediaHelper.base64ToBitmap(m.body)
-                if(bmp!=null) bubble.addView(ImageView(this).apply {
-                    setImageBitmap(bmp);scaleType=ImageView.ScaleType.FIT_CENTER;adjustViewBounds=true
-                    background=RabtaUi.shape(this@ChatActivity,AppTheme.raised(this@ChatActivity),12);clipToOutline=true;contentDescription="Photo"
-                },LinearLayout.LayoutParams(dp(220),dp(200)))
+                if(bmp!=null) {
+                    // Like WhatsApp: the photo fills its bubble in its own shape (very tall or wide ones are cropped), tap for full screen.
+                    val width=dp(250);val height=(width*bmp.height.toFloat()/bmp.width).toInt().coerceIn(dp(140),dp(330))
+                    val photo=FrameLayout(this).apply {
+                        background=RabtaUi.shape(this@ChatActivity,AppTheme.raised(this@ChatActivity),12);clipToOutline=true;isFocusable=true
+                        contentDescription="Photo from $author. Tap to open";tag="photo:${m.id}"
+                        setOnClickListener { PhotoViewer.show(this@ChatActivity,bmp,author) }
+                    }
+                    photo.addView(ImageView(this).apply { setImageBitmap(bmp);scaleType=ImageView.ScaleType.CENTER_CROP;importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO },FrameLayout.LayoutParams(-1,-1))
+                    photo.addView(View(this).apply { background=GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,intArrayOf(0x8C000000.toInt(),0)) },FrameLayout.LayoutParams(-1,dp(48),Gravity.BOTTOM))
+                    photo.addView(msgFooter(m,true),FrameLayout.LayoutParams(-2,-2,Gravity.BOTTOM or Gravity.END).apply { setMargins(0,0,dp(8),dp(6)) })
+                    bubble.addView(photo,LinearLayout.LayoutParams(width,height));timeInline=true
+                }
                 else bubble.addView(textLine("Photo unavailable"))
             }
             "voice" -> {
@@ -713,11 +728,20 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
                 }
                 voiceViews.add(voice);bubble.addView(voice,LinearLayout.LayoutParams(dp(250),-2))
             }
-            "file","video" -> {
-                bubble.addView(RabtaUi.text(this,if(m.msgType=="video") "Video" else "Document",12f,true,AppTheme.accent(this)))
-                bubble.addView(textLine(Attachments.name(m.body)))
-                bubble.addView(RabtaUi.text(this,Attachments.details(m.body),12f,color=SUB))
-                bubble.addView(RabtaUi.button(this,"Open ${if(m.msgType=="video") "video" else "file"}") { Attachments.open(this,m.body) }.apply { setPadding(0,dp(8),0,dp(8));background=RabtaUi.ripple(this@ChatActivity,Color.TRANSPARENT) })
+            "video" -> {
+                // Like WhatsApp: the picture, play in the middle, download and size in the corner, the time on the picture.
+                val video=VideoBubble(this,m.id,m.body,author).apply { tag="video:${m.id}" }
+                video.addView(msgFooter(m,true),FrameLayout.LayoutParams(-2,-2,Gravity.BOTTOM or Gravity.END).apply { setMargins(0,0,dp(8),dp(8)) })
+                video.setOnClickListener { video.play() };video.centre.setOnClickListener { video.play() };video.chip.setOnClickListener { video.download() }
+                bubble.addView(video);timeInline=true
+            }
+            "file" -> {
+                val card=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
+                card.addView(RabtaUi.text(this,"Document",12f,true,AppTheme.accent(this)))
+                card.addView(textLine(Attachments.name(m.body)))
+                card.addView(RabtaUi.text(this,Attachments.details(m.body),12f,color=SUB))
+                card.addView(RabtaUi.button(this,"Open file") { Attachments.open(this,m.body) }.apply { setPadding(0,dp(8),0,dp(8));background=RabtaUi.ripple(this@ChatActivity,Color.TRANSPARENT) })
+                bubble.addView(card,LinearLayout.LayoutParams(dp(250),-2))
             }
             "sticker" -> {
                 val iv=ImageView(this).apply { contentDescription="Sticker";scaleType=ImageView.ScaleType.FIT_CENTER }
@@ -737,8 +761,9 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         val emojis=reactions.keys().asSequence().map { reactions.optString(it) }.groupingBy { it }.eachCount().entries.joinToString("  ") { it.key+" "+it.value }
         if(meta.first||emojis.isNotEmpty())bubble.addView(RabtaUi.text(this,(if(meta.first) "★  " else "")+emojis,12f,color=SUB))
         progress?.let { bubble.addView(RabtaUi.text(this,"Uploading $it% · Hold to cancel",12f,color=SUB)) }
+        // Hold a message to select it; the header then offers Reply, Star, Delete, Forward and more for the selection.
         fun actions(v:View) {
-            v.setOnLongClickListener { MessageActions.show(this,m,isGroup,{ selectReply(it) },{loadHistory()});true }
+            v.setOnLongClickListener { it.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);toggleSelected(m.id);true }
             if(v is ViewGroup)for(i in 0 until v.childCount)actions(v.getChildAt(i))
         }
         actions(bubble)
@@ -750,9 +775,101 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
                 background=RabtaUi.ripple(this@ChatActivity,Color.TRANSPARENT);layoutParams=LinearLayout.LayoutParams(-1,-2)
             })
         }
-        val wrap=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL;gravity=if(m.mine) Gravity.END else Gravity.START;tag="message:${m.id}" }
+        val wrap=MessageRow(m.id).apply { orientation=LinearLayout.HORIZONTAL;gravity=(if(m.mine) Gravity.END else Gravity.START) or Gravity.CENTER_VERTICAL;tag="message:${m.id}" }
+        // Photos, videos, voice messages and files get WhatsApp's round forward button beside them.
+        val forward=if(m.msgType in setOf("image","video","voice","file")) forwardButton(m) else null
+        if(forward!=null&&m.mine) wrap.addView(forward,LinearLayout.LayoutParams(dp(36),dp(36)).apply { marginEnd=dp(8);topMargin=if(continued) dp(2) else dp(8) })
         wrap.addView(bubble,LinearLayout.LayoutParams(-2,-2).apply { topMargin=if(continued) dp(2) else dp(8) })
+        if(forward!=null&&!m.mine) wrap.addView(forward,LinearLayout.LayoutParams(dp(36),dp(36)).apply { marginStart=dp(8);topMargin=if(continued) dp(2) else dp(8) })
         chatBox.addView(wrap,LinearLayout.LayoutParams(-1,-2))
+        messageRows[m.id]=wrap;paintSelection(m.id)
+    }
+    private fun forwardButton(m:Db.Message)=UiIcons.image(this,"share_forward",TXT,18,L.t(this,"Forward")).apply {
+        isFocusable=true;tag="forward:${m.id}"
+        background=RabtaUi.ripple(this@ChatActivity,(AppTheme.surface(this@ChatActivity) and 0x00FFFFFF) or 0xD9000000.toInt(),999)
+        setOnClickListener { MessageActions.forward(this@ChatActivity,listOf(m)) }
+        setOnLongClickListener { performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);toggleSelected(m.id);true }
+        visibility=if(selectedIds.isEmpty()) View.VISIBLE else View.GONE
+    }.also { forwardButtons.add(it) }
+
+    // ── Selection: hold a message, then tap more; the header turns into actions for the chosen messages ──
+    private val selectedIds=linkedSetOf<String>()
+    /** The messages on screen now, by id, for the selection's actions, and their rows. */
+    private val shownMessages=mutableMapOf<String,Db.Message>()
+    private val messageRows=mutableMapOf<String,View>()
+    private val forwardButtons=mutableListOf<View>()
+    private lateinit var selectionBar:LinearLayout
+    private lateinit var selectionCount:TextView
+    private lateinit var replyAction:View
+    private lateinit var starAction:ImageView
+    /** A message's row: while selecting, a tap (or hold) anywhere on it chooses or drops it instead of opening anything. */
+    private inner class MessageRow(private val id:String):LinearLayout(this@ChatActivity) {
+        private val gestures=android.view.GestureDetector(context,object:android.view.GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e:MotionEvent)=true
+            override fun onSingleTapUp(e:MotionEvent):Boolean { toggleSelected(id);return true }
+            override fun onLongPress(e:MotionEvent) { toggleSelected(id) }
+        })
+        override fun onInterceptTouchEvent(ev:MotionEvent)=selectedIds.isNotEmpty()
+        @android.annotation.SuppressLint("ClickableViewAccessibility")
+        override fun onTouchEvent(ev:MotionEvent):Boolean = if(selectedIds.isNotEmpty()) { gestures.onTouchEvent(ev);true } else super.onTouchEvent(ev)
+    }
+    private fun buildSelectionBar()=LinearLayout(this).apply {
+        gravity=Gravity.CENTER_VERTICAL;setBackgroundColor(RECV);setPadding(dp(6),dp(8),dp(6),dp(8));visibility=View.GONE
+        addView(headerAction("back","Cancel selection") { clearSelection() })
+        selectionCount=RabtaUi.text(this@ChatActivity,"",20f,true).apply { setPadding(dp(10),0,dp(4),0);accessibilityLiveRegion=View.ACCESSIBILITY_LIVE_REGION_POLITE }
+        addView(selectionCount,LinearLayout.LayoutParams(0,-2,1f))
+        replyAction=headerAction("reply","Reply") { selectionAction("reply") }.also { addView(it) }
+        starAction=headerAction("star","Star") { selectionAction("star") }.also { addView(it) }
+        addView(headerAction("trash","Delete") { selectionAction("delete") })
+        addView(headerAction("share_forward","Forward") { selectionAction("forward") })
+        addView(headerAction("more","More options") { selectionAction("more") })
+    }
+    private fun toggleSelected(id:String) {
+        if(!shownMessages.containsKey(id)) return
+        if(!selectedIds.remove(id)) selectedIds.add(id)
+        paintSelection(id);updateSelection()
+    }
+    private fun clearSelection() {
+        if(selectedIds.isEmpty()) return
+        val was=selectedIds.toList();selectedIds.clear()
+        was.forEach { paintSelection(it) };updateSelection()
+    }
+    private fun paintSelection(id:String) {
+        val row=messageRows[id] ?: return
+        val on=id in selectedIds
+        row.setBackgroundColor(if(on) (GREEN and 0x00FFFFFF) or 0x33000000 else Color.TRANSPARENT)
+        androidx.core.view.ViewCompat.setStateDescription(row,if(selectedIds.isEmpty()) null else L.t(this,if(on) "Selected" else "Not selected"))
+    }
+    private fun selectedMessages()=shownMessages.values.filter { it.id in selectedIds }.sortedBy { it.sentAt }
+    /** Count and actions follow the selection: Reply for one message, Star or Unstar. */
+    private fun updateSelection() {
+        if(!::selectionBar.isInitialized) return
+        val on=selectedIds.isNotEmpty()
+        selectionBar.visibility=if(on&&!callShown) View.VISIBLE else View.GONE
+        if(!callShown) headerBar.visibility=if(on) View.GONE else View.VISIBLE
+        forwardButtons.forEach { it.visibility=if(on) View.GONE else View.VISIBLE }
+        if(!on) return
+        selectionCount.text=selectedIds.size.toString();selectionCount.contentDescription="${selectedIds.size} ${L.t(this,"selected")}"
+        replyAction.visibility=if(selectedIds.size==1) View.VISIBLE else View.GONE
+        val unstar=selectedMessages().let { chosen -> chosen.isNotEmpty()&&chosen.all { db.meta(it.id).first } }
+        starAction.contentDescription=L.t(this,if(unstar) "Unstar" else "Star")
+    }
+    private fun selectionAction(key:String) {
+        val chosen=selectedMessages();if(chosen.isEmpty()) { clearSelection();return }
+        when(key) {
+            "reply" -> chosen.singleOrNull()?.let { selectReply(it) }
+            "star" -> { MessageActions.star(this,chosen);clearSelection();loadHistory() }
+            "delete" -> MessageActions.delete(this,chosen) { clearSelection();loadHistory() }
+            "forward" -> MessageActions.forward(this,chosen) { clearSelection() }
+            "more" -> {
+                val items=mutableListOf<Pair<String,()->Unit>>()
+                chosen.singleOrNull()?.let { m -> items+=L.t(this,"React") to { clearSelection();MessageActions.react(this,m,isGroup) { loadHistory() } } }
+                items+=L.t(this,"Copy") to { MessageActions.copy(this,chosen);clearSelection() }
+                if(chosen.any { Transfers.progress.containsKey(it.id) }) items+=L.t(this,"Cancel transfer") to { chosen.forEach { Transfers.cancel(it.id) };clearSelection() }
+                if(selectedIds.size<shownMessages.size) items+=L.t(this,"Select all") to { selectedIds.addAll(shownMessages.keys);shownMessages.keys.forEach { paintSelection(it) };updateSelection() }
+                android.app.AlertDialog.Builder(this).setItems(items.map { it.first }.toTypedArray()) { _,i -> items[i].second() }.show()
+            }
+        }
     }
 
     private fun textLine(t:String)=RabtaUi.text(this,t,16f).apply { setLineSpacing(dp(1).toFloat(),1.05f) }
@@ -803,12 +920,17 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         wrap.addView(bubble,LinearLayout.LayoutParams(-2,-2).apply { topMargin=dp(8) })
         chatBox.addView(wrap,LinearLayout.LayoutParams(-1,-2))
     }
-    /** Time and, on your own messages, the tick: clock, ✓, ✓✓, blue ✓✓ or a red mark. The words stay for screen readers. */
-    private fun msgFooter(m:Db.Message)=TextView(this).apply {
-        textSize=11f;setTextColor(SUB);maxLines=1;includeFontPadding=false
+    /**
+     * Time and, on your own messages, the tick: clock, ✓, ✓✓, blue ✓✓ or a red mark. The words stay for screen readers.
+     * [onMedia]: white, over a photo or video, as in WhatsApp.
+     */
+    private fun msgFooter(m:Db.Message,onMedia:Boolean=false)=TextView(this).apply {
+        val plain=if(onMedia) Color.WHITE else SUB
+        textSize=11f;setTextColor(plain);maxLines=1;includeFontPadding=false
+        if(onMedia) setShadowLayer(dp(2).toFloat(),0f,dp(1).toFloat(),0x99000000.toInt())
         val line=android.text.SpannableStringBuilder(fmtTime(m.sentAt))
         if(m.mine) {
-            val color=when { m.status==MessageDelivery.READ -> AppTheme.readTick(this@ChatActivity); MessageDelivery.retryable(m.status) -> AppTheme.error(this@ChatActivity); else -> SUB }
+            val color=when { m.status==MessageDelivery.READ -> AppTheme.readTick(this@ChatActivity); MessageDelivery.retryable(m.status) -> AppTheme.error(this@ChatActivity); else -> plain }
             line.append(" ").append(UiIcons.inline(this@ChatActivity,MessageDelivery.tickIcon(m.status),color,16))
         }
         text=line
@@ -890,7 +1012,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         sendPhotoFrom(uri)
     }
     private fun sendVideoFrom(uri:android.net.Uri) {
-        VideoCompressor.prepareWithDialog(this,uri,null) { body ->
+        VideoCompressor.prepareWithDialog(this,uri,null,preview=true) { body ->
             android.app.AlertDialog.Builder(this).setTitle("Send ${Attachments.name(body)}?").setMessage("${Attachments.details(body)} · $shownName").setOnCancelListener { Attachments.discard(this,body) }
                 .setNegativeButton("Cancel") { _,_ -> Attachments.discard(this,body) }.setPositiveButton("Send") { _,_ -> sendContent(body,"video") }.show()
         }
@@ -1051,6 +1173,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     private fun showCallScreen() {
         if(!VoiceCall.with(peerId)) return
         if(!callShown) {
+            clearSelection()
             callShown=true
             if(panelOpen()) hidePanel()
             headerBar.visibility=View.GONE; (headerBar.parent as View).setBackgroundColor(DARK); RabtaUi.systemBars(this,true)

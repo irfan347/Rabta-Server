@@ -81,8 +81,11 @@ object VideoCompressor {
         } finally { out.delete() }
     }
 
-    /** Runs [prepare] with a progress dialog and Cancel; [done] receives the ready attachment body. */
-    fun prepareWithDialog(a: Activity, uri: Uri, maxDurationMs: Long?, done: (String) -> Unit) {
+    /**
+     * Runs [prepare] with a progress dialog and Cancel; [done] receives the ready attachment body. [preview] adds the
+     * frame, shape and length a chat shows before the video is downloaded ([Attachments.withVideoPreview]).
+     */
+    fun prepareWithDialog(a: Activity, uri: Uri, maxDurationMs: Long?, preview: Boolean = false, done: (String) -> Unit) {
         val stop = AtomicBoolean(false)
         val bar = ProgressBar(a, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100; progressTintList = android.content.res.ColorStateList.valueOf(AppTheme.accent(a))
@@ -99,7 +102,7 @@ object VideoCompressor {
             val result = runCatching {
                 prepare(a, uri, maxDurationMs, { stop.get() }) { p ->
                     if (p != last) { last = p; a.runOnUiThread { bar.progress = p; label.text = "Making it smaller to send… $p%" } }
-                }
+                }.let { if (preview) Attachments.withVideoPreview(a, it) else it }
             }
             a.runOnUiThread {
                 runCatching { dialog.dismiss() }

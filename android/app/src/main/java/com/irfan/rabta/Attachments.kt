@@ -64,6 +64,28 @@ object Attachments {
         val match=root(c).listFiles()?.firstOrNull { it.length()==size&&Regex("[a-f0-9-]{36}").matches(it.name)&&runCatching { hash(it.readBytes())==sha256 }.getOrDefault(false) } ?: return null
         return JSONObject().put("v",1).put("local",match.name).put("name",safeName(name)).put("mime",mime.take(100)).put("size",size).put("sha256",sha256).toString()
     }
+    /**
+     * A sent video's preview, as WhatsApp shows before anything is downloaded: a small frame (base64 JPEG), its
+     * shape and length. Added to the message, so [receive] keeps it; a video without one still opens as before.
+     */
+    fun withVideoPreview(c:Context,body:String):String = runCatching {
+        val o=JSONObject(body); val r=android.media.MediaMetadataRetriever()
+        try {
+            r.setDataSource(file(c,body).absolutePath)
+            val frame=r.getFrameAtTime(0,android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC) ?: return body
+            val scale=minOf(1f,320f/maxOf(frame.width,frame.height))
+            val small=android.graphics.Bitmap.createScaledBitmap(frame,maxOf(1,(frame.width*scale).toInt()),maxOf(1,(frame.height*scale).toInt()),true)
+            val jpeg=java.io.ByteArrayOutputStream().also { small.compress(android.graphics.Bitmap.CompressFormat.JPEG,60,it) }.toByteArray()
+            o.put("thumb",Base64.encodeToString(jpeg,Base64.NO_WRAP)).put("w",small.width).put("h",small.height)
+            r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()?.takeIf { it>0 }?.let { o.put("ms",it) }
+            o.toString()
+        } finally { runCatching { r.release() } }
+    }.getOrDefault(body)
+    private val PREVIEW=listOf("thumb","w","h","ms")
+    /** [to] (e.g. the server's record of an upload) with the preview [from] carries. */
+    fun keepPreview(from:JSONObject,to:String):String = runCatching {
+        val o=JSONObject(to); PREVIEW.forEach { k -> if(from.has(k)&&!o.has(k)) o.put(k,from.get(k)) }; o.toString()
+    }.getOrDefault(to)
     fun name(body:String)=runCatching { JSONObject(body).getString("name") }.getOrDefault("Attachment")
     fun details(body:String):String=runCatching { val n=JSONObject(body).getLong("size"); if(n>=1024*1024) "%.1f MB".format(n/1048576.0) else "${(n+1023)/1024} KB" }.getOrDefault("")
     fun open(a:Activity,body:String) {

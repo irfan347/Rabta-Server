@@ -18,7 +18,7 @@ object Transfers {
         val o=JSONObject(body)
         // Passing on a file you received: send this phone's copy, since the server lets go of a file once everyone it was
         // sent to has saved it. A file not saved here yet is still on the server for this phone, so that one is shared.
-        if(o.has("remote"))return localCopy(c,o)?.let { upload(c,it,id,changed) } ?: body
+        if(o.has("remote"))return localCopy(c,o)?.let { Attachments.keepPreview(o,upload(c,it,id,changed)) } ?: body
         cancelled.remove(id);val file=Attachments.file(c,body);val prefs=c.getSharedPreferences("uploads_${Session.id}",0)
         val hash=o.getString("sha256");var remote=prefs.getString(hash,null)
         try {
@@ -36,30 +36,39 @@ object Transfers {
                 }
             }
             if(cancelled.contains(id))throw Cancelled()
-            return FeatureApi.request("/api/uploads/$remote/complete","POST").toString()
+            return Attachments.keepPreview(o,FeatureApi.request("/api/uploads/$remote/complete","POST").toString())
         } catch(e:Cancelled) {
             if(remote!=null)runCatching { FeatureApi.request("/api/uploads/$remote","DELETE") }
             prefs.edit().remove(hash).apply();throw e
         } finally { progress.remove(id);cancelled.remove(id);changed() }
     }
-    fun download(c:Context,body:String):String {
+    /** [progress] gets the percentage while the file comes from the server. */
+    fun download(c:Context,body:String,progress:(Int)->Unit={}):String {
         val o=JSONObject(body);val remote=o.getString("remote");require(Regex("[a-f0-9]{32}").matches(remote))
         val prefs=c.getSharedPreferences("downloads_${Session.id}",0)
-        val local=localCopy(c,o) ?: fetch(c,o,remote)
+        val local=localCopy(c,o) ?: fetch(c,o,remote,progress)
         if(prefs.getString(remote,null)!=local)prefs.edit().putString(remote,local).apply()
         saved(c,remote)
         return local
     }
+    /** The file of [body] already on this phone: one sent from here, or one saved when it was opened. Quick, for drawing. */
+    fun onPhone(c:Context,body:String):java.io.File? = runCatching {
+        val o=JSONObject(body)
+        val local=if(o.has("remote")) c.getSharedPreferences("downloads_${Session.id}",0).getString(o.getString("remote"),null) ?: return null else body
+        Attachments.file(c,local).takeIf { it.exists() }
+    }.getOrNull()
     /** This phone's own copy of a received file: saved when it was first opened, or the same bytes restored from a backup. */
     fun localCopy(c:Context,o:JSONObject):String? {
         c.getSharedPreferences("downloads_${Session.id}",0).getString(o.optString("remote"),null)?.takeIf { runCatching { Attachments.file(c,it).exists() }.getOrDefault(false) }?.let { return it }
         return Attachments.find(c,o.optLong("size"),o.optString("sha256"),o.optString("name","attachment"),o.optString("mime","application/octet-stream"))
     }
-    private fun fetch(c:Context,o:JSONObject,remote:String):String {
+    private fun fetch(c:Context,o:JSONObject,remote:String,progress:(Int)->Unit):String {
         val request=Request.Builder().url(Session.serverUrl+"/api/files/$remote").header("Authorization","Bearer ${Session.token}").build()
         FeatureApi.http.newCall(request).execute().use { r ->
             check(r.isSuccessful) { "File unavailable (${r.code})" }
-            val out=java.io.ByteArrayOutputStream();r.body!!.byteStream().use { input -> val buffer=ByteArray(8192);while(true){val n=input.read(buffer);if(n<0)break;require(out.size()+n<=Attachments.MAX_BYTES);out.write(buffer,0,n)} }
+            val size=o.getLong("size").coerceAtLeast(1);var shown=-1
+            val out=java.io.ByteArrayOutputStream();r.body!!.byteStream().use { input -> val buffer=ByteArray(8192);while(true){val n=input.read(buffer);if(n<0)break;require(out.size()+n<=Attachments.MAX_BYTES);out.write(buffer,0,n)
+                val p=(out.size()*100/size).toInt().coerceAtMost(100);if(p!=shown){shown=p;progress(p)}} }
             val bytes=out.toByteArray();val hash=java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString(""){"%02x".format(it)}
             check(bytes.size.toLong()==o.getLong("size")&&hash==o.getString("sha256")) { "File checksum failed" }
             return Attachments.save(c,bytes,o.getString("name"),o.getString("mime"))
