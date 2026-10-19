@@ -52,9 +52,10 @@ class PushTest {
         val old = listOf(Session.id, Session.name, Session.token, Session.serverUrl)
         val prefs = ctx.getSharedPreferences("push", 0); val oldSent = prefs.getString("sent", null)
         val server = Server(); val mock = MockWebServer().apply { dispatcher = server; start() }
+        val url = mock.url("/").toString().trimEnd('/') // resolves the host name: never on the main thread
         ui {
             MessageService.stop(ctx); WsClient.disconnect()
-            Session.id = "PU1100000001"; Session.name = "Push fixture"; Session.token = "local-push-test"; Session.serverUrl = mock.url("/").toString().trimEnd('/')
+            Session.id = "PU1100000001"; Session.name = "Push fixture"; Session.token = "local-push-test"; Session.serverUrl = url
         }
         prefs.edit().remove("sent").commit()
         try { run(server) } finally {
