@@ -24,6 +24,9 @@ object Names {
 
     fun nickname(c: Context, peerId: String): String = all(c)[peerId].orEmpty()
 
+    /** Reads the names again on next use (e.g. another database was opened). */
+    fun forget() { cache = null }
+
     /** Saves (or, when blank, removes) your nickname for [peerId]. Call off the main thread. */
     fun set(c: Context, peerId: String, nickname: String, theirName: String = "") {
         Db.get(c).setNickname(peerId, nickname, theirName)

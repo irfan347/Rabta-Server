@@ -825,9 +825,9 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         // and not during a quick reconnect.
         val offline=WsClient.showsOffline()
         statusTv.text=when {
+            self -> L.t(this,"Message yourself")   // your notes need no connection
             offline -> L.t(this,"Connecting…")
             isGroup -> groupSize?.let { "$it members" } ?: L.t(this,"Group")
-            self -> L.t(this,"Message yourself")
             presence.isNotBlank() -> presence
             else -> L.t(this,"tap here for contact info")
         }

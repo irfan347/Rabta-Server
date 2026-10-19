@@ -1,4 +1,4 @@
 {
   "minVersionCode": 0,
-  "notes": "Messages and calls now reach you even when Rabta is closed or stopped by your phone: Rabta's server wakes it through Google's push service, like WhatsApp. No message text goes through Google.\nOpening Rabta connects faster, and Rabta asks once to keep running in the background. Tap Allow."
+  "notes": "Hold a chat to pin, mute, archive or delete it, several at once. The + button opens your contacts, a new group, a new contact and Message yourself.\nGive contacts your own names (only you see them), choose who sees your status (all contacts, all except some, or only some), and tap a photo for that person's status or profile.\nVideo calls: filters and background blur, and the name and time fade so the picture stays clear.\nOne account per phone."
 }

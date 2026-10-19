@@ -24,7 +24,7 @@ class MessageQueryTests(unittest.TestCase):
         self.db.execute("INSERT INTO messages(id,conv_id,from_id,body,sent_at,mine,status,msg_type) VALUES (?,?,?,?,?,?,?,?)",(str(id),conv,'me',body,time,mine,status,kind))
 
     def search(self,query):
-        return self.db.execute(sql_in('searchConversations','SELECT c.peer_id'),(query,query,query)).fetchall()
+        return self.db.execute(sql_in('searchConversations','SELECT c.peer_id'),(query,)*4).fetchall()
 
     def test_search_matches_old_messages_not_just_latest_preview(self):
         self.message('old',body='Train tickets',time=1)
@@ -66,5 +66,20 @@ class MessageQueryTests(unittest.TestCase):
         self.db.execute(sql_in('applyReadReceipt',"UPDATE messages SET status='read' WHERE conv_id="),('ali',))
         states=dict(self.db.execute('SELECT id,status FROM messages'))
         self.assertEqual(states,{'sent':'read','relayed':'read','delivered':'read','direct_delivered':'read','failed':'failed','sending':'sending','queued':'queued','mesh':'mesh'})
+
+
+    def test_your_name_for_someone_finds_their_chat(self):
+        self.db.execute("INSERT INTO contacts(peer_id,name,nickname) VALUES ('ali','Ali','Bhai Jaan')")
+        hit=self.search('bhai')
+        self.assertEqual([r[0] for r in hit],['ali'])
+        self.assertEqual(hit[0][9],'Bhai Jaan')
+        self.assertEqual(hit[0][1],'Ali','Their own name stays as stored')
+
+    def test_pinned_chats_come_first_and_archived_are_still_found(self):
+        self.db.execute("UPDATE conversations SET last_time=5 WHERE peer_id='ali'")
+        self.db.execute("UPDATE conversations SET pinned=10,last_time=1 WHERE peer_id='amna'")
+        self.assertEqual([r[0] for r in self.search('a')],['amna','ali'])
+        self.db.execute("UPDATE conversations SET archived=1 WHERE peer_id='ali'")
+        self.assertEqual(self.search('ali')[0][8],1,'A search still finds an archived chat, marked archived')
 
 if __name__ == '__main__': unittest.main()

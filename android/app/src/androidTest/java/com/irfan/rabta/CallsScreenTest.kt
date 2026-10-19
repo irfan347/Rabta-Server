@@ -357,6 +357,41 @@ class CallsScreenTest {
         }
     }
 
+    /** Filters and background blur change your camera during a call; the camera keeps going and the call ends cleanly. */
+    @Test fun videoEffectsChangeTheCameraWithoutStoppingIt()=fixture { _ ->
+        listOf("CAMERA","RECORD_AUDIO").forEach { shell("pm grant ${ctx.packageName} android.permission.$it") }
+        val ended=CountDownLatch(1);val offered=CountDownLatch(1);val server=answeringServer(ended,offered)
+        server.start();val url=server.url("/").toString().trimEnd('/')
+        ui { Session.serverUrl=url;WsClient.connect(Session) }
+        var video:VideoCallActivity?=null
+        try {
+            waitUi { WsClient.connected&&WsClient.protocol>=2 }
+            video=inst.startActivitySync(Intent(ctx,VideoCallActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra(VideoCallActivity.PEER_ID,"CA1100000002").putExtra(VideoCallActivity.PEER_NAME,"Video contact")
+                .putExtra(VideoCallActivity.IS_CALLER,true).putExtra(VideoCallActivity.CALL_ID,"BBBBBB000002")) as VideoCallActivity
+            val v=video!!
+            waitUi { VideoCall.active }
+            assertTrue("The video offer goes out",offered.await(20,TimeUnit.SECONDS))
+            fun press(description:String) { var t:View?=null;waitUi { t=all(v.window.decorView).firstOrNull { it.isShown&&it.contentDescription?.toString()==description };t!=null };ui { t!!.performClick() } }
+            press("Filters and background blur")
+            press("Warm filter")
+            waitUi { VideoEffects.filter==VideoFilter.WARM }
+            press("Background blur, off")
+            waitUi { VideoEffects.blur }
+            val before=VideoEffects.processed
+            Thread.sleep(3000)
+            org.junit.Assume.assumeTrue("This emulator's camera sends frames",VideoEffects.processed>before)
+            assertEquals("Every frame took the effects",0L,VideoEffects.failures)
+            ui { all(v.window.decorView).first { it.isShown&&it.contentDescription=="End call" }.performClick() }
+            assertTrue("End tells the other phone",ended.await(5,TimeUnit.SECONDS))
+            waitUi { !VideoCall.active }
+            assertEquals("Effects end with the call",VideoFilter.NORMAL,VideoEffects.filter);assertFalse(VideoEffects.blur)
+        } finally {
+            ui { video?.finish();VideoCall.end();WsClient.disconnect();MessageService.stop(ctx) }
+            server.shutdown()
+        }
+    }
+
     /** The fixture account's server: counts connections in [opened] and answers Rabta's ping only while [answering]. */
     private fun pingServer(opened:java.util.concurrent.atomic.AtomicInteger,answering:java.util.concurrent.atomic.AtomicBoolean)=MockWebServer().apply {
         dispatcher=object:Dispatcher() {

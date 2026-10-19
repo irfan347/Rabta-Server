@@ -22,6 +22,9 @@ object VideoEffects : VideoProcessor {
     /** While the effects panel is open: a small upright snapshot for its previews, about twice a second. */
     @Volatile var onSnapshot: ((I420Planes) -> Unit)? = null
     @Volatile private var sink: VideoSink? = null
+    /** Frames that went out with an effect, and frames an effect could not handle (sent unchanged): for diagnostics and tests. */
+    @Volatile var processed = 0L; private set
+    @Volatile var failures = 0L; private set
     @Volatile private var lastSnapshot = 0L
 
     fun reset() { filter = VideoFilter.NORMAL; blur = false; onSnapshot = null; Person.close() }
@@ -45,10 +48,10 @@ object VideoEffects : VideoProcessor {
             if (f == VideoFilter.NORMAL && !b) { out.onFrame(frame); return }
             if (b) { Person.find(p, frame.rotation); Person.latest(p.w, p.h, frame.rotation)?.let { m -> VideoLook.blurBackground(p, frame.rotation, m.data, m.w, m.h) } }
             VideoLook.colour(p, f)
-            val processed = VideoFrame(write(p), frame.rotation, frame.timestampNs)
-            out.onFrame(processed); processed.release()
+            val changed = VideoFrame(write(p), frame.rotation, frame.timestampNs)
+            out.onFrame(changed); changed.release(); processed++
         } catch (_: Throwable) {
-            out.onFrame(frame)   // an effect that fails never stops the camera
+            failures++; out.onFrame(frame)   // an effect that fails never stops the camera
         } finally { source.release() }
     }
 
