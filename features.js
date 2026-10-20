@@ -130,5 +130,29 @@ module.exports=function install({app,authId,users,getPool}) {
   }));
   app.post('/api/status/:id/view',wrap(async(req,res,me)=>{const s=statuses.get(req.params.id);ensure(s&&s.expires>Date.now()&&!blocked(s.owner,me)&&(s.owner===me||s.audience.includes(me)),'Status unavailable');if(me!==s.owner&&!s.viewers.includes(me)){const next={...s,viewers:[...s.viewers,me],viewedAt:{...(s.viewedAt||{}),[me]:Date.now()}};await persist('status',s.id,next);statuses.set(s.id,next)}res.json({ok:true});}));
   app.delete('/api/status/:id',wrap(async(req,res,me)=>{const s=statuses.get(req.params.id);ensure(s&&s.owner===me,'Status unavailable');await remove('status',s.id);statuses.delete(s.id);res.json({ok:true});}));
-  return {init,blocked,grant,tidy:()=>cleanup(true)};
+  /**
+   * Deleting an account: its updates, files and photo go, with the blocks and reports it is in, and it leaves the
+   * audiences and viewers of other people's updates. Updates that ended are cleared from storage too.
+   */
+  async function forget(me){
+    const db=getPool();
+    if(db){
+      await db.query("DELETE FROM rf_data WHERE kind IN ('grant','got') AND (id LIKE $2 OR split_part(id,':',1) IN (SELECT id FROM rf_data WHERE kind='upload' AND data::jsonb->>'owner'=$1))",[me,'%:'+me]);
+      await db.query("DELETE FROM rf_data WHERE (kind='upload' AND data::jsonb->>'owner'=$1) OR (kind='photo' AND id=$1) OR (kind='block' AND (id LIKE $2 OR id LIKE $3))"+
+        " OR (kind='report' AND (data::jsonb->>'reporter'=$1 OR data::jsonb->>'target'=$1)) OR (kind='status' AND (data::jsonb->>'owner'=$1 OR (data::jsonb->>'expires')::bigint<=$4))",[me,me+':%','%:'+me,Date.now()]);
+    }
+    for(const [key,s] of [...statuses]){
+      if(s.owner===me){statuses.delete(key);continue}
+      if(!s.audience.includes(me)&&!(s.viewers||[]).includes(me))continue;
+      const left={...s,audience:s.audience.filter(x=>x!==me),viewers:(s.viewers||[]).filter(x=>x!==me),viewedAt:{...(s.viewedAt||{})}};delete left.viewedAt[me];
+      await persist('status',key,left);statuses.set(key,left);
+    }
+    for(const u of [...uploads.values()])if(u.owner===me){uploads.delete(u.id);for(const to of sharedWith.get(u.id)||[])grants.delete(u.id+':'+to);sharedWith.delete(u.id);holders.delete(u.id);used.delete(u.id)}
+    for(const key of [...grants.keys()])if(key.endsWith(':'+me)){grants.delete(key);sharedWith.get(key.slice(0,key.indexOf(':')))?.delete(me)}
+    for(const people of holders.values())people.delete(me);
+    for(const key of [...blocks])if(key.startsWith(me+':')||key.endsWith(':'+me))blocks.delete(key);
+    photos.delete(me);
+    for(let i=reports.length-1;i>=0;i--)if(reports[i].reporter===me||reports[i].target===me)reports.splice(i,1);
+  }
+  return {init,blocked,grant,tidy:()=>cleanup(true),forget};
 };

@@ -514,6 +514,93 @@ app.post('/api/groups', async (req, res) => {
   res.json({ id, name, members:[...members] });
 });
 
+// ---------- delete account ----------
+// Google Play asks apps with sign-up to let people delete their account, in the app and on the web. The account goes
+// with everything it left on the server: messages and receipts still on their way to or from it, its place in groups,
+// its updates, files, photo, blocks, reports, push tokens, phones and devices, and its calls end. Other people keep
+// what is on their own phones; the username becomes free.
+async function deleteAccount(userId) {
+  const user = memUsers.get(userId); if (!user) return;
+  // Storage first, sign-in last: if a step fails, the account still works and the person can try again.
+  if (pool) {
+    await pool.query('DELETE FROM ru_messages WHERE from_id=$1 OR to_id=$1', [userId]);
+    await pool.query('DELETE FROM ru_receipts WHERE by_id=$1 OR to_id=$1', [userId]);
+    for (const g of groups.values()) if (g.members.has(userId)) await pool.query('UPDATE rg_groups SET members=$1 WHERE id=$2', [[...g.members].filter(m => m !== userId).join(','), g.id]);
+  }
+  await features.forget(userId); await push.forgetUser(userId); await account.forget(userId);
+  if (pool) await pool.query('DELETE FROM ru_users WHERE id=$1', [userId]);
+  memUsers.delete(userId); loginFails.delete(user.username);
+  for (const g of groups.values()) g.members.delete(userId);
+  for (let i = memMessages.length - 1; i >= 0; i--) if (memMessages[i].from_id === userId || memMessages[i].to_id === userId) memMessages.splice(i, 1);
+  for (let i = memReceipts.length - 1; i >= 0; i--) if (memReceipts[i].by_id === userId || memReceipts[i].to_id === userId) memReceipts.splice(i, 1);
+  for (const [key, t] of [...awaiting]) { const [, from, to] = key.split('|'); if (from === userId || to === userId) { clearTimeout(t); awaiting.delete(key); } }
+  for (const call of [...voiceCalls.values(), ...videoCalls.values()]) if (call.from === userId || call.to === userId) endCall(call);
+  const w = online.get(userId); if (w) try { w.close(1008, 'auth'); } catch (_) {}
+  presenceChanged(userId); for (const x of online.values()) if (x.rabtaWatch === userId) x.rabtaWatch = '';
+}
+// The PIN is typed again to delete, under the same limit as signing in: 10 wrong ones in 15 minutes.
+const tooManyTries = username => { const f = loginFails.get(username); return !!f && f.count >= 10 && f.until > Date.now(); };
+function wrongPin(username) { const f = loginFails.get(username), cur = (f && f.until > Date.now()) ? f : { count: 0, until: Date.now() + 15 * 60 * 1000 }; cur.count++; loginFails.set(username, cur); }
+async function deleted(res, userId) {
+  try { await deleteAccount(userId); res.json({ ok: true }); }
+  catch (e) { console.error('Account deletion failed:', e.message); res.status(503).json({ error: 'The account could not be deleted, please try again' }); }
+}
+// From the app: the signed-in phone (a trusted one, once the account has any), with the PIN.
+app.post('/api/me/delete', async (req, res) => {
+  const auth = readTokenFull(bearer(req)), user = auth && memUsers.get(auth.id);
+  if (!user) return res.status(401).json({ error: 'Login required' });
+  if (tooManyTries(user.username)) return res.status(429).json({ error: 'Too many attempts, wait 15 minutes' });
+  if (!checkPin(String(req.body?.pin || ''), user.pass_hash)) { wrongPin(user.username); return res.status(401).json({ error: 'Wrong PIN' }); }
+  await deleted(res, user.id);
+});
+// From the web page: the PIN, and the recovery code once the account has a trusted phone, as signing in on a new phone needs.
+app.post('/api/delete-account', async (req, res) => {
+  const username = String(req.body?.username || '').trim().toLowerCase(), code = String(req.body?.recoveryCode || '');
+  if (tooManyTries(username)) return res.status(429).json({ error: 'Too many attempts, wait 15 minutes' });
+  const user = [...memUsers.values()].find(u => u.username === username);
+  if (!user || !checkPin(String(req.body?.pin || ''), user.pass_hash)) { wrongPin(username); return res.status(401).json({ error: 'Wrong username or PIN' }); }
+  if (!account.mayDelete(user, code)) {
+    if (code) wrongPin(username);
+    return res.status(403).json({ error: code ? 'Wrong recovery code' : 'Enter the recovery code you saved when you set up Rabta, or delete the account in the app: Settings → Delete account', recoveryCode: true });
+  }
+  await deleted(res, user.id);
+});
+
+// ---------- web pages: privacy policy and account deletion ----------
+const CONTACT = String(process.env.CONTACT_EMAIL || '').trim().replace(/[<>&"']/g, '');
+const page = (title, body) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title>` +
+  `<style>body{font:16px/1.55 system-ui,sans-serif;max-width:720px;margin:0 auto;padding:24px 16px;color:#1d2433;background:#fff}h1{font-size:26px}h2{font-size:19px;margin-top:28px}` +
+  `label{display:block;margin:14px 0 4px;font-weight:600}input{width:100%;box-sizing:border-box;padding:10px;font:inherit;border:1px solid #9aa3b2;border-radius:8px}` +
+  `button{margin-top:18px;padding:12px 18px;font:inherit;font-weight:600;color:#fff;background:#c62828;border:0;border-radius:8px}#out{margin-top:16px;font-weight:600}` +
+  `@media(prefers-color-scheme:dark){body{color:#e8ecf4;background:#0f141c}input{background:#1a212c;color:inherit}}</style></head><body>${body}</body></html>`;
+app.get('/privacy', (req, res) => res.type('html').send(page('Rabta privacy policy', `<h1>Rabta privacy policy</h1><p>Updated 20 October 2026. Rabta is a messaging app for chats, voice and video calls, status updates and messages between nearby phones without internet.</p>
+<h2>What the Rabta server keeps, and why</h2><ul>
+<li><b>Your account:</b> your username, display name and account ID, and your PIN stored only as a salted hash, so you can sign in. When you were last online, which your contacts see. Your profile photo, if you add one.</li>
+<li><b>Your phone:</b> a one-way hash of the phone's Android ID, so a phone has one Rabta account, and the public keys of the phones you trust for signing in.</li>
+<li><b>Messages, photos, videos, voice messages and files</b> go through the server, which keeps a message only until it is delivered and a file only until the people it was sent to have saved it; then the content is deleted. Small delivery records (message IDs and times, no content) are kept for up to 30 days. Internet messages are protected by TLS on the way, but they are not end-to-end encrypted, so they pass through the server readable.</li>
+<li><b>Calls:</b> voice calls pass through the server as they happen, and video calls go between the phones or through a relay. Calls are never recorded or stored.</li>
+<li><b>Status updates</b> are kept for 24 hours and shown only to the people you choose.</li>
+<li><b>Notifications:</b> a Firebase Cloud Messaging token (from Google) lets the server wake Rabta for new messages and calls. The wake carries no message content.</li>
+<li>The people you block, and reports you send about misuse.</li></ul>
+<h2>On your phone</h2><p>Your chats are stored on your phone. A backup is made only when you choose, encrypted with your password. Nearby messaging uses Bluetooth and Wi-Fi to find Rabta phones around you; some Android versions need the location permission for that, but Rabta does not collect or store your location. Nearby messages are encrypted between the phones.</p>
+<h2>Who else sees it</h2><p>Rabta shows no ads, sells no data and uses no analytics or tracking. Google delivers the wake notifications, and the server and its database run on hosting providers that process the data only to run Rabta.</p>
+<h2>Deleting your account</h2><p>In Rabta: <b>Settings → Delete account</b>. On the web: <a href="/delete-account">delete your account here</a>. This removes your account, profile photo, status updates, phones and devices, push tokens, and the messages and files still on their way to or from you; Rabta also deletes that account's chats on your phone. Messages already delivered stay on the phones of the people who received them.</p>
+<h2>Children</h2><p>Rabta is not meant for children under 13.</p>
+${CONTACT ? `<h2>Contact</h2><p>Questions about privacy: <a href="mailto:${CONTACT}">${CONTACT}</a></p>` : ''}`)));
+app.get('/delete-account', (req, res) => res.type('html').send(page('Delete your Rabta account', `<h1>Delete your Rabta account</h1>
+<p>The easiest way is in the app: <b>Settings → Delete account</b>. You can also do it here, for example if you no longer have your phone.</p>
+<p>This deletes your account, profile photo, status updates, phones and devices, push tokens, and messages and files still on their way to or from you. It cannot be undone. Messages already delivered stay on the phones of the people who received them. Your username becomes free for others.</p>
+<form id="f"><label for="u">Username</label><input id="u" name="username" autocomplete="username" required>
+<label for="p">PIN</label><input id="p" name="pin" type="password" inputmode="numeric" autocomplete="current-password" required>
+<label for="c">Recovery code (needed if you have a trusted phone)</label><input id="c" name="recoveryCode" autocomplete="off" placeholder="XXXX-XXXX-XXXX">
+<button type="submit">Delete my account</button></form><p id="out" role="status"></p>
+<script>const v=id=>document.getElementById(id).value;document.getElementById('f').addEventListener('submit',async e=>{e.preventDefault();const out=document.getElementById('out');
+if(!confirm('Delete this Rabta account for good?'))return;out.textContent='Deleting…';
+try{const r=await fetch('/api/delete-account',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:v('u'),pin:v('p'),recoveryCode:v('c')})});
+const b=await r.json().catch(()=>({}));out.textContent=r.ok?'Your Rabta account has been deleted.':(b.error||'Could not delete, please try again');if(r.ok)e.target.reset();}
+catch(_){out.textContent='No connection, please try again';}});</script>
+${CONTACT ? `<p>Need help? <a href="mailto:${CONTACT}">${CONTACT}</a></p>` : ''}`)));
+
 app.get('/health', (req, res) => res.json({ ok: true, db: !!pool, online: online.size, users: memUsers.size, push: push.enabled(), ...push.stats?.() }));
 
 const features=require('./features')({app,authId,users:memUsers,getPool:()=>pool});

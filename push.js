@@ -125,5 +125,11 @@ module.exports = function install({ app, authId, getPool, account = process.env.
 
   // How many phones can be woken, and how the latest wake went (no tokens, ids or message content).
   const stats = () => ({ pushPhones: tokens.size, pushLast: lastSend, pushSetup: sa ? 'ok' : setup.problem, pushProject: sa ? sa.project_id : null });
-  return { init, wake, enabled: () => !!sa, stats };
+  /** A deleted account's phones are no longer woken. */
+  async function forgetUser(userId) {
+    const db = getPool(); if (db) await db.query("DELETE FROM rf_data WHERE kind='push' AND data::jsonb->>'user'=$1", [userId]);
+    for (const [token, user] of [...tokens]) if (user === userId) tokens.delete(token);
+    lastWake.delete(userId);
+  }
+  return { init, wake, enabled: () => !!sa, stats, forgetUser };
 };

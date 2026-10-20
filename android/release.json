@@ -1,4 +1,4 @@
 {
   "minVersionCode": 0,
-  "notes": "Rabta now targets Android 16, ready for Google Play.\nVideo calls use a newer calling engine, which also runs on phones with 16 KB memory pages.\nBack works as before on Android 16, with its new back animation."
+  "notes": "Settings → Delete account deletes your Rabta account and this phone's chats for it, after your PIN.\nRabta's privacy policy is at rabta-server-1e2i.onrender.com/privacy."
 }
