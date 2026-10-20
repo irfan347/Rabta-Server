@@ -118,9 +118,9 @@ open class ThemedActivity : androidx.fragment.app.FragmentActivity() {
         window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN or android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
     }
 
-    override fun setContentView(view: View) {
+    override fun setContentView(view: View?) {
         super.setContentView(view)
-        RabtaUi.insets(view) { onKeyboardVisibilityChanged(it) }
+        if (view != null) RabtaUi.insets(view) { onKeyboardVisibilityChanged(it) }
     }
     protected open fun onKeyboardVisibilityChanged(visible: Boolean) {}
     override fun onResume() {
