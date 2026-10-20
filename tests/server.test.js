@@ -353,3 +353,19 @@ test('typing says when a voice message is being recorded; blocked people see nei
   await a.send({type:'typing',to:f.eve.id,kind:'recording'});
   assert.equal(e.messages.filter(m=>m.type==='typing').length,0);
 });
+test('a phone that goes quiet (its data went off) stops showing online; last seen is when it was last heard',async()=>{
+  const f=await fixture();const get=f.routes.get('GET /api/user/id/:id');
+  const look=async id=>{const r={code:200,status(n){this.code=n;return this},json(v){this.body=v;return this}};await get({headers:{authorization:'Bearer '+f.bob.token},params:{id},query:{}},r);return r.body;};
+  const b=f.socket(f.bob,{presence:true});await b.send({type:'watch',id:f.alice.id});
+  const a=f.socket(f.alice,{presence:true});await a.send({type:'presence',active:true});
+  assert.equal((await look(f.alice.id)).online,true);
+  const heard=Date.now()-30000;a.ws.rabtaHeard=heard;
+  assert.equal((await look(f.alice.id)).online,false,'Not heard from for 30 s: not online, before its socket is closed');
+  f.beat();
+  const told=()=>b.messages.filter(m=>m.type==='presence');
+  assert.deepEqual(told().map(m=>m.online),[false,true,false]);assert.equal(told().at(-1).lastSeen,heard);
+  await a.send({type:'presence',active:true});
+  assert.deepEqual(told().map(m=>m.online),[false,true,false,true],'Heard again: online again, each change told once');
+  const old=f.socket(f.eve);old.ws.rabtaHeard=Date.now()-40000;
+  assert.equal((await look(f.eve.id)).online,false,'Older phones too, after 35 s without a ping');
+});

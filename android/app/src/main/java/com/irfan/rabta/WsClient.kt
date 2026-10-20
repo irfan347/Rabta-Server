@@ -78,10 +78,15 @@ object WsClient {
     }
 
     // Contacts see "online" only while Rabta is on this phone's screen (see OnScreen), as in WhatsApp; the server is
-    // told on every connection, and again whenever it changes.
+    // told on every connection and whenever it changes, and every 10 s while Rabta shows, so a phone whose data goes
+    // off stops showing online within half a minute.
     @Volatile private var shown = false
     fun shown(value: Boolean) = main { if (shown == value) return@main; shown = value; if (connected) tellShown() }
-    private fun tellShown() { ws?.send(JSONObject().put("type", "presence").put("active", shown).toString()) }
+    private val stillShown = Runnable { if (connected) tellShown() }
+    private fun tellShown() {
+        ws?.send(JSONObject().put("type", "presence").put("active", shown).toString())
+        handler.removeCallbacks(stillShown); if (shown) handler.postDelayed(stillShown, 10_000)
+    }
     /** The contact whose chat is open: the server sends their online and last seen as they change. "" for none. */
     private var watching = ""
     fun watch(id: String) = main { if (watching == id) return@main; watching = id; if (connected) tellWatching() }

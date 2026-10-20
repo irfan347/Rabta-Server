@@ -172,13 +172,24 @@ const groups = new Map();  // groupId -> {id,name,creator,members:Set}
 function sendTo(id, payload) { const socket=online.get(id); if(socket?.readyState===1) socket.send(JSON.stringify(payload)); }
 // "Online" is Rabta open on the phone's screen, as in WhatsApp, not a phone kept connected in the background. Phones
 // that report it say so when they connect (X-Rabta-Presence) and then send {type:'presence',active}; older ones count
-// as online while connected, as before.
-function isOnline(id) { const w = online.get(id); return !!w && w.rabtaActive !== false; }
+// as online while connected, as before. A phone not heard from lately (its data went off) is not online any more, well
+// before its socket is closed: while Rabta shows, the app speaks every 10 s; older phones ping every 25 s.
+const SHOWN_MS = 25000;
+function isOnline(id) {
+  const w = online.get(id); if (!w || w.rabtaActive === false) return false;
+  return Date.now() - w.rabtaHeard < (w.rabtaActive ? SHOWN_MS : QUIET_MS);
+}
 function presenceOf(id) { return { type: 'presence', id, online: isOnline(id), lastSeen: memUsers.get(id)?.last_seen || 0 }; }
 // Tells the phones that have this contact's chat open (see 'watch').
 function presenceChanged(id) {
+  const w = online.get(id); if (w) w.rabtaTold = isOnline(id);
   const frame = JSON.stringify(presenceOf(id));
-  for (const w of online.values()) if (w.rabtaWatch === id && w.readyState === 1 && !features.blocked(id, w.rabtaUser)) try { w.send(frame); } catch (_) {}
+  for (const x of online.values()) if (x.rabtaWatch === id && x.readyState === 1 && !features.blocked(id, x.rabtaUser)) try { x.send(frame); } catch (_) {}
+}
+// After anything that may change it ([was]: what watchers were told): last seen is when it stopped being online ([at]).
+function presenceUpdate(id, was, at = Date.now()) {
+  const now = isOnline(id); if (now === !!was) return;
+  updateLastSeen(id, now ? Date.now() : at); presenceChanged(id);
 }
 // Resolves true once the frame is written to the socket, false if the socket is gone or the write failed.
 // This is a transport write, not a recipient receipt; clients ignore duplicate message IDs on redelivery.
@@ -315,9 +326,9 @@ async function deliverReceipts(userId, ws) {
   }
 }
 
-function updateLastSeen(userId) {
-  const u = memUsers.get(userId); if (u) u.last_seen = Date.now();
-  if (pool) pool.query('UPDATE ru_users SET last_seen=$1 WHERE id=$2', [Date.now(), userId]).catch(() => {});
+function updateLastSeen(userId, at = Date.now()) {
+  const u = memUsers.get(userId); if (u) u.last_seen = at;
+  if (pool) pool.query('UPDATE ru_users SET last_seen=$1 WHERE id=$2', [at, userId]).catch(() => {});
 }
 
 wss.on('connection', (ws, req) => {
@@ -327,14 +338,14 @@ wss.on('connection', (ws, req) => {
   ws.rabtaDevice = auth.device; ws.rabtaUser = userId;
   // A phone that reports when Rabta is on its screen is away until it says it is.
   if (req.headers['x-rabta-presence']) ws.rabtaActive = false;
-  const user = memUsers.get(userId), wasOnline = isOnline(userId);
+  const user = memUsers.get(userId), was = online.get(userId)?.rabtaTold;
   if (online.has(userId)) try { online.get(userId).close(); } catch (_) {}
   online.set(userId, ws);
   ws.rabtaAlive = true; ws.rabtaHeard = Date.now(); ws.rabtaPings = 0;
   ws.on('pong', () => { ws.rabtaAlive = true; ws.rabtaHeard = Date.now(); });
   ws.on('ping', () => { ws.rabtaAlive = true; ws.rabtaHeard = Date.now(); ws.rabtaPings++; });   // the app pings every 25 s
   if (ws.rabtaActive !== false) updateLastSeen(userId);
-  if (isOnline(userId) !== wasOnline) presenceChanged(userId);
+  presenceUpdate(userId, was); ws.rabtaTold = isOnline(userId);
 
   ws.send(JSON.stringify({ type: 'ready', id: userId, name: user.name, protocol: 2, receipts: true }));
   for (const frame of account.pendingFor(userId)) ws.send(JSON.stringify(frame));
@@ -402,8 +413,8 @@ wss.on('connection', (ws, req) => {
       else for(const type of ['call_end','video_end']) ws.send(JSON.stringify({type,from:String(msg.to||''),callId:String(msg.callId||'')}));
     } else if (msg.type === 'presence') {
       // Rabta came on the screen or left it: online while it shows, last seen when it went.
-      const was = isOnline(userId); ws.rabtaActive = msg.active === true;
-      if (isOnline(userId) !== was) { updateLastSeen(userId); presenceChanged(userId); }
+      ws.rabtaActive = msg.active === true;
+      if (online.get(userId) === ws) presenceUpdate(userId, ws.rabtaTold);
     } else if (msg.type === 'watch') {
       // The chat on screen: its contact's online and last seen now, and again whenever they change.
       const id = String(msg.id || '').toUpperCase();
@@ -439,8 +450,7 @@ wss.on('connection', (ws, req) => {
   ws.on('close', () => {
     if (online.get(userId) === ws) {
       // Gone while Rabta showed: last seen now. A phone connected in the background keeps when Rabta last showed.
-      const was = isOnline(userId); online.delete(userId);
-      if (was) { updateLastSeen(userId); presenceChanged(userId); }
+      online.delete(userId); presenceUpdate(userId, ws.rabtaTold);
       for(const call of [...voiceCalls.values(),...videoCalls.values()]) if(call.from===userId||call.to===userId) away(call,userId);
     }
   });
@@ -478,6 +488,8 @@ setInterval(() => tidy().catch(e => console.error('Clean-up failed:', e.message)
 setInterval(() => {
   const now = Date.now();
   for (const socket of [...online.values()]) if (socket.rabtaPings > 0 && now - socket.rabtaHeard > SILENT_MS) { try { socket.terminate(); } catch (_) {} }
+  // A phone gone quiet stops showing online (last seen: when it was last heard); one heard again shows it again.
+  for (const [id, socket] of [...online]) presenceUpdate(id, socket.rabtaTold, socket.rabtaHeard);
 }, 15000).unref?.();
 
 app.post('/api/groups', async (req, res) => {
