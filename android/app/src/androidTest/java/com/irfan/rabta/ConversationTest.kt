@@ -281,8 +281,11 @@ class ConversationTest {
             waitUi { windows().none { it is ZoomImageView&&it.isShown } }
             ui { photo().performLongClick() }
             waitUi { all(a.window.decorView).any { it.isShown&&it.contentDescription=="Cancel selection" } }
-            ui { a.onBackPressed() }
+            // The phone's own back (a key, as from the navigation bar): on Android 16 it reaches the chat's back handling only
+            // through the back callbacks, no longer through onBackPressed.
+            inst.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
             waitUi { all(a.window.decorView).none { it.isShown&&it.contentDescription=="Cancel selection" } }
+            assertFalse("Back cleared the selection and left the chat open",a.isFinishing)
         } finally { ui { a.finish() };db.deleteChat(chat) }
     }
 

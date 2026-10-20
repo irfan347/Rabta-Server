@@ -31,6 +31,7 @@ class TextStatusActivity : ThemedActivity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        onBack { if (::emoji.isInitialized && emoji.open) { emoji.hide(); true } else false }
         RabtaUi.systemBars(this, true)
         colour = state?.getInt("colour") ?: StatusLook.COLOURS.indices.random()
         font = state?.getInt("font") ?: 0
@@ -102,6 +103,4 @@ class TextStatusActivity : ThemedActivity() {
 
     override fun onSaveInstanceState(out: Bundle) { out.putInt("colour", colour); out.putInt("font", font); super.onSaveInstanceState(out) }
     override fun onKeyboardVisibilityChanged(visible: Boolean) { if (visible && ::emoji.isInitialized) emoji.keyboardShown() }
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() { if (::emoji.isInitialized && emoji.open) emoji.hide() else super.onBackPressed() }
 }

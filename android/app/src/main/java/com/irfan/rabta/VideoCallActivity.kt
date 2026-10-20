@@ -65,6 +65,8 @@ class VideoCallActivity : ThemedActivity(), CallWatcher {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Like WhatsApp, back shows the chat with that person, under the call's small window where this phone has one.
+        onBack { if (!minimize()) finish(); showChat(); true }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
             WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
             WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
@@ -144,9 +146,6 @@ class VideoCallActivity : ThemedActivity(), CallWatcher {
     override fun onStop() { super.onStop(); started = false; if (VideoCall.active && !isChangingConfigurations) VideoCall.visible(false) }
     override fun onDestroy() { VideoEffects.onSnapshot = null; handler.removeCallbacksAndMessages(null); releaseViews(); super.onDestroy() }
 
-    /** Like WhatsApp, back shows the chat with that person, under the call's small window where this phone has one. */
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() { if (!minimize()) finish(); showChat() }
 
     /**
      * The chat with the person in the call, in Rabta's own task (the call's task is separate): brought to the front

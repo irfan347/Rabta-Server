@@ -51,6 +51,7 @@ class StatusEditorActivity : ThemedActivity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        onBack { if (::emoji.isInitialized && emoji.open) { emoji.hide(); true } else false }
         kind = intent.getStringExtra("kind").orEmpty(); source = intent.data ?: run { finish(); return }
         if (kind != "image" && kind != "video") { finish(); return }
         RabtaUi.systemBars(this, true)
@@ -131,8 +132,6 @@ class StatusEditorActivity : ThemedActivity() {
     }
 
     override fun onKeyboardVisibilityChanged(visible: Boolean) { if (visible && ::emoji.isInitialized) emoji.keyboardShown() }
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() { if (::emoji.isInitialized && emoji.open) emoji.hide() else super.onBackPressed() }
 
     private fun showAudience() { audiencePill.text = StatusPost.audienceLabel(this, audience); audiencePill.contentDescription = "${audiencePill.text}. Change who can see" }
 

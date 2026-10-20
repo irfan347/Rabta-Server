@@ -98,6 +98,15 @@ open class ThemedActivity : androidx.fragment.app.FragmentActivity() {
     private var appliedSettings=""
     private var unlocking=false
     override fun attachBaseContext(base:Context) { super.attachBaseContext(L.context(base)) }
+    /**
+     * What back does on this screen; [handled] false closes it as usual. Android 16 no longer calls onBackPressed in
+     * apps that target it, so a screen says it here.
+     */
+    protected fun onBack(handled:()->Boolean) {
+        onBackPressedDispatcher.addCallback(this,object:androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() { if(!handled()) { isEnabled=false;onBackPressedDispatcher.onBackPressed();isEnabled=true } }
+        })
+    }
     override fun onPause() { super.onPause();AppLock.left() }
     private var appliedDark=false
     override fun onCreate(state: Bundle?) {

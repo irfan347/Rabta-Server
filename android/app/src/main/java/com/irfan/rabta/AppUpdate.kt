@@ -43,7 +43,8 @@ object AppUpdate {
     /** A release waiting for the user to allow "Install unknown apps" for Rabta. */
     private var waiting: Release? = null
 
-    fun enabled(c: Context) = !Config.testBuild(c)
+    /** Not in test builds, nor in the Google Play build, which Play updates (res/values/store.xml). */
+    fun enabled(c: Context) = !Config.testBuild(c) && c.resources.getBoolean(R.bool.self_update)
     fun versionName(c: Context): String = runCatching { c.packageManager.getPackageInfo(c.packageName, 0).versionName }.getOrNull().orEmpty()
     private fun installed(c: Context) = code(c.packageManager.getPackageInfo(c.packageName, 0))
     @Suppress("DEPRECATION")
