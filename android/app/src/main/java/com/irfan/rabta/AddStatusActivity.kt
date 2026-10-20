@@ -75,9 +75,16 @@ class AddStatusActivity : ThemedActivity() {
         // Without gallery access the grid shows only Camera, with a clear way to allow access or browse.
         access = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(dp(24), dp(24), dp(24), dp(24)); visibility = View.GONE
-            addView(RabtaUi.text(this@AddStatusActivity, "Show your recent photos and videos here", 15f, true).apply { gravity = Gravity.CENTER })
-            addView(RabtaUi.text(this@AddStatusActivity, "Rabta reads them only to show this list. Nothing is shared until you pick one and choose who sees it.", 13f, color = AppTheme.sub(this@AddStatusActivity)).apply { gravity = Gravity.CENTER; setPadding(0, dp(6), 0, dp(14)) })
-            addView(RabtaUi.button(this@AddStatusActivity, "Allow access", true) { requestPermissions(RecentMedia.permissions(), PERMISSION) }.apply { gravity = Gravity.CENTER })
+            if (RecentMedia.canAsk(this@AddStatusActivity)) {
+                addView(RabtaUi.text(this@AddStatusActivity, "Show your recent photos and videos here", 15f, true).apply { gravity = Gravity.CENTER })
+                addView(RabtaUi.text(this@AddStatusActivity, "Rabta reads them only to show this list. Nothing is shared until you pick one and choose who sees it.", 13f, color = AppTheme.sub(this@AddStatusActivity)).apply { gravity = Gravity.CENTER; setPadding(0, dp(6), 0, dp(14)) })
+                addView(RabtaUi.button(this@AddStatusActivity, "Allow access", true) { requestPermissions(RecentMedia.permissions(this@AddStatusActivity), PERMISSION) }.apply { gravity = Gravity.CENTER })
+            } else {
+                // The Google Play build does not read the phone's photos: Android's picker hands Rabta only what is picked.
+                addView(RabtaUi.text(this@AddStatusActivity, "Share photos and videos from your gallery", 15f, true).apply { gravity = Gravity.CENTER })
+                addView(RabtaUi.text(this@AddStatusActivity, "Rabta sees only the ones you pick, and nothing is shared until you choose who sees it.", 13f, color = AppTheme.sub(this@AddStatusActivity)).apply { gravity = Gravity.CENTER; setPadding(0, dp(6), 0, dp(14)) })
+                addView(RabtaUi.button(this@AddStatusActivity, "Open gallery", true) { browse() }.apply { gravity = Gravity.CENTER })
+            }
         }
         body.addView(access, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
         root.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))

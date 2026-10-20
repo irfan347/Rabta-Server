@@ -1,5 +1,6 @@
 package com.irfan.rabta
 
+import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
@@ -8,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import android.widget.Toast
 
 /**
  * Rabta has no push service: messages and calls arrive while [MessageService] runs. Android's battery optimisation,
@@ -20,10 +22,15 @@ object BackgroundRun {
 
     fun summary(c: Context) = if (allowed(c)) "Allowed · Android keeps Rabta running for new messages" else "Not allowed · messages may stop when Rabta is closed"
 
-    /** Android's own "let this app always run in the background?" question. */
+    /** False in the Google Play build: Play keeps Android's question for other kinds of apps. */
+    private fun canAsk(c: Context) = Config.declares(c, Manifest.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+
+    /** Android's own "let this app always run in the background?" question, or else Rabta's app settings with the same choice under Battery. */
     fun request(a: Activity) {
         val ask = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${a.packageName}"))
-        if (runCatching { a.startActivity(ask) }.isFailure) openAppSettings(a)
+        if (canAsk(a) && runCatching { a.startActivity(ask) }.isSuccess) return
+        Toast.makeText(a, "Open Battery and choose Unrestricted", Toast.LENGTH_LONG).show()
+        openAppSettings(a)
     }
 
     private fun openAppSettings(a: Activity) {
@@ -76,7 +83,8 @@ object BackgroundRun {
      * them while Rabta is closed. Android lets no app allow itself: the person taps Allow. The strip and Settings stay.
      */
     fun askOnce(a: Activity) {
-        if (allowed(a) || prefs(a).getBoolean("asked", false)) return
+        // Only Android's own question comes up by itself; the settings screen opens only when the person taps Allow.
+        if (allowed(a) || !canAsk(a) || prefs(a).getBoolean("asked", false)) return
         prefs(a).edit().putBoolean("asked", true).apply()
         ask(a)
     }

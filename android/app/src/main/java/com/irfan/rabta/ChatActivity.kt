@@ -1108,7 +1108,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             contact={ shareContact() },
             stickers={ showPanel();emojiPanel?.showTab(2) },
             pick={ item -> if(item.video) sendVideoFrom(item.uri) else sendPhotoFrom(item.uri) },
-            requestAccess={ ActivityCompat.requestPermissions(this,RecentMedia.permissions(),96) }
+            requestAccess={ ActivityCompat.requestPermissions(this,RecentMedia.permissions(this),96) }
         ).also { it.show() }
     }
     /** Sends a Rabta contact as a readable message; Rabta shows it as a card with a Message button. */

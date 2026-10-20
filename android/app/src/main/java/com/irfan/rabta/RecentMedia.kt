@@ -13,13 +13,21 @@ import android.provider.MediaStore
 object RecentMedia {
     data class Item(val uri: Uri, val video: Boolean, val durationMs: Long)
 
-    fun permissions(): Array<String> = when {
-        Build.VERSION.SDK_INT >= 34 -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
-        Build.VERSION.SDK_INT >= 33 -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
+    /** What Rabta asks for on Android [sdk], of the permissions this build [declared]. */
+    internal fun permissions(sdk: Int, declared: Set<String>): Array<String> = when {
+        sdk >= 34 -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+        sdk >= 33 -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
         else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
-    }
+    }.filter { it in declared }.toTypedArray()
+    /**
+     * None in the Google Play build on Android 13 and later: Play lets only gallery-type apps read all photos, so that
+     * build sends from Android's own picker, which hands Rabta only what the user picks.
+     */
+    fun permissions(c: Context) = permissions(Build.VERSION.SDK_INT, Config.declared(c))
+    /** Whether this build may offer the phone's recent photos and videos at all. */
+    fun canAsk(c: Context) = permissions(c).isNotEmpty()
     /** Full access, or (Android 14) the photos the user selected. */
-    fun hasAccess(c: Context) = permissions().any { c.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
+    fun hasAccess(c: Context) = permissions(c).any { c.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
 
     /** Newest first. Blocking: call off the main thread. */
     fun query(c: Context, limit: Int = 300): List<Item> {

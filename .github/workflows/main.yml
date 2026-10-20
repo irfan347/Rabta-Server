@@ -320,6 +320,11 @@ jobs:
           grep -q 'package="com.irfan.rabta"' "$out/play-manifest.xml"
           grep -q 'android:targetSdkVersion="36"' "$out/play-manifest.xml"
           if grep -q "REQUEST_INSTALL_PACKAGES" "$out/play-manifest.xml"; then echo "The Play bundle must not be able to install updates itself."; exit 1; fi
+          # Play keeps these for other kinds of apps; the Play build uses Android's photo picker and battery settings.
+          for p in READ_MEDIA_IMAGES READ_MEDIA_VIDEO READ_MEDIA_VISUAL_USER_SELECTED REQUEST_IGNORE_BATTERY_OPTIMIZATIONS; do
+            if grep -q "android.permission.$p\"" "$out/play-manifest.xml"; then echo "The Play bundle must not ask for $p."; exit 1; fi
+          done
+          echo "Play bundle permissions:"; grep -o '<uses-permission[^>]*' "$out/play-manifest.xml" | grep -o 'android:name="[^"]*"' | cut -d'"' -f2 | sed 's/^/  /'
           if grep -q 'android:debuggable="true"' "$out/play-manifest.xml"; then echo "The Play bundle must not be debuggable."; exit 1; fi
           python3 android/scripts/page_size.py "$aab"
           keytool -printcert -jarfile "$aab" > "$out/play-signature.txt"
