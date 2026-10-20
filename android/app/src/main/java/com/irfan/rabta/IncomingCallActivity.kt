@@ -33,6 +33,7 @@ class IncomingCallActivity : ThemedActivity(), RabtaEvents.Listener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        onBack { decline(); true }
         fromId   = intent.getStringExtra("fromId")   ?: ""
         fromName = intent.getStringExtra("fromName") ?: "Someone"
         callId   = intent.getStringExtra("callId")   ?: ""
@@ -69,7 +70,6 @@ class IncomingCallActivity : ThemedActivity(), RabtaEvents.Listener {
         try { (getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager).cancel(MessageService.CALL_NOTIF) } catch (_: Exception) {}
     }
 
-    override fun onBackPressed() { decline() }
     override fun onDestroy() { handler.removeCallbacks(autoDecline); RabtaEvents.remove(this); super.onDestroy() }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()

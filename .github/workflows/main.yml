@@ -130,9 +130,9 @@ jobs:
           log-accepted-android-sdk-licenses: false
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.7'
+          gradle-version: '8.11.1'
       - name: Install Android build tools
-        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
       - name: Check project detection and database queries
         env:
           ANDROID_PROJECT_DIR: ${{ steps.project.outputs.directory }}
@@ -186,7 +186,7 @@ jobs:
           ANDROID_PROJECT_DIR: ${{ steps.project.outputs.directory }}
         run: |
           tasks=":app:testDebugUnitTest :app:assembleDebug :app:assembleDevice"
-          if [ -n "${RABTA_RELEASE_KEYSTORE:-}" ]; then tasks="$tasks :app:assembleRelease"; fi
+          if [ -n "${RABTA_RELEASE_KEYSTORE:-}" ]; then tasks="$tasks :app:assembleRelease :app:bundlePlay"; fi
           gradle --project-dir "$ANDROID_PROJECT_DIR" $tasks --no-daemon --stacktrace
       - name: Record QR regression failure
         if: failure()
@@ -213,7 +213,7 @@ jobs:
           node --check features.js
           apk="$ANDROID_PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
           test -s "$apk"
-          tools="$ANDROID_HOME/build-tools/34.0.0"
+          tools="$ANDROID_HOME/build-tools/36.0.0"
           "$tools/apksigner" verify --verbose --print-certs "$apk" > "$apk.signature.txt"
           "$tools/aapt" dump badging "$apk" > "$apk.badging.txt"
           grep -q "package: name='com.irfan.rabta'" "$apk.badging.txt"
@@ -242,7 +242,7 @@ jobs:
           set -euo pipefail
           apk="$ANDROID_PROJECT_DIR/app/build/outputs/apk/device/app-device.apk"
           test -s "$apk"
-          tools="$ANDROID_HOME/build-tools/34.0.0"
+          tools="$ANDROID_HOME/build-tools/36.0.0"
           "$tools/apksigner" verify --verbose --print-certs "$apk" > "$apk.signature.txt"
           "$tools/aapt" dump badging "$apk" > "$apk.badging.txt"
           grep -q "package: name='com.irfan.rabta.testing'" "$apk.badging.txt"
@@ -275,13 +275,15 @@ jobs:
           out="$ANDROID_PROJECT_DIR/app/build/outputs/apk/release"
           apk="$out/app-release.apk"
           test -s "$apk"
-          tools="$ANDROID_HOME/build-tools/34.0.0"
+          tools="$ANDROID_HOME/build-tools/36.0.0"
           "$tools/apksigner" verify --verbose --print-certs "$apk" > "$out/signature.txt"
           "$tools/aapt" dump badging "$apk" > "$out/badging.txt"
           grep -q "package: name='com.irfan.rabta'" "$out/badging.txt"
           grep -q "application-label:'Rabta'" "$out/badging.txt"
           if grep -q "application-debuggable" "$out/badging.txt"; then echo "The public APK must not be debuggable."; exit 1; fi
           if grep "native-code:" "$out/badging.txt" | grep -q "x86"; then echo "The public APK must not carry emulator (x86) libraries."; exit 1; fi
+          grep -q "targetSdkVersion:'36'" "$out/badging.txt"
+          python3 android/scripts/page_size.py "$apk"
           # Debuggable test builds must never carry the public app's signature.
           digest() { grep -m1 "certificate SHA-256 digest" "$1" | awk '{print $NF}'; }
           "$tools/apksigner" verify --print-certs "$ANDROID_PROJECT_DIR/app/build/outputs/apk/device/app-device.apk" > "$out/test-signature.txt"
@@ -309,6 +311,28 @@ jobs:
           (dist / "notes.txt").write_text(base["notes"] or f"Rabta {name}")
           PYTHON
           cat "$out/signature.txt"
+          # Google Play's copy: an app bundle signed with the public app's own key (Play then signs installs with
+          # that same key, so phones that installed Rabta from GitHub update from Play), without the self-updater.
+          aab="$ANDROID_PROJECT_DIR/app/build/outputs/bundle/play/app-play.aab"
+          test -s "$aab"
+          curl -fsSL -o "$RUNNER_TEMP/bundletool.jar" https://github.com/google/bundletool/releases/download/1.17.2/bundletool-all-1.17.2.jar
+          java -jar "$RUNNER_TEMP/bundletool.jar" dump manifest --bundle "$aab" > "$out/play-manifest.xml"
+          grep -q 'package="com.irfan.rabta"' "$out/play-manifest.xml"
+          grep -q 'android:targetSdkVersion="36"' "$out/play-manifest.xml"
+          if grep -q "REQUEST_INSTALL_PACKAGES" "$out/play-manifest.xml"; then echo "The Play bundle must not be able to install updates itself."; exit 1; fi
+          # Play keeps these for other kinds of apps; the Play build uses Android's photo picker and battery settings.
+          for p in READ_MEDIA_IMAGES READ_MEDIA_VIDEO READ_MEDIA_VISUAL_USER_SELECTED REQUEST_IGNORE_BATTERY_OPTIMIZATIONS; do
+            if grep -q "android.permission.$p\"" "$out/play-manifest.xml"; then echo "The Play bundle must not ask for $p."; exit 1; fi
+          done
+          echo "Play bundle permissions:"; grep -o '<uses-permission[^>]*' "$out/play-manifest.xml" | grep -o 'android:name="[^"]*"' | cut -d'"' -f2 | sed 's/^/  /'
+          if grep -q 'android:debuggable="true"' "$out/play-manifest.xml"; then echo "The Play bundle must not be debuggable."; exit 1; fi
+          python3 android/scripts/page_size.py "$aab"
+          keytool -printcert -jarfile "$aab" > "$out/play-signature.txt"
+          bundle=$(grep -m1 "SHA256:" "$out/play-signature.txt" | awk '{print $2}' | tr -d ':' | tr 'A-F' 'a-f')
+          if [ "$bundle" != "$(digest "$out/signature.txt")" ]; then echo "The Play bundle must be signed with the public app's key."; exit 1; fi
+          name=$(python3 -c 'import json; print(json.load(open("rabta-release/rabta-update.json"))["versionName"])')
+          cp "$aab" "rabta-release/Rabta-$name.aab"
+          echo "Play bundle: Rabta-$name.aab, signed with the public app's key"
           echo "ready=true" >> "$GITHUB_OUTPUT"
       - name: Upload the public APK
         if: steps.public.outputs.ready == 'true'
@@ -362,7 +386,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        api: [29, 34]
+        api: [29, 34, 36]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -373,7 +397,7 @@ jobs:
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.7'
+          gradle-version: '8.11.1'
       - name: Enable emulator acceleration
         run: sudo chmod 666 /dev/kvm
       - name: Exercise interface and capture real Android screenshots
@@ -441,6 +465,53 @@ jobs:
           path: android/app/build/reports/androidTests/
           if-no-files-found: ignore
 
+  # Google Play signs installs with Rabta's own key, so phones that installed it from GitHub update from Play. Play
+  # takes that key only encrypted for Google: once android/play/encryption_public_key.pem (Play Console, App signing,
+  # "Export and upload a key from Java keystore") is in the repository, run this workflow by hand and upload the
+  # Rabta-play-signing-key zip there. Until then it tries the tool on a throwaway key and uploads nothing.
+  play-key:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Encrypt the release key for Google Play
+        env:
+          KEYSTORE_B64: ${{ secrets.RABTA_RELEASE_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.RABTA_RELEASE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RABTA_RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RABTA_RELEASE_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/pepk.jar" https://www.gstatic.com/play-apps-publisher-rapid/signing-tool/prod/pepk.jar
+          pem=android/play/encryption_public_key.pem
+          if [ -f "$pem" ]; then
+            if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then echo "The release signing secrets are missing."; exit 1; fi
+            printf '%s' "$KEYSTORE_B64" | tr -d ' \r\n' | base64 -d > "$RUNNER_TEMP/release.jks"
+            store="$RUNNER_TEMP/release.jks"; alias="${KEY_ALIAS:-rabta}"; spass="$KEYSTORE_PASSWORD"; kpass="${KEY_PASSWORD:-$KEYSTORE_PASSWORD}"; out=rabta-play-key.zip
+          else
+            echo "No $pem yet: trying the tool on a throwaway key."
+            keytool -genkeypair -keystore "$RUNNER_TEMP/try.jks" -alias try -keyalg RSA -keysize 2048 -validity 1 -storepass trytry -keypass trytry -dname CN=try
+            openssl genrsa -out "$RUNNER_TEMP/try.pem" 2048 && openssl rsa -in "$RUNNER_TEMP/try.pem" -pubout -out "$RUNNER_TEMP/try-public.pem"
+            pem="$RUNNER_TEMP/try-public.pem"; store="$RUNNER_TEMP/try.jks"; alias=try; spass=trytry; kpass=trytry; out="$RUNNER_TEMP/try.zip"
+          fi
+          # The tool asks for both passwords on a terminal; script gives it one.
+          printf '%s\n%s\n' "$spass" "$kpass" | script -qec "java -jar '$RUNNER_TEMP/pepk.jar' --keystore='$store' --alias='$alias' --output='$out' --include-cert --rsa-aes-encryption --encryption-key-path='$pem'" /dev/null
+          test -s "$out"
+          echo "Encrypted for Google Play: $(stat -c %s "$out") bytes"
+      - name: Upload the encrypted key
+        if: hashFiles('android/play/encryption_public_key.pem') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rabta-play-signing-key
+          path: rabta-play-key.zip
+          if-no-files-found: error
+
   # Each push to main publishes the verified public APK; installed apps find it through rabta-update.json.
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.build.outputs.release == 'true'
@@ -465,7 +536,7 @@ jobs:
           name=$(python3 -c 'import json; print(json.load(open("rabta-release/rabta-update.json"))["versionName"])')
           if [ -z "$RELEASES_TOKEN" ]; then echo "RABTA_RELEASES_TOKEN is missing, so nothing can be published to $RELEASES_REPO."; exit 1; fi
           # Everyone downloads from the public releases repository; this source repository can stay private.
-          GH_TOKEN="$RELEASES_TOKEN" gh release create "v$name" "rabta-release/Rabta-$name.apk" rabta-release/rabta-update.json \
+          GH_TOKEN="$RELEASES_TOKEN" gh release create "v$name" "rabta-release/Rabta-$name.apk" "rabta-release/Rabta-$name.aab" rabta-release/rabta-update.json \
             --repo "$RELEASES_REPO" --title "Rabta $name" --notes-file rabta-release/notes.txt --latest
           # Apps installed before the move still look in this repository; feed them while it is public.
           if [ "$SELF_PRIVATE" != "true" ]; then

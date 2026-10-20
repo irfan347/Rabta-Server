@@ -91,9 +91,16 @@ class AttachSheet(
         recent.addView(grid, FrameLayout.LayoutParams(-1, -1))
         access = LinearLayout(a).apply {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; visibility = View.GONE; setPadding(dp(16), dp(8), dp(16), dp(8))
-            addView(RabtaUi.text(a, "See your recent photos and videos here", 14f, true).apply { gravity = Gravity.CENTER })
-            addView(RabtaUi.text(a, "Rabta only reads them to show this list. Nothing is sent until you tap one.", 12f, color = AppTheme.sub(a)).apply { gravity = Gravity.CENTER; setPadding(0, dp(4), 0, dp(10)) })
-            addView(RabtaUi.button(a, "Allow access", true) { requestAccess() }.apply { gravity = Gravity.CENTER; layoutParams = LinearLayout.LayoutParams(-2, -2) })
+            if (RecentMedia.canAsk(a)) {
+                addView(RabtaUi.text(a, "See your recent photos and videos here", 14f, true).apply { gravity = Gravity.CENTER })
+                addView(RabtaUi.text(a, "Rabta only reads them to show this list. Nothing is sent until you tap one.", 12f, color = AppTheme.sub(a)).apply { gravity = Gravity.CENTER; setPadding(0, dp(4), 0, dp(10)) })
+                addView(RabtaUi.button(a, "Allow access", true) { requestAccess() }.apply { gravity = Gravity.CENTER; layoutParams = LinearLayout.LayoutParams(-2, -2) })
+            } else {
+                // The Google Play build does not read the phone's photos: Android's picker hands Rabta only what is picked.
+                addView(RabtaUi.text(a, "Send photos and videos from your gallery", 14f, true).apply { gravity = Gravity.CENTER })
+                addView(RabtaUi.text(a, "Rabta sees only the ones you pick.", 12f, color = AppTheme.sub(a)).apply { gravity = Gravity.CENTER; setPadding(0, dp(4), 0, dp(10)) })
+                addView(RabtaUi.button(a, "Open gallery", true) { dialog.dismiss(); gallery() }.apply { gravity = Gravity.CENTER; layoutParams = LinearLayout.LayoutParams(-2, -2) })
+            }
         }
         recent.addView(access, FrameLayout.LayoutParams(-1, -1))
         root.addView(recent, LinearLayout.LayoutParams(-1, dp(250)).apply { topMargin = dp(6) })

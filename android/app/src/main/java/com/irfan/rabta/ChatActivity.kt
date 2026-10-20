@@ -147,6 +147,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        onBack { when { callShown -> { hideCallScreen(); true }; selectedIds.isNotEmpty() -> { clearSelection(); true }; panelOpen() -> { hidePanel(); true }; else -> false } }
         Session.init(this)
         peerId   = intent.getStringExtra("peerId")   ?: ""; if (peerId.isEmpty()) { finish(); return }
         peerName = intent.getStringExtra("peerName") ?: "User"
@@ -549,8 +550,6 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         (emojiBtn as? ImageView)?.setImageDrawable(UiIcons.drawable(this,if(panel) "keyboard" else "emoji",SUB,24))
         emojiBtn.contentDescription=if(panel) "Keyboard" else "Emoji"
     }
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() { if(callShown) hideCallScreen() else if(selectedIds.isNotEmpty()) clearSelection() else if(panelOpen()) hidePanel() else super.onBackPressed() }
 
     private var captureUri:android.net.Uri?=null
     private fun takePhoto() {
@@ -1109,7 +1108,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             contact={ shareContact() },
             stickers={ showPanel();emojiPanel?.showTab(2) },
             pick={ item -> if(item.video) sendVideoFrom(item.uri) else sendPhotoFrom(item.uri) },
-            requestAccess={ ActivityCompat.requestPermissions(this,RecentMedia.permissions(),96) }
+            requestAccess={ ActivityCompat.requestPermissions(this,RecentMedia.permissions(this),96) }
         ).also { it.show() }
     }
     /** Sends a Rabta contact as a readable message; Rabta shows it as a card with a Message button. */

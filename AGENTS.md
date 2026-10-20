@@ -28,4 +28,4 @@ gradle --project-dir android :app:testDebugUnitTest :app:assembleDebug --no-daem
 gradle --project-dir android :app:connectedDebugAndroidTest --no-daemon
 ```
 
-Android commands require the existing Java 17 / Gradle 8.7 / Android SDK 34 toolchain; device tests additionally require an emulator or test phone. Run backend tests against isolated fixtures and disposable databases, never production accounts or production storage. Report unavailable checks honestly; a successful APK build does not prove phone-to-phone messaging, calling or mesh delivery.
+Android commands require the existing Java 17 / Gradle 8.11.1 / Android SDK 36 toolchain (AGP 8.9.1; the app targets API 36, as Google Play requires); device tests additionally require an emulator or test phone. Run backend tests against isolated fixtures and disposable databases, never production accounts or production storage. Report unavailable checks honestly; a successful APK build does not prove phone-to-phone messaging, calling or mesh delivery.

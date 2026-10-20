@@ -4,11 +4,12 @@ plugins {
 }
 android {
     namespace = "com.irfan.rabta"
-    compileSdk = 34
+    // Google Play takes new apps and updates only when they target Android 16 (API 36).
+    compileSdk = 36
     defaultConfig {
         applicationId = "com.irfan.rabta"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 36
         // Every CI run numbers its build, so a published Rabta is always newer than the one it updates.
         val ciRun = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
         versionCode = if (ciRun != null) 1000 + ciRun else 34
@@ -43,6 +44,12 @@ android {
             // Phones are ARM; the x86 libraries only serve emulators and nearly double the download.
             ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
         }
+        // The same app for Google Play, which installs and updates it itself: without Rabta's own updater, which Play
+        // does not allow (src/play turns it off and drops its permission). Built as an app bundle (.aab) for upload.
+        create("play") {
+            initWith(getByName("release"))
+            matchingFallbacks += listOf("release")
+        }
         create("device") {
             initWith(getByName("debug"))
             applicationIdSuffix = ".testing"
@@ -68,11 +75,16 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     testImplementation("junit:junit:4.13.2")
     implementation("androidx.core:core-ktx:1.13.1")
+    // Back on Android 16 reaches the screens' own back handling (ThemedActivity.onBack) only through activity 1.6+;
+    // the versions the libraries above bring are older.
+    implementation("androidx.activity:activity:1.9.3")
+    implementation("androidx.fragment:fragment:1.8.5")
     implementation("com.google.android.gms:play-services-nearby:19.3.0")
     // Wake pushes while Rabta is closed (see Push.kt); set up from res/values/firebase.xml, no Gradle plugin.
     implementation("com.google.firebase:firebase-messaging:24.0.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("io.github.webrtc-sdk:android:114.5735.07")
+    // Its 64-bit library suits phones with 16 KB memory pages, which Google Play requires (114.5735.07's did not).
+    implementation("io.github.webrtc-sdk:android:125.6422.07")
     // Background blur in video calls: finds the person on the phone itself (bundled model, no network).
     implementation("com.google.mlkit:segmentation-selfie:16.0.0-beta6")
 }
