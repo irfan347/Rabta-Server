@@ -111,6 +111,9 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             val seconds = recordedMillis()/1000
             holdTimer.text = duration(seconds); lockedTimer.text = duration(seconds)
             if(!recordingPaused) waveform.add(MediaHelper.recordingLevel())
+            // Meanwhile the contact sees "recording audio…", as in WhatsApp.
+            val now=System.currentTimeMillis()
+            if(!recordingPaused&&!isGroup&&!self&&now-lastTypingSent>2500) { lastTypingSent=now; WsClient.sendTyping(peerId,"recording") }
             if(seconds >= 120) stopVoiceRecord(true) else uiHandler.postDelayed(this,100)
         }
     }
@@ -192,11 +195,12 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         titleTv.text = shownName   // e.g. after you named them in Contact info
         if (!firstHistory) loadHistory()   // e.g. a video call just ended: its bubble joins the chat
         Thread { try { db.clearUnread(peerId) } catch (_: Exception) {} }.start()
-        if (!isGroup && !self) WsClient.sendRead(peerId, "all")
+        if (!isGroup && !self) { WsClient.sendRead(peerId, "all"); WsClient.watch(peerId) }
     }
     override fun onPause() {
         // A voice message playing goes on, as in WhatsApp; the bar in the chats shows it.
         super.onPause(); openPeer = null; uiHandler.removeCallbacks(statusTick); uiHandler.removeCallbacks(presenceTick); if(recording) stopVoiceRecord(false)
+        WsClient.unwatch(peerId)
         resumed = false; if (::callBar.isInitialized) { VoiceCall.unwatch(callWatcher); callBar.stop(); voiceBar.stop(); uiHandler.removeCallbacks(callTick); earpiece(false) }
     }
     override fun onDestroy() {
@@ -1281,9 +1285,18 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             if(!isGroup) WsClient.sendRead(fromId,msgId)
         }
     }
-    override fun onTyping(fromId:String) {
+    override fun onTyping(fromId:String,kind:String) {
         if (fromId!=peerId||isGroup) return
-        uiHandler.post { typingTv.visibility=View.VISIBLE; statusTv.visibility=View.GONE; uiHandler.removeCallbacks(typingHide); uiHandler.postDelayed(typingHide,3000) }
+        uiHandler.post {
+            typingTv.text=L.t(this,if(kind=="recording") "recording audio…" else "typing…")
+            typingTv.visibility=View.VISIBLE; statusTv.visibility=View.GONE; uiHandler.removeCallbacks(typingHide); uiHandler.postDelayed(typingHide,3000)
+        }
+    }
+    // Pushed by the server as soon as it changes, for the chat that is open (see WsClient.watch).
+    override fun onPresence(userId:String,online:Boolean,lastSeen:Long) {
+        if (userId!=peerId||isGroup||self) return
+        presence=when { online -> L.t(this,"online"); lastSeen>0 -> this.lastSeen(lastSeen); else -> "" }
+        updateStatus()
     }
     override fun onVideoEnd(callId:String) {}
 }

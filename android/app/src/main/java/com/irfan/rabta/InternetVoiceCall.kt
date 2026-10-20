@@ -7,29 +7,35 @@ import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.AudioEffect
+import android.media.audiofx.NoiseSuppressor
 import android.os.Handler
 import android.os.Looper
 import android.util.Base64
 import org.json.JSONObject
-import java.util.concurrent.LinkedBlockingQueue
 
 /**
  * Voice call over the internet: mic → base64 frames → server → other phone.
- * 8kHz PCM, 40ms frames, jitter buffer drops old frames to cap latency.
+ * 8kHz PCM, 40ms frames, played through a [CallJitter] that evens out how they arrive.
  */
 class InternetVoiceCall(private val peerId: String, val id:String, private val onStatus: (String) -> Unit) {
     private val ringback=CallSounds()
     private val sampleRate = 8000
     private val frameBytes = 640       // 40ms × 8000Hz × 2 bytes
-    private val maxQueue = 6           // ~240ms max buffer
+    // About a quarter second of audio waiting to go out: past that, a slow upload would hold the voice back more and
+    // more, so frames are skipped until it is sent.
+    private val maxBacklog = 6_000L
     private val handler = Handler(Looper.getMainLooper())
 
-    private val recMinBuf = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(frameBytes * 2)
+    // Room for a third of a second, so a busy moment on the phone does not lose microphone audio.
+    private val recMinBuf = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(frameBytes * 8)
     private val playMinBuf = AudioTrack.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(frameBytes * 2)
 
     private var record: AudioRecord? = null
     private var track: AudioTrack? = null
-    private val playQueue = LinkedBlockingQueue<ByteArray>()
+    private val jitter = CallJitter(frameBytes)
+    private val effects = mutableListOf<AudioEffect>()
     @Volatile var running = false; private set
     @Volatile private var hasRemoteAudio = false
     @Volatile var muted = false
@@ -74,8 +80,7 @@ class InternetVoiceCall(private val peerId: String, val id:String, private val o
             startCapture()
             handler.post { if(running) onStatus("Connected") }
         }
-        while (playQueue.size >= maxQueue) playQueue.poll()
-        playQueue.offer(data)
+        jitter.put(data)
     }
 
     @SuppressLint("MissingPermission")
@@ -90,12 +95,13 @@ class InternetVoiceCall(private val peerId: String, val id:String, private val o
             if (rec.state != AudioRecord.STATE_INITIALIZED) {
                 handler.post { onStatus("Mic shuru nahi hua — permission check karein") }; return
             }
-            record = rec; rec.startRecording()
+            record = rec; cleanMic(rec.audioSessionId); rec.startRecording()
             captureThread=Thread {
                 val buf = ByteArray(frameBytes)
                 while (running) {
                     val n = rec.read(buf, 0, buf.size)
                     if (n > 0 && WsClient.connected) {
+                        if (WsClient.backlog() > maxBacklog) continue
                         if(muted) java.util.Arrays.fill(buf,0,n,0.toByte())
                         val enc = Base64.encodeToString(buf, 0, n, Base64.NO_WRAP)
                         WsClient.sendRaw(JSONObject().put("type","call_audio").put("to",peerId).put("callId",id).put("data",enc).toString())
@@ -107,6 +113,12 @@ class InternetVoiceCall(private val peerId: String, val id:String, private val o
         } catch (e: Exception) {
             handler.post { onStatus("Microphone problem") }
         }
+    }
+
+    /** The other voice coming back from this phone's speaker, and noise around it, are taken out where the phone can. */
+    private fun cleanMic(session: Int) {
+        runCatching { if (AcousticEchoCanceler.isAvailable()) AcousticEchoCanceler.create(session)?.let { it.enabled = true; effects += it } }
+        runCatching { if (NoiseSuppressor.isAvailable()) NoiseSuppressor.create(session)?.let { it.enabled = true; effects += it } }
     }
 
     private fun startPlayback() {
@@ -123,11 +135,12 @@ class InternetVoiceCall(private val peerId: String, val id:String, private val o
                 .setTransferMode(AudioTrack.MODE_STREAM).build()
             track = t
             t.play()
+            // One frame every 40 ms, real or filled in: writing waits for the speaker, which keeps the pace.
             playbackThread=Thread {
                 while (running) {
-                    val frame = try { playQueue.take() } catch (_: InterruptedException) { break }
-                    if (frame.isEmpty()) break
-                    try { t.write(frame, 0, frame.size) } catch (_: Exception) {}
+                    val frame = jitter.next()
+                    val written = try { t.write(frame, 0, frame.size) } catch (_: Exception) { -1 }
+                    if (written < 0) try { Thread.sleep(40) } catch (_: InterruptedException) { break }
                 }
             }.also { it.isDaemon = true; it.start() }
         } catch (e: Exception) {
@@ -141,12 +154,16 @@ class InternetVoiceCall(private val peerId: String, val id:String, private val o
         if (!running) return
         running = false
         if (sendEnd) try { WsClient.sendRaw(JSONObject().put("type","call_end").put("to",peerId).put("callId",id).toString()) } catch (_: Exception) {}
+        val playing = playbackThread
         playbackThread?.interrupt()
         captureThread?.interrupt()
         playbackThread=null; captureThread=null
-        playQueue.offer(ByteArray(0))
         try { record?.stop(); record?.release() } catch (_: Exception) {}
-        try { track?.stop(); track?.release() } catch (_: Exception) {}
-        record = null; track = null; playQueue.clear()
+        // The player is nearly always waiting to write: stopping the speaker lets it finish before it is released.
+        try { track?.stop() } catch (_: Exception) {}
+        runCatching { playing?.join(100) }
+        try { track?.release() } catch (_: Exception) {}
+        effects.forEach { runCatching { it.release() } }; effects.clear()
+        record = null; track = null
     }
 }

@@ -156,6 +156,44 @@ class ConversationTest {
             assertEquals("delivered",db.status("convo-failed"))
         } finally { ui { a.finish();WsClient.disconnect() };server.shutdown();MessageService.stop(ctx) }
     }
+    /** The header says what the contact is doing as the server tells it: online, last seen, typing, recording audio. */
+    @Test fun theHeaderShowsOnlineLastSeenTypingAndRecordingAsTheServerSays() {
+        prepare();val server=MockWebServer();val frames=java.util.concurrent.CopyOnWriteArrayList<JSONObject>();var socket:WebSocket?=null
+        val reports=java.util.concurrent.atomic.AtomicReference("")
+        server.dispatcher=object:Dispatcher() {
+            override fun dispatch(request:RecordedRequest):MockResponse {
+                if(request.path!="/ws")return MockResponse().setResponseCode(404)
+                reports.set(request.getHeader("X-Rabta-Presence").orEmpty())
+                return MockResponse().withWebSocketUpgrade(object:WebSocketListener() {
+                    override fun onOpen(ws:WebSocket,response:Response) { socket=ws;ws.send("{\"type\":\"ready\",\"id\":\"AAAABBBBCCCC\",\"protocol\":2}") }
+                    override fun onMessage(ws:WebSocket,text:String) { frames.add(JSONObject(text)) }
+                })
+            }
+        }
+        server.start();val url=server.url("/").toString().trimEnd('/')
+        ui { Session.serverUrl=url;WsClient.connect(Session) }
+        val deadline=System.currentTimeMillis()+10000
+        while(!WsClient.connected&&System.currentTimeMillis()<deadline)Thread.sleep(50)
+        assertTrue("Local authenticated socket ready",WsClient.connected)
+        val a=launch()
+        try {
+            fun shown()=all(a.window.decorView).filterIsInstance<TextView>().filter { it.isShown }.map { it.text.toString() }
+            fun last(type:String)=frames.lastOrNull { it.optString("type")==type }
+            waitUi { last("watch")?.optString("id")==peer }
+            assertEquals("The phone tells the server it reports when Rabta is on screen","1",reports.get())
+            waitUi { last("presence")?.optBoolean("active")==true }
+            socket!!.send(JSONObject().put("type","presence").put("id",peer).put("online",true).put("lastSeen",0).toString())
+            waitUi { shown().contains("online") }
+            socket!!.send(JSONObject().put("type","presence").put("id",peer).put("online",false).put("lastSeen",System.currentTimeMillis()).toString())
+            waitUi { shown().any { it.startsWith("last seen today at") }&&!shown().contains("online") }
+            socket!!.send(JSONObject().put("type","typing").put("from",peer).toString())
+            waitUi { shown().contains("typing…") }
+            socket!!.send(JSONObject().put("type","typing").put("from",peer).put("kind","recording").toString())
+            waitUi { shown().contains("recording audio…")&&!shown().contains("typing…") }
+            ui { a.finish() }
+            waitUi { last("watch")?.optString("id")=="" }
+        } finally { ui { a.finish();WsClient.disconnect() };server.shutdown();MessageService.stop(ctx) }
+    }
     @Test fun voiceUsesDecodedDurationAndRealPlaybackControls() {
         prepare()
         val samples=16000;val buffer=java.nio.ByteBuffer.allocate(44+samples*2).order(java.nio.ByteOrder.LITTLE_ENDIAN)
