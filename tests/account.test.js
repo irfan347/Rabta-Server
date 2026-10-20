@@ -17,7 +17,7 @@ function server(database = false) {
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../index.js'), 'utf8'), context);
   async function call(method, route, { body = {}, token, params = {}, query = {}, headers = {} } = {}) {
     let status = 200, json;
-    const res = { status(n) { status = n; return this; }, json(v) { json = v; }, send(v) { json = v; }, setHeader() {} };
+    const res = { status(n) { status = n; return this; }, json(v) { json = v; }, send(v) { json = v; }, setHeader() {}, type() { return this; } };
     await routes.get(method + ' ' + route)({ body, params, query, headers: { ...headers, ...(token ? { authorization: 'Bearer ' + token } : {}) } }, res);
     return { status, ...json };
   }
@@ -25,7 +25,12 @@ function server(database = false) {
     const handlers = {}, messages = []; const ws = { readyState: 1, closed: false, send(s, cb) { messages.push(JSON.parse(s)); cb?.(); }, close() { this.readyState = 3; this.closed = true; handlers.close?.(); }, on(e, f) { handlers[e] = f; } };
     connect(ws, { headers: { authorization: 'Bearer ' + token }, url: '/ws' }); return { ws, messages };
   }
-  return { call, socket, queries };
+  async function page(route) {
+    let type = '', html = '';
+    await routes.get('GET ' + route)({ headers: {}, params: {}, query: {} }, { type(t) { type = t; return this; }, send(v) { html = v; } });
+    return { type, html };
+  }
+  return { call, socket, queries, page };
 }
 
 // A phone's Keystore key, as the app creates it: EC P-256, public key sent as X.509 (SPKI) DER.
@@ -189,3 +194,60 @@ test('one account per phone: the phone that has an account cannot make another; 
   assert.equal((await s.call('POST', '/api/me/phone', { token: older.token, body: { phone: 'not-a-phone' } })).status, 400);
   assert.equal((await s.call('POST', '/api/me/phone', { body: { phone: r } })).status, 401);
 });
+
+// ---------- deleting an account (Google Play requires it in the app and on the web) ----------
+const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]).toString('base64');
+test('deleting the account in the app: the PIN again, then the account and what it left are gone', async () => {
+  const s = server(); const p = phone();
+  const a = await register(s, 'gone', p), b = await register(s, 'stays');
+  await s.call('POST', '/api/me/photo', { token: a.token, body: { photo: JPEG } });
+  await s.call('POST', '/api/status', { token: a.token, body: { kind: 'text', body: 'hello', audience: [b.id] } });
+  await s.call('POST', '/api/block', { token: b.token, body: { target: a.id } });
+  const sa = s.socket(a.token);
+  assert.equal((await s.call('POST', '/api/me/delete', { token: a.token, body: { pin: '000000' } })).status, 401);
+  assert.equal(sa.ws.closed, false, 'A wrong PIN deletes nothing');
+  assert.equal((await s.call('POST', '/api/me/delete', { token: a.token, body: { pin: '123456' } })).ok, true);
+  assert.equal(sa.ws.closed, true, 'Its phone is disconnected');
+  assert.equal((await s.call('GET', '/api/me', { token: a.token })).status, 401, 'Its sign-in stops working');
+  assert.equal((await s.call('POST', '/api/login', { body: { username: 'gone', pin: '123456', device: p.proof('login:gone') } })).status, 401);
+  assert.equal((await s.call('GET', '/api/status', { token: b.token })).statuses.length, 0, 'Its updates are gone');
+  assert.equal((await s.call('GET', '/api/user/photo/:id', { token: b.token, params: { id: a.id } })).status, 404, 'Its photo is gone');
+  assert.deepEqual((await s.call('GET', '/api/privacy', { token: b.token })).blocked, [], 'Blocks it was in are gone');
+  assert.equal((await register(s, 'gone')).username, 'gone', 'Its username is free again');
+  assert.equal((await s.call('POST', '/api/me/delete', { body: { pin: '123456' } })).status, 401, 'Deleting needs a signed-in phone');
+});
+test('deleting on the web: the PIN, and the recovery code once the account has a trusted phone', async () => {
+  const s = server(); const a = await register(s, 'webgone', phone());
+  const web = body => s.call('POST', '/api/delete-account', { body });
+  assert.equal((await web({ username: 'webgone', pin: '999999' })).status, 401);
+  const need = await web({ username: 'webgone', pin: '123456' });
+  assert.equal(need.status, 403); assert.equal(need.recoveryCode, true);
+  assert.equal((await web({ username: 'webgone', pin: '123456', recoveryCode: 'AAAA-BBBB-CCCC' })).status, 403);
+  assert.equal((await web({ username: ' WebGone', pin: '123456', recoveryCode: a.recoveryCode.toLowerCase() })).ok, true);
+  assert.equal((await s.call('GET', '/api/user/:username', { params: { username: 'webgone' } })).status, 404);
+  await register(s, 'oldphone');
+  assert.equal((await web({ username: 'oldphone', pin: '123456' })).ok, true, 'An account with no trusted phone needs only the PIN, as signing in does');
+});
+test('deleting is limited like signing in: after 10 wrong PINs it waits', async () => {
+  const s = server(); const a = await register(s, 'tries');
+  for (let i = 0; i < 10; i++) assert.equal((await s.call('POST', '/api/me/delete', { token: a.token, body: { pin: '000000' } })).status, 401);
+  assert.equal((await s.call('POST', '/api/me/delete', { token: a.token, body: { pin: '123456' } })).status, 429);
+  assert.equal((await s.call('POST', '/api/delete-account', { body: { username: 'tries', pin: '123456' } })).status, 429);
+});
+test('deletion clears the account from storage, its sign-in last', async () => {
+  const s = server(true); const a = await register(s, 'stored', phone());
+  assert.equal((await s.call('POST', '/api/me/delete', { token: a.token, body: { pin: '123456' } })).ok, true);
+  const sql = s.queries.map(([q]) => q), at = re => sql.findIndex(q => re.test(q));
+  for (const re of [/DELETE FROM ru_messages WHERE from_id=\$1 OR to_id=\$1/, /DELETE FROM ru_receipts/, /DELETE FROM rf_data WHERE kind IN \('grant','got'\)/, /kind='photo'/,
+    /DELETE FROM rf_data WHERE kind='push'/, /DELETE FROM ru_devices WHERE user_id=\$1$/, /DELETE FROM ru_phones/, /DELETE FROM ru_reserved/, /DELETE FROM ru_users/]) assert.ok(at(re) >= 0, String(re));
+  assert.ok(at(/DELETE FROM ru_users/) > at(/DELETE FROM ru_devices WHERE user_id=\$1$/), 'Sign-in goes last, so a failure on the way leaves a working account');
+  assert.ok(s.queries.filter(([q]) => /DELETE FROM ru_users/.test(q)).every(([, args]) => args[0] === a.id));
+});
+test('the privacy policy and the delete-account page are public web pages', async () => {
+  const s = server();
+  const privacy = await s.page('/privacy'), del = await s.page('/delete-account');
+  assert.equal(privacy.type, 'html'); assert.equal(del.type, 'html');
+  assert.match(privacy.html, /not end-to-end encrypted/); assert.match(privacy.html, /Settings → Delete account/); assert.match(privacy.html, /href="\/delete-account"/);
+  assert.match(del.html, /\/api\/delete-account/); assert.match(del.html, /Recovery code/);
+});
+

@@ -78,6 +78,8 @@ Status: `StatusActivity` -> `FeatureApi`/`Transfers` -> server audience-filtered
 | `GET /api/me` | Bearer-authenticated current account. |
 | `POST /api/groups` | Authenticated group creation, up to 50 members including creator. |
 | `GET /health` | Public process/pool/presence counts. |
+| `POST /api/me/delete`, `POST /api/delete-account` | Account deletion (Google Play requires it): from the signed-in phone with the PIN, or from the web with the PIN plus the recovery code once the account has a trusted phone. Removes the account and everything it left on the server. |
+| `GET /privacy`, `GET /delete-account` | Public privacy policy and account deletion page (`CONTACT_EMAIL` adds a contact address). |
 | `GET /ws` upgrade | Bearer header or token query; authenticated WebSocket session. |
 | `GET /api/ice` | Authenticated STUN and optional one-hour HMAC TURN credentials. |
 | `GET /api/privacy`, `POST /api/block`, `POST /api/report` | Authenticated privacy/report operations. Reports have no moderation UI/service. |

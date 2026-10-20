@@ -188,6 +188,7 @@ module.exports = function install({ app, users, getPool, authToken, makeToken, c
 
   /** A token is valid only for a trusted device; a token without a device only while the account has none. */
   function tokenAllowed(userId, deviceId) {
+    if (!users.has(userId)) return false;   // a deleted account's tokens stop working
     const list = devicesOf(userId);
     if (!deviceId) return list.size === 0;
     const d = list.get(deviceId); if (d) d.seen = Date.now();
@@ -300,5 +301,21 @@ module.exports = function install({ app, users, getPool, authToken, makeToken, c
   const pendingFor = userId => [...requests.values()].filter(r => r.user === userId && r.status === 'pending' && r.expires > Date.now())
     .map(r => ({ type: 'device_request', request: { id: r.id, name: r.device.name, at: Date.now(), expires: r.expires } }));
 
-  return { init, usernameStatus, cleanName, signIn, registered, tokenAllowed, pendingFor, linkPhone, unlinkPhone, phoneAccount };
+  // ---------- account deletion ----------
+  /**
+   * Away from the account's own phone (the web page), deleting it takes what signing in on a new phone takes: the PIN,
+   * and the recovery code once the account has a trusted phone.
+   */
+  const mayDelete = (u, code) => devicesOf(u.id).size === 0 || recoveryMatches(u, code);
+  /** The deleted account's phones, devices, sign-in requests and old usernames. */
+  async function forget(userId) {
+    const db = getPool();
+    if (db) for (const sql of ['DELETE FROM ru_devices WHERE user_id=$1', 'DELETE FROM ru_phones WHERE user_id=$1', 'DELETE FROM ru_reserved WHERE user_id=$1']) await db.query(sql, [userId]);
+    devices.delete(userId);
+    for (const [phone, used] of [...phones]) { used.delete(userId); if (!used.size) phones.delete(phone); }
+    for (const [name, r] of [...reserved]) if (r.user === userId) reserved.delete(name);
+    for (const [id, r] of [...requests]) if (r.user === userId) requests.delete(id);
+  }
+
+  return { init, usernameStatus, cleanName, signIn, registered, tokenAllowed, pendingFor, linkPhone, unlinkPhone, phoneAccount, mayDelete, forget };
 };

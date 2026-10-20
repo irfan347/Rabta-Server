@@ -31,6 +31,7 @@ class SettingsActivity : ThemedActivity() {
                     .addCategory(Intent.CATEGORY_OPENABLE), 42)
             }
             row("Sign out", "This phone's local chats remain stored", "account") { confirmLogout() }
+            row("Delete account", "Delete your account and this phone's chats for it", "trash") { confirmDelete() }
         }
 
         section("PRIVACY & SECURITY") {
@@ -205,6 +206,32 @@ class SettingsActivity : ThemedActivity() {
                 MessageService.stop(this); Push.forget(this); Session.logout(); WsClient.disconnect()
                 startActivity(Intent(this, AuthActivity::class.java)); finishAffinity()
             }.show()
+    }
+
+    /** Delete account: what goes, then the PIN, then the server, then this phone (AccountDeletion). */
+    private fun confirmDelete() {
+        val pin = EditText(this).apply {
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            hint = "PIN"; contentDescription = "Your PIN"
+        }
+        val box = FrameLayout(this).apply { setPadding(RabtaUi.dp(this@SettingsActivity, 24), RabtaUi.dp(this@SettingsActivity, 8), RabtaUi.dp(this@SettingsActivity, 24), 0); addView(pin) }
+        AlertDialog.Builder(this).setTitle("Delete your Rabta account?")
+            .setMessage("This deletes your account, profile photo and status updates, the messages and files still on their way to or from you, and this phone's chats and files for this account. It cannot be undone. Messages you already sent stay with the people who received them.\n\nEnter your PIN to delete.")
+            .setView(box).setNegativeButton("Cancel", null)
+            .setPositiveButton("Delete account") { _, _ -> deleteAccount(pin.text.toString()) }.show()
+    }
+    private fun deleteAccount(pin: String) {
+        if (pin.isBlank()) { Toast.makeText(this, "Enter your PIN to delete the account", Toast.LENGTH_LONG).show(); return }
+        val account = Session.id
+        FeatureApi.run(this, { FeatureApi.request("/api/me/delete", "POST", org.json.JSONObject().put("pin", pin)) }) {
+            Thread {
+                AccountDeletion.wipe(this, account)
+                runOnUiThread {
+                    Toast.makeText(this, "Your Rabta account was deleted", Toast.LENGTH_LONG).show()
+                    startActivity(Intent(this, AuthActivity::class.java)); finishAffinity()
+                }
+            }.start()
+        }
     }
 
     private fun themedInfo(title: String, message: String) {

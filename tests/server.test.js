@@ -12,7 +12,7 @@ async function fixture(database=false) {
   class WebSocketServer { on(event,cb){if(event==='connection')connect=cb;} }
   let failing=null,responder=null; // SQL that should throw / custom rows, for storage tests
   class Pool { async query(sql,args){ queries.push([sql,args]); if(failing?.test(sql)) throw new Error('db unavailable'); return {rows:responder?.(sql,args)||[]}; } }
-  const context=vm.createContext({require(name){if(name==='./features')return require('../features');if(name==='./account')return require('../account');if(name==='./push')return ()=>({init:async()=>{},enabled:()=>false,wake:(id,kind='message')=>wakes.push([id,kind])});if(name==='express')return express;if(name==='ws')return {WebSocketServer};if(name==='http')return {createServer(){return {listen(){}}}};if(name==='pg')return {Pool};return require(name)},setTimeout,clearTimeout,setInterval:fn=>{intervals.push(fn);return {unref(){}};},process:{env:database?{DATABASE_URL:'test'}:{}},console,Buffer,URL});
+  const context=vm.createContext({require(name){if(name==='./features')return require('../features');if(name==='./account')return require('../account');if(name==='./push')return ()=>({init:async()=>{},enabled:()=>false,wake:(id,kind='message')=>wakes.push([id,kind]),forgetUser:async()=>{}});if(name==='express')return express;if(name==='ws')return {WebSocketServer};if(name==='http')return {createServer(){return {listen(){}}}};if(name==='pg')return {Pool};return require(name)},setTimeout,clearTimeout,setInterval:fn=>{intervals.push(fn);return {unref(){}};},process:{env:database?{DATABASE_URL:'test'}:{}},console,Buffer,URL});
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../index.js'),'utf8'),context);
   const register=async name=>{let value;await routes.get('POST /api/register')({body:{username:name,pin:'123456',name}},{json(v){value=v},status(){return this}});return value;};
   const alice=await register('alice'),bob=await register('bob'),eve=await register('eve');
@@ -369,3 +369,17 @@ test('a phone that goes quiet (its data went off) stops showing online; last see
   const old=f.socket(f.eve);old.ws.rabtaHeard=Date.now()-40000;
   assert.equal((await look(f.eve.id)).online,false,'Older phones too, after 35 s without a ping');
 });
+test('a deleted account leaves its groups, its calls end, and messages it sent that were on their way are dropped',async()=>{
+  const f=await fixture();let group,res;
+  await f.routes.get('POST /api/groups')({headers:{authorization:'Bearer '+f.alice.token},body:{name:'Family',members:[f.bob.id]}},{json(v){group=v},status(){return this}});
+  const a=f.socket(f.alice),b=f.socket(f.bob);
+  await a.send({type:'call_init',callId:'112233445566',to:f.bob.id});
+  await a.send({type:'msg',id:'ABCDEF123456',to:f.eve.id,body:'for eve, offline',msgType:'text'});
+  await f.routes.get('POST /api/me/delete')({headers:{authorization:'Bearer '+f.alice.token},body:{pin:'123456'}},{json(v){res=v},status(){return this}});
+  assert.equal(res.ok,true);assert.equal(a.ws.readyState,3,'Its phone is disconnected');
+  assert.equal(b.messages.filter(m=>m.type==='call_end').length,1,'The call ends for the other phone');
+  const e=f.socket(f.eve);assert.equal(e.messages.filter(m=>m.type==='msg').length,0);
+  await b.send({type:'group_msg',id:'AAAABBBBCCCC',to:group.id,body:'still here',msgType:'text'});
+  assert.equal(b.messages.at(-1).status,'sent','The group goes on without it');
+});
+

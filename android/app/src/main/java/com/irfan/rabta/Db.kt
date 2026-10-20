@@ -73,6 +73,12 @@ class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(
             }
         }
 
+        /** Delete account: closes [account]'s history and deletes its file (the phone is already signed out of it). */
+        fun delete(ctx: Context, account: String) {
+            synchronized(this) { INST?.takeIf { it.account == account }?.let { runCatching { it.close() }; INST = null } }
+            fileFor(account)?.let { ctx.applicationContext.deleteDatabase(it) }
+        }
+
         /**
          * Before per-account files, every account on the phone shared rabta.db. Hand that history to the first
          * account that opens it after the update (normally the account that was signed in when the app updated);
@@ -90,6 +96,11 @@ class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(
             }
             if (moved) prefs.edit().putString("legacy_owner", account).commit()
         }
+    }
+
+    /** The files on this phone that this account's messages point to (see Attachments), for deleting the account. */
+    fun attachmentKeys(): Set<String> = readableDatabase.rawQuery("SELECT body FROM messages WHERE body LIKE '%\"local\"%'", null).use { c ->
+        buildSet { while (c.moveToNext()) runCatching { org.json.JSONObject(c.getString(0)).optString("local") }.getOrNull()?.takeIf { it.isNotEmpty() }?.let(::add) }
     }
 
     fun upsertConversation(peerId: String, peerName: String, lastMsg: String, time: Long, incUnread: Boolean, isGroup: Boolean = false) {
