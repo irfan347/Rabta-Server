@@ -7,7 +7,7 @@ object Session {
     private const val P = "rabta_session"
     private lateinit var ctx: Context
 
-    fun init(c: Context) { ctx = c.applicationContext; Inbox.init(ctx); Outbox.init(ctx); if (serverUrl.isEmpty()) serverUrl = Config.SERVER }
+    fun init(c: Context) { ctx = c.applicationContext; Inbox.init(ctx); Outbox.init(ctx); (ctx as? android.app.Application)?.let(OnScreen::init); if (serverUrl.isEmpty()) serverUrl = Config.SERVER }
 
     var id: String get() = prefs().getString("id", "") ?: ""; set(v) { prefs().edit().putString("id", v).apply() }
     var username: String get() = prefs().getString("username", "") ?: ""; set(v) { prefs().edit().putString("username", v).apply() }

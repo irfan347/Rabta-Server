@@ -15,11 +15,22 @@ import java.util.concurrent.TimeUnit
 object WsClient {
     // A connect that has not answered in 20 s is stuck (often a network Android had blocked while Rabta slept); a
     // fresh attempt is quicker than waiting longer.
+    // Call audio goes out in small frames every 40 ms: each is sent at once, not held back to fill a packet (Nagle),
+    // which bunched the voice up and made it break.
     private val http = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS)
-        .pingInterval(25, TimeUnit.SECONDS).build()
+        .pingInterval(25, TimeUnit.SECONDS).socketFactory(NoDelaySockets).build()
+    private object NoDelaySockets : javax.net.SocketFactory() {
+        private val base = javax.net.SocketFactory.getDefault()
+        private fun java.net.Socket.now() = apply { runCatching { tcpNoDelay = true } }
+        override fun createSocket() = base.createSocket().now()
+        override fun createSocket(host: String, port: Int) = base.createSocket(host, port).now()
+        override fun createSocket(host: String, port: Int, local: java.net.InetAddress, localPort: Int) = base.createSocket(host, port, local, localPort).now()
+        override fun createSocket(host: java.net.InetAddress, port: Int) = base.createSocket(host, port).now()
+        override fun createSocket(host: java.net.InetAddress, port: Int, local: java.net.InetAddress, localPort: Int) = base.createSocket(host, port, local, localPort).now()
+    }
     private val handler = Handler(Looper.getMainLooper())
-    private var ws: WebSocket? = null
+    @Volatile private var ws: WebSocket? = null
     @Volatile var connected = false; private set
     @Volatile var protocol=0; private set
     @Volatile var authRequired = false; private set
@@ -66,6 +77,24 @@ object WsClient {
         probe=Runnable { probe=null; if(attempt==generation&&lastHeard<now) lost(attempt,"Reconnecting…",atOnce=true) }.also { handler.postDelayed(it,if(onScreen) 3000 else 6000) }
     }
 
+    // Contacts see "online" only while Rabta is on this phone's screen (see OnScreen), as in WhatsApp; the server is
+    // told on every connection and whenever it changes, and every 10 s while Rabta shows, so a phone whose data goes
+    // off stops showing online within half a minute.
+    @Volatile private var shown = false
+    fun shown(value: Boolean) = main { if (shown == value) return@main; shown = value; if (connected) tellShown() }
+    private val stillShown = Runnable { if (connected) tellShown() }
+    private fun tellShown() {
+        ws?.send(JSONObject().put("type", "presence").put("active", shown).toString())
+        handler.removeCallbacks(stillShown); if (shown) handler.postDelayed(stillShown, 10_000)
+    }
+    /** The contact whose chat is open: the server sends their online and last seen as they change. "" for none. */
+    private var watching = ""
+    fun watch(id: String) = main { if (watching == id) return@main; watching = id; if (connected) tellWatching() }
+    fun unwatch(id: String) = main { if (watching == id) watch("") }
+    private fun tellWatching() { ws?.send(JSONObject().put("type", "watch").put("id", watching).toString()) }
+    /** Bytes written but not yet sent: a call skips audio rather than fall further behind on a slow upload. */
+    fun backlog(): Long = ws?.queueSize() ?: 0L
+
     fun connect(session: Session) = main {
         if(session.serverUrl.isBlank()||session.token.isBlank())return@main
         val next=session.serverUrl+"|"+session.id+"|"+session.token
@@ -97,7 +126,7 @@ object WsClient {
         try {
             val url=Session.serverUrl.trimEnd('/').replace("https://","wss://").replace("http://","ws://")+"/ws"
             val expectedId=Session.id
-            ws=http.newWebSocket(Request.Builder().url(url).header("Authorization","Bearer ${Session.token}").build(),object:WebSocketListener(){
+            ws=http.newWebSocket(Request.Builder().url(url).header("Authorization","Bearer ${Session.token}").header("X-Rabta-Presence","1").build(),object:WebSocketListener(){
                 override fun onOpen(socket:WebSocket,r:Response)=main {
                     if(attempt!=generation){socket.cancel();return@main}
                     // A successful HTTP upgrade is not an authenticated session.
@@ -112,7 +141,9 @@ object WsClient {
                     if(o.optString("type")=="ready") {
                         if(o.optString("id")!=expectedId){lost(attempt,"Sign in again",true);return@main}
                         readyTimeout?.let {handler.removeCallbacks(it)};readyTimeout=null
-                        protocol=o.optInt("protocol",1);answersPing=o.optBoolean("receipts");connected=true;status="Online";reconnectDelay=2000L;RabtaEvents.postConnected();settled?.invoke()
+                        protocol=o.optInt("protocol",1);answersPing=o.optBoolean("receipts");connected=true;status="Online";reconnectDelay=2000L
+                        tellShown();if(watching.isNotEmpty())tellWatching()
+                        RabtaEvents.postConnected();settled?.invoke()
                     } else if(connected)handle(o)
                 }
                 override fun onClosing(socket:WebSocket,code:Int,reason:String)=main {
@@ -146,7 +177,8 @@ object WsClient {
             "ack" -> RabtaEvents.postAck(o.optString("id"), MessageDelivery.SERVER_PREFIX + o.optString("status"))
             "receipt" -> RabtaEvents.postReceipt(o.optString("id"), o.optString("by"), false)
             "device_request" -> o.optJSONObject("request")?.let { RabtaEvents.postDeviceRequest(it.optString("id"), it.optString("name")) }
-            "typing" -> RabtaEvents.postTyping(o.optString("from"))
+            "typing" -> RabtaEvents.postTyping(o.optString("from"), o.optString("kind"))
+            "presence" -> RabtaEvents.postPresence(o.optString("id"), o.optBoolean("online"), o.optLong("lastSeen"))
             "read" -> RabtaEvents.postRead(o.optString("msgId"), o.optString("by"))
             "incoming_call" -> RabtaEvents.postIncomingCall(o.optString("from"), o.optString("fromName"),o.optString("callId"))
             "call_state" -> RabtaEvents.postCallState(o.optString("from"),o.optString("callId"),o.optString("state"))
@@ -178,7 +210,8 @@ object WsClient {
     }
 
     fun sendRaw(json: String): Boolean = if (connected) (ws?.send(json) == true) else false
-    fun sendTyping(toId: String) = sendRaw(JSONObject().put("type","typing").put("to",toId).toString())
+    /** [kind] "recording" while a voice message is recorded. */
+    fun sendTyping(toId: String, kind: String = "") = sendRaw(JSONObject().put("type","typing").put("to",toId).apply { if (kind.isNotEmpty()) put("kind",kind) }.toString())
     fun sendReceipt(toId: String, msgId: String) = sendRaw(JSONObject().put("type","receipt").put("to",toId).put("id",msgId).toString())
     fun sendRead(toId: String, msgId: String) = sendRaw(JSONObject().put("type","read").put("to",toId).put("msgId",msgId).toString())
 

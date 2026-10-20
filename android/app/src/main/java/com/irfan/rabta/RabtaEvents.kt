@@ -14,7 +14,10 @@ object RabtaEvents {
         /** Another phone entered this account's PIN and waits for this trusted phone to allow it. */
         fun onDeviceRequest(requestId: String, deviceName: String) {}
         fun onRead(msgId: String, byId: String) {}
-        fun onTyping(fromId: String) {}
+        /** [kind] is "recording" while they record a voice message, otherwise they are typing. */
+        fun onTyping(fromId: String, kind: String) {}
+        /** The server says whether [userId] has Rabta open now, or when it last had ([lastSeen], 0 when unknown). */
+        fun onPresence(userId: String, online: Boolean, lastSeen: Long) {}
         fun onIncomingCall(fromId: String, fromName: String, callId: String) {}
         fun onCallAudio(fromId: String, data: String, callId: String) {}
         fun onCallState(fromId:String,callId:String,state:String) {}
@@ -45,7 +48,8 @@ object RabtaEvents {
     fun postNearbyLinked()                                   = fire { onNearbyLinked() }
     fun postDeviceRequest(requestId: String, deviceName: String) = fire { onDeviceRequest(requestId, deviceName) }
     fun postRead(msgId: String, byId: String)                = fire { onRead(msgId, byId) }
-    fun postTyping(fromId: String)                           = fire { onTyping(fromId) }
+    fun postTyping(fromId: String, kind: String)             = fire { onTyping(fromId, kind) }
+    fun postPresence(userId: String, online: Boolean, lastSeen: Long) = fire { onPresence(userId, online, lastSeen) }
     fun postIncomingCall(fromId: String, fromName: String, callId: String)   = fire { onIncomingCall(fromId, fromName, callId) }
     fun postCallAudio(fromId: String, data: String, callId: String)          = fire { onCallAudio(fromId, data, callId) }
     fun postCallState(fromId:String,callId:String,state:String) = fire { onCallState(fromId,callId,state) }

@@ -92,6 +92,8 @@ Status: `StatusActivity` -> `FeatureApi`/`Transfers` -> server audience-filtered
 
 WebSocket messages include `ready` (protocol 2), `msg`, `group_msg`, `ack`, `typing`, `read`, `group_created`, `ping`/`pong`, `call_init`, `incoming_call`, `call_ringing`, `call_state`, `call_accept`, `call_audio`, `call_end`, `video_offer`, `video_answer`, `ice_candidate`, `video_end`.
 
+Presence: a phone that connects with `X-Rabta-Presence: 1` sends `presence` (`active`: Rabta is on its screen) and counts as online only while active; older phones count as online while connected. `watch` names the contact whose chat is open, and the server pushes that contact's `presence` (`online`, `lastSeen`) whenever it changes. `typing` may carry `kind: "recording"` while a voice message is recorded.
+
 The client also calls **`POST /api/me/photo` and `GET /api/user/photo/:id`**, but neither route exists in this backend. These are unfinished integration points.
 
 ## Implemented functionality versus limits

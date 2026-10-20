@@ -16,7 +16,7 @@ async function fixture(database=false) {
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../index.js'),'utf8'),context);
   const register=async name=>{let value;await routes.get('POST /api/register')({body:{username:name,pin:'123456',name}},{json(v){value=v},status(){return this}});return value;};
   const alice=await register('alice'),bob=await register('bob'),eve=await register('eve');
-  function socket(user,{broken=false}={}){const handlers={},messages=[];const ws={readyState:1,pings:0,send(s,cb){if(broken)return cb?.(new Error('socket write failed'));messages.push(JSON.parse(s));cb?.()},close(){this.readyState=3;handlers.close?.()},terminate(){this.close()},ping(){this.pings++},on(e,f){handlers[e]=f}};connect(ws,{headers:{authorization:'Bearer '+user.token},url:'/ws'});return {messages,send:async m=>handlers.message(Buffer.from(JSON.stringify(m))),pong:()=>handlers.pong?.(),ping:()=>handlers.ping?.(),ws};}
+  function socket(user,{broken=false,presence=false}={}){const handlers={},messages=[];const ws={readyState:1,pings:0,send(s,cb){if(broken)return cb?.(new Error('socket write failed'));messages.push(JSON.parse(s));cb?.()},close(){this.readyState=3;handlers.close?.()},terminate(){this.close()},ping(){this.pings++},on(e,f){handlers[e]=f}};connect(ws,{headers:{authorization:'Bearer '+user.token,...(presence?{'x-rabta-presence':'1'}:{})},url:'/ws'});return {messages,send:async m=>handlers.message(Buffer.from(JSON.stringify(m))),pong:()=>handlers.pong?.(),ping:()=>handlers.ping?.(),ws};}
   return {socket,alice,bob,eve,queries,routes,register,wakes,failSql:re=>{failing=re},onSql:fn=>{responder=fn},expire:()=>{for(const t of [...timers])t.fn();},beat:()=>intervals.forEach(fn=>fn())};
 }
 test('large offline attachment survives intact and retries do not duplicate',async()=>{
@@ -315,4 +315,57 @@ test('a message or call for a phone that is not connected wakes it; a connected 
   assert.equal(e.messages.filter(m=>m.type==='msg').length,1);
   let health;f.routes.get('GET /health')({},{json(v){health=v}});
   assert.equal(health.push,false,'The health check says whether wake pushes are on');
+});
+
+test('a phone that reports it is online only while Rabta is on its screen; last seen is when Rabta left it',async()=>{
+  const f=await fixture();const get=f.routes.get('GET /api/user/id/:id');
+  const look=async id=>{const r={code:200,status(n){this.code=n;return this},json(v){this.body=v;return this}};await get({headers:{authorization:'Bearer '+f.bob.token},params:{id},query:{}},r);return r.body;};
+  const a=f.socket(f.alice,{presence:true});
+  assert.equal((await look(f.alice.id)).online,false,'Connected in the background is not online');
+  await a.send({type:'presence',active:true});assert.equal((await look(f.alice.id)).online,true);
+  await a.send({type:'presence',active:false});const left=await look(f.alice.id);
+  assert.equal(left.online,false);assert.ok(left.lastSeen>0);
+  await new Promise(r=>setTimeout(r,5));a.ws.close();
+  assert.equal((await look(f.alice.id)).lastSeen,left.lastSeen,'A background connection ending is not a new last seen');
+  const old=f.socket(f.eve);assert.equal((await look(f.eve.id)).online,true,'Older phones are online while connected, as before');
+  old.ws.close();assert.equal((await look(f.eve.id)).online,false);
+});
+test('the chat on screen hears its contact come online and leave; blocked people hear nothing',async()=>{
+  const f=await fixture();const b=f.socket(f.bob,{presence:true}),e=f.socket(f.eve,{presence:true});
+  const seen=s=>s.messages.filter(m=>m.type==='presence');
+  await b.send({type:'watch',id:f.alice.id.toLowerCase()});
+  assert.deepEqual(seen(b).map(m=>[m.id,m.online]),[[f.alice.id,false]]);
+  await f.routes.get('POST /api/block')({headers:{authorization:'Bearer '+f.alice.token},body:{target:f.eve.id},params:{},query:{}},{status(){return this},json(){},setHeader(){}});
+  await e.send({type:'watch',id:f.alice.id});
+  const a=f.socket(f.alice,{presence:true});await a.send({type:'presence',active:true});
+  assert.deepEqual(seen(b).map(m=>m.online),[false,true]);
+  await a.send({type:'presence',active:false});
+  assert.deepEqual(seen(b).map(m=>m.online),[false,true,false]);assert.ok(seen(b).at(-1).lastSeen>0);
+  await b.send({type:'watch',id:''});await a.send({type:'presence',active:true});
+  assert.equal(seen(b).length,3,'A closed chat no longer hears it');
+  assert.equal(seen(e).length,0,'Blocked people never learn presence');
+});
+test('typing says when a voice message is being recorded; blocked people see neither',async()=>{
+  const f=await fixture();const a=f.socket(f.alice),b=f.socket(f.bob),e=f.socket(f.eve);
+  await a.send({type:'typing',to:f.bob.id});await a.send({type:'typing',to:f.bob.id,kind:'recording'});await a.send({type:'typing',to:f.bob.id,kind:'<script>'});
+  assert.deepEqual(b.messages.filter(m=>m.type==='typing').map(m=>m.kind??'typing'),['typing','recording','typing']);
+  await f.routes.get('POST /api/block')({headers:{authorization:'Bearer '+f.eve.token},body:{target:f.alice.id},params:{},query:{}},{status(){return this},json(){},setHeader(){}});
+  await a.send({type:'typing',to:f.eve.id,kind:'recording'});
+  assert.equal(e.messages.filter(m=>m.type==='typing').length,0);
+});
+test('a phone that goes quiet (its data went off) stops showing online; last seen is when it was last heard',async()=>{
+  const f=await fixture();const get=f.routes.get('GET /api/user/id/:id');
+  const look=async id=>{const r={code:200,status(n){this.code=n;return this},json(v){this.body=v;return this}};await get({headers:{authorization:'Bearer '+f.bob.token},params:{id},query:{}},r);return r.body;};
+  const b=f.socket(f.bob,{presence:true});await b.send({type:'watch',id:f.alice.id});
+  const a=f.socket(f.alice,{presence:true});await a.send({type:'presence',active:true});
+  assert.equal((await look(f.alice.id)).online,true);
+  const heard=Date.now()-30000;a.ws.rabtaHeard=heard;
+  assert.equal((await look(f.alice.id)).online,false,'Not heard from for 30 s: not online, before its socket is closed');
+  f.beat();
+  const told=()=>b.messages.filter(m=>m.type==='presence');
+  assert.deepEqual(told().map(m=>m.online),[false,true,false]);assert.equal(told().at(-1).lastSeen,heard);
+  await a.send({type:'presence',active:true});
+  assert.deepEqual(told().map(m=>m.online),[false,true,false,true],'Heard again: online again, each change told once');
+  const old=f.socket(f.eve);old.ws.rabtaHeard=Date.now()-40000;
+  assert.equal((await look(f.eve.id)).online,false,'Older phones too, after 35 s without a ping');
 });
