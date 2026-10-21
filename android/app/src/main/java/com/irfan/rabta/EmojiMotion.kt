@@ -2,7 +2,7 @@ package com.irfan.rabta
 
 import android.animation.ValueAnimator
 import android.view.View
-import android.view.animation.OvershootInterpolator
+import android.view.animation.DecelerateInterpolator
 
 object EmojiMotion {
     private val emoji by lazy { EmojiData.categories.flatMap { it.entries }.map { it.first }.sortedByDescending { it.length } }
@@ -29,6 +29,6 @@ object EmojiMotion {
     fun play(v: View) {
         if(!Experience.animate(v.context) || !ValueAnimator.areAnimatorsEnabled()) return
         v.animate().cancel(); v.scaleX = 0.75f; v.scaleY = 0.75f
-        v.animate().scaleX(1f).scaleY(1f).setDuration(420).setInterpolator(OvershootInterpolator(2f)).start()
+        v.animate().scaleX(1f).scaleY(1f).setDuration(420).setInterpolator(DecelerateInterpolator()).start()
     }
 }

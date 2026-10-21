@@ -18,6 +18,10 @@ class SettingsActivity : ThemedActivity() {
         content = FeatureUi.page(this, "Settings")
         content.addView(FeatureUi.text(this, "Your Rabta preferences and account tools."))
 
+        section("APP MODE") {
+            row("Change app mode", "${Experience.mode(this@SettingsActivity)} · Easy, Standard or Developer", "appearance") { Experience.choose(this@SettingsActivity) }
+        }
+
         section("ACCOUNT") {
             row("Profile", "${Session.name} · @${Session.username}", "profile") {
                 startActivity(Intent(this@SettingsActivity, ProfileActivity::class.java))
@@ -42,6 +46,7 @@ class SettingsActivity : ThemedActivity() {
             row("App lock", if (Privacy.prefs(this@SettingsActivity).getBoolean("lock", false)) "Enabled · device screen lock" else "Use your device unlock") {
                 toggleAppLock()
             }
+            row("Locked chats", "Unlock to view hidden conversations", "privacy") { startActivity(Intent(this@SettingsActivity,LockedChatsActivity::class.java)) }
             row("Blocked contacts", "${blockedContacts().size} blocked", "privacy") { showBlockedContacts() }
         }
 
@@ -53,7 +58,6 @@ class SettingsActivity : ThemedActivity() {
             }
         }
         section("EXPERIENCE") {
-            row("App mode", Experience.mode(this@SettingsActivity), "appearance") { Experience.choose(this@SettingsActivity) }
             row("Screen capture protection", "Screenshots and screen recording are blocked inside Rabta", "privacy") {
                 themedInfo("Screen capture protection", "Android protects Rabta screens from ordinary screenshots and recording. A camera or a modified device can still capture content. Files opened in other apps follow those apps' rules.")
             }

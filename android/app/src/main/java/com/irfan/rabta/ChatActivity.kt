@@ -891,13 +891,14 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     private fun toggleChatLock() {
             val locked=Privacy.chatLocked(this,peerId)
             android.app.AlertDialog.Builder(this).setTitle(if(locked) "Remove chat lock?" else "Lock this chat?")
-                .setMessage("Use your fingerprint or device screen lock each time you return. Message previews and notification replies will be hidden. This protects access on this phone.")
+                .setMessage("Use your fingerprint or device screen lock each time you return. The chat will disappear from the main list and search. Open it from Settings → Privacy & security → Locked chats. Message previews and notification replies will be hidden.")
                 .setNegativeButton("Cancel",null).setPositiveButton("Continue") { _,_ ->
                     AppLock.authenticate(this) { Privacy.setChatLocked(this,peerId,!locked);recreate() }
                 }.show()
     }
     private fun largeEmoji(text:String)=RabtaUi.text(this,text,if(EmojiMotion.count(text)==1) 54f else 42f).apply {
-        includeFontPadding=false;setPadding(dp(8),dp(6),dp(8),dp(6))
+        includeFontPadding=true;setPadding(dp(12),dp(10),dp(12),dp(10))
+        setLineSpacing(0f,1f);if(android.os.Build.VERSION.SDK_INT>=28) setFallbackLineSpacing(true)
         addOnAttachStateChangeListener(object:View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(v:View) { EmojiMotion.play(v) }
             override fun onViewDetachedFromWindow(v:View) { v.animate().cancel() }

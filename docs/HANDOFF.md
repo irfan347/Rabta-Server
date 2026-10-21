@@ -69,3 +69,13 @@ Saif subsequently said the usage limit reset and asked to continue with feedback
 ## Swipe direction confirmation
 
 Implemented the confirmed physical directions: left selects/highlights a message; right quotes it for reply, including RTL layouts. Selection mode retains tap-to-toggle behavior. Horizontal gesture thresholds and vertical scroll rejection remain in place. Added a left-swipe instrumentation case alongside the existing right-swipe case. Rebuild passed (104 unit tests; device APK and instrumentation APK compiled). Test APK refreshed at `/home/saif/rabta/Rabta-Test-feature-upgrade.apk`; phone instrumentation remains blocked by the previously rejected USB installation. Other screenshot feedback listed above remains pending.
+
+## Phone feedback batch (not built or tested yet)
+
+User requested testing be deferred until a larger batch is ready. Do not install or run tests now. Future test APK destination is the PHONE `/sdcard/Download/rabta/`, not just the computer Downloads directory. That phone folder currently contains the previous `27a4bb7` build, not this batch.
+
+- Emoji picker cells now size with font scale and allow fewer columns on narrow screens; search result cells use the same sizing. Large emoji retain font/fallback padding, and their animation no longer overshoots bounds.
+- Locked conversations are excluded from ordinary chats, Spaces, archive/search and unread chat counts. Cached lists are cleared before resume when locks exist. No locked-chat icon/row appears on the main list. Always-available Settings > Privacy & security > Locked chats opens a dedicated device-authenticated screen, hiding identities again on pause. Each chat still enforces its own authentication. Contacts and call history are not hidden by this change.
+- App mode moved to the top of Settings. Existing preference signature recreates screens after a mode change.
+- Tab swipes translate the page during dragging and settle after release; velocity, boundaries, cancellation, multi-touch, RTL and disabled animations are handled. Floating action button stays stationary. Visual polish is focused on these reported behaviors; broader UI review remains pending.
+- This batch has NOT been compiled, run on the phone or tested, per the user’s request. Next testing batch should cover emoji at large text sizes, locked-chat lifecycle/search and swipe interruptions alongside existing regression checks.
