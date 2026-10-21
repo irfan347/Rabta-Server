@@ -36,6 +36,8 @@ class FeatureUpgradeTest {
         Session.init(ctx);old=listOf(Session.id,Session.name,Session.username,Session.token,Session.serverUrl)
         ui {MessageService.stop(ctx);WsClient.disconnect();Session.id=me;Session.name="Fixture";Session.username="fixture";Session.token="fixture-token";Session.serverUrl="https://127.0.0.1:8443"}
         Privacy.prefs(ctx).edit().clear().commit()
+        // A chat keeps its draft and quoted reply when it closes; each test starts with none.
+        ctx.getSharedPreferences("drafts_$me",0).edit().clear().commit()
         L.prefs(ctx).edit().putString("experience","Standard").putString("language","en").putFloat("scale",1f).commit()
         db=Db.get(ctx)
         db.writableDatabase.delete("messages","conv_id=?",arrayOf(peer));db.writableDatabase.delete("conversations","peer_id=?",arrayOf(peer))
@@ -49,7 +51,8 @@ class FeatureUpgradeTest {
             WsClient.disconnect();MessageService.stop(ctx)
         }
         inst.waitForIdleSync()
-        Privacy.prefs(ctx).edit().clear().commit();L.prefs(ctx).edit().putString("experience","Standard").apply()
+        Privacy.prefs(ctx).edit().clear().commit();ctx.getSharedPreferences("drafts_$me",0).edit().clear().commit()
+        L.prefs(ctx).edit().putString("experience","Standard").apply()
         db.writableDatabase.delete("messages","conv_id=?",arrayOf(peer));db.writableDatabase.delete("conversations","peer_id=?",arrayOf(peer));db.removeContact(peer)
         ui {Session.id=old[0];Session.name=old[1];Session.username=old[2];Session.token=old[3];Session.serverUrl=old[4]}
     }

@@ -93,7 +93,7 @@ class PremiumUiTest {
     private fun capture(name:String) {
         inst.waitForIdleSync();Thread.sleep(300);inst.waitForIdleSync()
         val dir=File(ctx.getExternalFilesDir(null),"premium-captures").apply {mkdirs()}
-        val shot=inst.uiAutomation.takeScreenshot()?:return
+        val shot=inst.captureScreen()?:return
         val scaled=Bitmap.createScaledBitmap(shot,360,(shot.height*360f/shot.width).toInt(),true)
         File(dir,"premium-$name.jpg").outputStream().use {scaled.compress(Bitmap.CompressFormat.JPEG,78,it)}
         if(scaled!==shot)scaled.recycle();shot.recycle()

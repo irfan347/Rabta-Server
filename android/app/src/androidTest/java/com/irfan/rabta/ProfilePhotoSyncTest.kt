@@ -125,14 +125,15 @@ class ProfilePhotoSyncTest {
         look(); ui { assertEquals(4, answers); assertSame(first, seen) }
         waitUi("Unchanged photo answered without the picture") { photos.unchanged.get() == 1 && !asking(owner) }
         assertEquals(1, photos.downloads.get())
+        ui { assertEquals("An unchanged photo is not handed out a second time", 4, answers) }
 
-        // Once the owner removes it, the contact's next look shows initials.
+        // Once the owner removes it, the contact's next look shows it at once, then initials as soon as the check answers.
         photos.photos.remove(owner)
         now += 5 * 60_000 + 1
         look()
         waitUi("Removed photo is forgotten") { ProfileHelper.get(owner) == null }
-        ui { assertEquals("The old photo was handed out once, not followed by a second answer", 5, answers) }
-        look(); ui { assertEquals(6, answers); assertNull(seen) }
+        ui { assertEquals("The old photo, then word that it went", 6, answers); assertNull(seen) }
+        look(); ui { assertEquals(7, answers); assertNull(seen) }
     }
 
     /** Older app versions kept photos up to 1600 px, above the server's 256 KB limit; they are resized for sharing. */

@@ -35,7 +35,7 @@ class DesignSystemTest {
     private fun capture(name:String) {
         inst.waitForIdleSync();Thread.sleep(180)
         val dir=File(ctx.getExternalFilesDir(null),"design-system").apply { mkdirs() }
-        val bitmap=inst.uiAutomation.takeScreenshot()
+        val bitmap=checkNotNull(inst.captureScreen()) { "Android returned no screenshot" }
         try { File(dir,"$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG,100,it) } } finally { bitmap.recycle() }
         for(command in listOf("mkdir -p /sdcard/Download/rabta-interface","cp ${dir.absolutePath}/$name.png /sdcard/Download/rabta-interface/$name.png")) {
             android.os.ParcelFileDescriptor.AutoCloseInputStream(inst.uiAutomation.executeShellCommand(command)).use { it.readBytes() }

@@ -21,7 +21,7 @@ class InterfaceTest {
     private fun screenshot(name:String) {
         inst.waitForIdleSync(); Thread.sleep(600)
         val dir=File(ctx.getExternalFilesDir(null),"screenshots").apply { mkdirs() }
-        inst.uiAutomation.takeScreenshot().useBitmap { bitmap -> File(dir,"$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG,100,it) } }
+        checkNotNull(inst.captureScreen()) { "Android returned no screenshot" }.useBitmap { bitmap -> File(dir,"$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG,100,it) } }
         // AGP uninstalls the app after tests, so copy captures outside its data directory.
         for(command in listOf("mkdir -p /sdcard/Download/rabta-interface", "cp ${dir.absolutePath}/$name.png /sdcard/Download/rabta-interface/$name.png")) {
             android.os.ParcelFileDescriptor.AutoCloseInputStream(inst.uiAutomation.executeShellCommand(command)).use { it.readBytes() }
