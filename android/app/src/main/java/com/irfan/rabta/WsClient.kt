@@ -148,7 +148,9 @@ object WsClient {
                 }
                 override fun onClosing(socket:WebSocket,code:Int,reason:String)=main {
                     if(attempt!=generation)return@main
-                    socket.close(code,reason)
+                    // An empty peer close frame is reported as 1005 locally. It is not a
+                    // legal wire code: echoing it throws on the main thread and kills Rabta.
+                    if(code==1005) socket.close(1000,null) else socket.close(code,reason)
                     lost(attempt,if(code==1008)"Sign in again — session expired or rejected" else "Connection closed — retrying…",code==1008)
                 }
                 override fun onClosed(socket:WebSocket,code:Int,reason:String)=main {
