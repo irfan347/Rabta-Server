@@ -93,3 +93,7 @@ Read existing adb crash buffer only, without launching apps or running tests. On
 - Read receipts and typing settings moved out of Developer into Privacy for all modes. Added existing status-audience picker shortcut for FUTURE updates. Screen capture information moved under Privacy; Chats and Appearance are separate sections.
 - No build, tests, installation, deployment or push performed for this batch, honoring deferred testing. Phone APK remains the older build with the known close-code crash. Next validation must include persisted visibility reload, failed persistence, anonymous and authenticated lookup, socket watchers, photo owner/other access, account isolation, draft lifecycle, and existing regressions.
 - Still pending major screenshot scope: author-validated message edits/deletion for everyone, disappearing messages and view-once media. Do not claim those implemented. Feature branch remains local until review/testing checkpoint; main deploys server and public Android releases.
+
+## Ongoing GitHub sync authorization
+
+Saif explicitly requested pushing the current code and keeping GitHub updated as development continues (24 percent session budget left). Push completed source batches to `feat/chat-privacy-modes`, without merging main or triggering production releases. Testing remains deferred until a larger batch is ready. Keep reporting untested changes separately from the earlier verified checkpoint.
