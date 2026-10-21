@@ -238,7 +238,7 @@ test('deletion clears the account from storage, its sign-in last', async () => {
   const s = server(true); const a = await register(s, 'stored', phone());
   assert.equal((await s.call('POST', '/api/me/delete', { token: a.token, body: { pin: '123456' } })).ok, true);
   const sql = s.queries.map(([q]) => q), at = re => sql.findIndex(q => re.test(q));
-  for (const re of [/DELETE FROM ru_messages WHERE from_id=\$1 OR to_id=\$1/, /DELETE FROM ru_receipts/, /DELETE FROM rf_data WHERE kind IN \('grant','got'\)/, /kind='photo'/,
+  for (const re of [/DELETE FROM ru_messages WHERE from_id=\$1 OR to_id=\$1/, /DELETE FROM ru_receipts/, /DELETE FROM rf_data WHERE kind IN \('grant','got'\)/, /kind IN \('photo','visibility'\) AND id=\$1/,
     /DELETE FROM rf_data WHERE kind='push'/, /DELETE FROM ru_devices WHERE user_id=\$1$/, /DELETE FROM ru_phones/, /DELETE FROM ru_reserved/, /DELETE FROM ru_users/]) assert.ok(at(re) >= 0, String(re));
   assert.ok(at(/DELETE FROM ru_users/) > at(/DELETE FROM ru_devices WHERE user_id=\$1$/), 'Sign-in goes last, so a failure on the way leaves a working account');
   assert.ok(s.queries.filter(([q]) => /DELETE FROM ru_users/.test(q)).every(([, args]) => args[0] === a.id));
