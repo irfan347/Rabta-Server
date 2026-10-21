@@ -234,7 +234,7 @@ class CallsScreenTest {
                 shell("input keyevent KEYCODE_WAKEUP");shell("wm dismiss-keyguard");shell("input keyevent 82")
             }
             waitUi { power.isInteractive&&connectedShown(c) }
-            ui { all(c.window.decorView).first { it.contentDescription=="End" && it.isClickable }.performClick() }
+            ui { all(c.window.decorView).first { it.contentDescription=="End call" && it.isClickable }.performClick() }
             assertTrue("The other phone is told the call ended",ended.await(5,TimeUnit.SECONDS))
             waitUi { serviceNotice()=="Rabta" }
             assertFalse("The call no longer keeps the phone awake",heldWakeLocks().contains("Rabta:call"))
@@ -296,7 +296,7 @@ class CallsScreenTest {
             ui { all(o.window.decorView).first { it.isShown&&it.contentDescription?.toString()?.startsWith("Ongoing call with")==true }.performClick() }
             // Whichever screen shows the call now: the call screen with its time and End.
             waitUi {
-                back=WindowInspector.getGlobalWindowViews().flatMap { all(it) }.firstOrNull { it.isShown&&it.contentDescription=="End" }?.context as? android.app.Activity
+                back=WindowInspector.getGlobalWindowViews().flatMap { all(it) }.firstOrNull { it.isShown&&it.contentDescription=="End call" }?.context as? android.app.Activity
                 back?.let { shows(it,"Connected") }==true
             }
             val b=back!!

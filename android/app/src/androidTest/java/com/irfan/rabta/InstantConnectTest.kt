@@ -159,7 +159,7 @@ class InstantConnectTest {
             try { assertEquals(reply,decode(rendered!!)) }finally{rendered?.recycle()}
             inst.waitForIdleSync()
             val dir=java.io.File(ctx.getExternalFilesDir(null),"screenshots").apply { mkdirs() }
-            val screenshot=inst.uiAutomation.takeScreenshot()
+            val screenshot=inst.captureScreen()
             screenshot?.let { image -> java.io.File(dir,"instant-connect-reply.png").outputStream().use { image.compress(Bitmap.CompressFormat.PNG,100,it) };image.recycle() }
             android.os.ParcelFileDescriptor.AutoCloseInputStream(inst.uiAutomation.executeShellCommand("mkdir -p /sdcard/Download/rabta-interface")).use { it.readBytes() }
             android.os.ParcelFileDescriptor.AutoCloseInputStream(inst.uiAutomation.executeShellCommand("cp ${dir.absolutePath}/instant-connect-reply.png /sdcard/Download/rabta-interface/instant-connect-reply.png")).use { it.readBytes() }

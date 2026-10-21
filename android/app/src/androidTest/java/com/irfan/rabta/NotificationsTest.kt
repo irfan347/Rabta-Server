@@ -109,7 +109,9 @@ class NotificationsTest {
     }
 
     /** Answer and Decline on the ringing notification; a call nobody answered becomes a missed call. */
-    @Test fun incomingCallNotificationDeclinesAndMissedCallsAreNoticed() = fixture { _ ->
+    @Test fun incomingCallNotificationDeclinesAndMissedCallsAreNoticed() = fixture { db ->
+        // Calls ring only from contacts; Rabta silences unknown callers.
+        db.saveContact("NT1100000003", "Ringing contact")
         val socket = AtomicReference<WebSocket>(); val ended = CopyOnWriteArrayList<String>()
         val server = MockWebServer()
         server.dispatcher = object : Dispatcher() {

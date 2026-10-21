@@ -27,7 +27,10 @@ object ProfileHelper {
 
     private val waiting = HashMap<String, MutableList<(Bitmap?) -> Unit>>()
 
-    /** Main thread only. Several views asking for the same person share one request; [onLoaded] may run again when a stale photo is refreshed. */
+    /**
+     * Main thread only. Several views asking for the same person share one request. A view shown a held photo while it
+     * is checked hears again only if the photo changed or went away (hidden or removed).
+     */
     fun loadIfNeeded(userId: String, serverUrl: String, token: String, onLoaded: (Bitmap?) -> Unit) {
         val accountKey=key(userId)
         val held = cache[accountKey]
@@ -44,7 +47,9 @@ object ProfileHelper {
                 else -> Entry(MediaHelper.base64ToBitmap(answer.photo), answer.tag, later(RECHECK_MS))
             }
             cache[accountKey] = entry
-            waiting.remove(accountKey)?.forEach { if(accountKey==key(userId)) it(entry.bmp) }
+            val shown = held?.bmp
+            val waiters = waiting.remove(accountKey).orEmpty()
+            if (accountKey == key(userId) && (shown == null || entry.bmp !== shown)) waiters.forEach { it(entry.bmp) }
         }
     }
 

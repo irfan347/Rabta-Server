@@ -391,7 +391,7 @@ test('registration stores a private international phone number without treating 
   const query=f.queries.find(([sql,args])=>sql.startsWith('INSERT INTO ru_users')&&args[1]==='number_user');
   assert.equal(query[1][6],'+923001234567');
   let other;
-  await f.routes.get('GET /api/user/:username')({params:{username:'number_user'}},{json(v){other=v}});
+  await f.routes.get('GET /api/user/:username')({params:{username:'number_user'},headers:{}},{json(v){other=v}});
   assert.equal(other.phoneNumber,undefined);assert.equal(other.phone_number,undefined);
 });
 test('invalid phone formats are rejected before creating an account; legacy clients still register',async()=>{
