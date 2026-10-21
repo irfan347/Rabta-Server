@@ -154,15 +154,15 @@ app.post('/api/login', async (req, res) => {
 app.get('/api/user/:username', (req, res) => {
   const user = [...memUsers.values()].find(u => u.username === req.params.username.toLowerCase());
   if (!user) return res.status(404).json({ error: 'User not found' });
-  const onlineNow = isOnline(user.id);
-  res.json({ id: user.id, username: user.username, name: user.name, online: onlineNow, lastSeen: user.last_seen });
+  const presence = presenceOf(user.id,authId(req));
+  res.json({ id: user.id, username: user.username, name: user.name, online: presence.online, lastSeen: presence.lastSeen });
 });
 // Contact info by account ID (signed-in callers only): the same public fields as a username lookup.
 app.get('/api/user/id/:id', (req, res) => {
   const me = authId(req); if (!me) return res.status(401).json({ error: 'login required' });
   const user = memUsers.get(String(req.params.id || '').toUpperCase());
   if (!user || features.blocked(user.id, me)) return res.status(404).json({ error: 'User not found' });
-  res.json({ id: user.id, username: user.username, name: user.name, online: isOnline(user.id), lastSeen: user.last_seen });
+  res.json({ id: user.id, username: user.username, name: user.name, online: presenceOf(user.id,me).online, lastSeen: presenceOf(user.id,me).lastSeen });
 });
 app.get('/api/me', (req, res) => {
   const id = authId(req); if (!id) return res.status(401).json({ error: 'login required' });
@@ -186,12 +186,11 @@ function isOnline(id) {
   const w = online.get(id); if (!w || w.rabtaActive === false) return false;
   return Date.now() - w.rabtaHeard < (w.rabtaActive ? SHOWN_MS : QUIET_MS);
 }
-function presenceOf(id) { return { type: 'presence', id, online: isOnline(id), lastSeen: memUsers.get(id)?.last_seen || 0 }; }
+function presenceOf(id,viewer) { return { type: 'presence', id, online: features.visible(id,viewer,'hideOnline') && isOnline(id), lastSeen: features.visible(id,viewer,'hideLastSeen') ? (memUsers.get(id)?.last_seen || 0) : 0 }; }
 // Tells the phones that have this contact's chat open (see 'watch').
 function presenceChanged(id) {
   const w = online.get(id); if (w) w.rabtaTold = isOnline(id);
-  const frame = JSON.stringify(presenceOf(id));
-  for (const x of online.values()) if (x.rabtaWatch === id && x.readyState === 1 && !features.blocked(id, x.rabtaUser)) try { x.send(frame); } catch (_) {}
+  for (const x of online.values()) if (x.rabtaWatch === id && x.readyState === 1 && !features.blocked(id, x.rabtaUser)) try { x.send(JSON.stringify(presenceOf(id,x.rabtaUser))); } catch (_) {}
 }
 // After anything that may change it ([was]: what watchers were told): last seen is when it stopped being online ([at]).
 function presenceUpdate(id, was, at = Date.now()) {
@@ -426,11 +425,11 @@ wss.on('connection', (ws, req) => {
       // The chat on screen: its contact's online and last seen now, and again whenever they change.
       const id = String(msg.id || '').toUpperCase();
       ws.rabtaWatch = id !== userId && memUsers.has(id) && !features.blocked(id, userId) ? id : '';
-      if (ws.rabtaWatch) ws.send(JSON.stringify(presenceOf(id)));
+      if (ws.rabtaWatch) ws.send(JSON.stringify(presenceOf(id,userId)));
     } else if (msg.type === 'typing') {
       // "recording" while a voice message is recorded; older phones show it as typing.
       const tgt = online.get(msg.to);
-      if (tgt && tgt.readyState === 1 && !features.blocked(userId, String(msg.to))) tgt.send(JSON.stringify({ type: 'typing', from: userId, ...(msg.kind === 'recording' ? { kind: 'recording' } : {}) }));
+      if (tgt && tgt.readyState === 1 && features.visible(userId, String(msg.to),'hideOnline')) tgt.send(JSON.stringify({ type: 'typing', from: userId, ...(msg.kind === 'recording' ? { kind: 'recording' } : {}) }));
     } else if (msg.type === 'read') {
       const tgt = online.get(msg.to); if (tgt && tgt.readyState === 1) tgt.send(JSON.stringify({ type: 'read', msgId: msg.msgId, by: userId }));
     } else if (msg.type === 'group_msg') {
@@ -609,9 +608,9 @@ const b=await r.json().catch(()=>({}));out.textContent=r.ok?'Your Rabta account 
 catch(_){out.textContent='No connection, please try again';}});</script>
 ${CONTACT ? `<p>Need help? <a href="mailto:${CONTACT}">${CONTACT}</a></p>` : ''}`)));
 
-app.get('/health', (req, res) => res.json({ ok: true, capabilities: ['phone-collection','contact-discovery'], db: !!pool, online: online.size, users: memUsers.size, push: push.enabled(), ...push.stats?.() }));
+app.get('/health', (req, res) => res.json({ ok: true, capabilities: ['phone-collection','contact-discovery','account-visibility'], db: !!pool, online: online.size, users: memUsers.size, push: push.enabled(), ...push.stats?.() }));
 
-const features=require('./features')({app,authId,users:memUsers,getPool:()=>pool});
+const features=require('./features')({app,authId,users:memUsers,getPool:()=>pool,onPrivacyChanged:presenceChanged});
 require('./discovery')({app,authId,users:memUsers,blocked:features.blocked,getPool:()=>pool});
 const push=require('./push')({app,authId,getPool:()=>pool});
 const PORT = process.env.PORT || 3000;

@@ -39,6 +39,16 @@ class SettingsActivity : ThemedActivity() {
         }
 
         section("PRIVACY & SECURITY") {
+            row("Screen capture protection", "Screenshots and screen recording are blocked inside Rabta", "privacy") {
+                themedInfo("Screen capture protection", "Android protects Rabta screens from ordinary screenshots and recording. A camera or a modified device can still capture content. Files opened in other apps follow those apps' rules.")
+            }
+            row("Status audience", "Choose who can see future status updates", "privacy") {
+                StatusPost.chooseAudience(this@SettingsActivity,StatusPost.audience(this@SettingsActivity)) { recreate() }
+            }
+            row("Online, last seen & photo", "Account visibility and Rabta freeze", "privacy") { VisibilitySettings.open(this@SettingsActivity) }
+            toggle("Send read receipts", "Let contacts see when you open messages", Privacy.prefs(this@SettingsActivity).getBoolean("send_read",true)) { enabled -> Privacy.prefs(this@SettingsActivity).edit().putBoolean("send_read",enabled).apply() }
+            toggle("Send typing indicators", "Let contacts see when you type or record", Privacy.prefs(this@SettingsActivity).getBoolean("send_typing",true)) { enabled -> Privacy.prefs(this@SettingsActivity).edit().putBoolean("send_typing",enabled).apply() }
+
             toggle("Block calls from unknown people", "Message requests must be accepted before calling", Privacy.prefs(this@SettingsActivity).getBoolean("silence_unknown_calls",true)) { enabled -> Privacy.prefs(this@SettingsActivity).edit().putBoolean("silence_unknown_calls",enabled).apply() }
             toggle("Hide notification previews", "App lock also hides previews", Privacy.prefs(this@SettingsActivity).getBoolean("hide_previews", false)) { enabled ->
                 Privacy.prefs(this@SettingsActivity).edit().putBoolean("hide_previews", enabled).apply()
@@ -57,21 +67,16 @@ class SettingsActivity : ThemedActivity() {
                 else Privacy.prefs(this@SettingsActivity).edit().putBoolean("sync_contacts",false).apply()
             }
         }
-        section("EXPERIENCE") {
-            row("Screen capture protection", "Screenshots and screen recording are blocked inside Rabta", "privacy") {
-                themedInfo("Screen capture protection", "Android protects Rabta screens from ordinary screenshots and recording. A camera or a modified device can still capture content. Files opened in other apps follow those apps' rules.")
-            }
-        }
         if(Experience.mode(this)=="Developer") section("ADVANCED CONTROLS") {
-            toggle("Send typing indicators", "Let contacts see when you type or record", Privacy.prefs(this@SettingsActivity).getBoolean("send_typing",true)) { enabled -> Privacy.prefs(this@SettingsActivity).edit().putBoolean("send_typing",enabled).apply() }
-            toggle("Send read receipts", "Let contacts see when you open messages", Privacy.prefs(this@SettingsActivity).getBoolean("send_read",true)) { enabled -> Privacy.prefs(this@SettingsActivity).edit().putBoolean("send_read",enabled).apply() }
             toggle("Animated emoji", "Animate large emoji and status reactions", Experience.animate(this@SettingsActivity)) { enabled -> L.prefs(this@SettingsActivity).edit().putBoolean("animate_emoji",enabled).apply() }
             row("Custom colors", "Choose your own accent and chat palette", "appearance") { AppTheme.choose(this@SettingsActivity) }
             row("Connection diagnostics", "Inspect online and nearby connection health", "connection") { startActivity(Intent(this@SettingsActivity, ConnectivityDiagnosticsActivity::class.java)) }
         }
-        section("APPEARANCE") {
+        section("CHATS") {
             row("Chat wallpaper", "Default background for all chats", "appearance") { Wallpapers.choose(this@SettingsActivity) }
             row("All starred messages", "Saved messages from every chat", "star") { startActivity(Intent(this@SettingsActivity,StarredActivity::class.java)) }
+        }
+        section("APPEARANCE") {
             row("Theme", "${AppTheme.palette(this@SettingsActivity).name} · ${AppTheme.mode(this@SettingsActivity)}", "appearance") { AppTheme.choose(this@SettingsActivity) }
             row("Language", if (L.prefs(this@SettingsActivity).getString("language", "en") == "ur") "اردو" else "English", "language") {
                 RabtaUi.sheet(this@SettingsActivity, "Language", listOf("English", "اردو").mapIndexed { i, label ->

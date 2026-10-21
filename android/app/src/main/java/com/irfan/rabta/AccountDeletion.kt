@@ -24,7 +24,7 @@ object AccountDeletion {
         Session.logout()
         Db.delete(app, account)
         for (name in listOf("mesh_v2_$account.db", "drop_$account.db")) app.deleteDatabase(name)
-        for (name in listOf("privacy", "radar", "instant_connect", "mesh_keys", "status_prefs", "uploads", "downloads")) app.deleteSharedPreferences("${name}_$account")
+        for (name in listOf("drafts", "privacy", "radar", "instant_connect", "mesh_keys", "status_prefs", "uploads", "downloads")) app.deleteSharedPreferences("${name}_$account")
         app.getSharedPreferences("status_cache", 0).edit().remove(account).apply()
         runCatching { java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry("rabta_mesh_v2_$account") } }
         val dir = File(app.filesDir, "attachments")

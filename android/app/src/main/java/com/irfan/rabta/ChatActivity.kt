@@ -63,6 +63,18 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     private lateinit var replyPreview:TextView
     private lateinit var offlineBanner:TextView
     private var draftReplyId:String?=null
+    private var draftAccount=""
+    private val saveDraftTask=Runnable { saveDraft() }
+    private fun draftPrefs()=getSharedPreferences("drafts_$draftAccount",0)
+    private fun draftKey()=(if(isGroup) "group:" else "direct:")+peerId
+    private fun saveDraft() {
+        if(!::input.isInitialized||draftAccount.isEmpty()||draftAccount!=Session.id||peerId.isEmpty())return
+        val text=input.text.toString();val reply=replyTo?.id?:draftReplyId
+        val edit=draftPrefs().edit()
+        if(text.isEmpty()&&reply==null)edit.remove(draftKey())
+        else edit.putString(draftKey(),org.json.JSONObject().put("text",text).put("reply",reply).toString())
+        edit.apply()
+    }
     private var firstHistory=true
     private var scrollAfterSend=false
     private var renderedHistory:List<Triple<Db.Message,Pair<Boolean,String>,Int?>>?=null
@@ -177,9 +189,12 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         // Opening another chat in this screen recreates it: the last chat's draft and search stay with that chat.
         val saved=savedInstanceState?.takeIf { (it.getString("statePeer") ?: peerId)==peerId }
         searchQuery=saved?.getString("searchQuery")?:intent.getStringExtra("searchQuery").orEmpty()
-        draftReplyId=saved?.getString("replyId")
+        draftAccount=Session.id
+        val draft=runCatching { org.json.JSONObject(draftPrefs().getString(draftKey(),"{}").orEmpty()) }.getOrDefault(org.json.JSONObject())
+        draftReplyId=if(saved!=null) saved.getString("replyId") else draft.optString("reply").takeIf {it.isNotEmpty()}
         buildUi()
-        input.setText(saved?.getString("draft").orEmpty())
+        input.setText(if(saved!=null) saved.getString("draft").orEmpty() else draft.optString("text"))
+        input.setSelection(input.length())
         RabtaEvents.add(this)
         loadHistory()
         if (VoiceCall.with(peerId) && (intent.getBooleanExtra("showCall", false) || saved?.getBoolean("callShown") == true)) showCallScreen()
@@ -238,6 +253,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         if (!isGroup && !self) { WsClient.sendRead(peerId, "all"); WsClient.watch(peerId) }
     }
     override fun onPause() {
+        uiHandler.removeCallbacks(saveDraftTask);saveDraft()
         // A voice message playing goes on, as in WhatsApp; the bar in the chats shows it.
         super.onPause()
         if(Privacy.chatLocked(this,peerId)) { chatUnlocked=false;window.decorView.visibility=View.INVISIBLE;VoicePlayer.stop() }
@@ -447,7 +463,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         }
         replyPreview=RabtaUi.text(this,"",14f,color=SUB).apply { maxLines=3;ellipsize=android.text.TextUtils.TruncateAt.END;setPadding(dp(12),dp(4),dp(8),dp(4));background=RabtaUi.shape(this@ChatActivity,SENT,12) }
         replyBar.addView(replyPreview,LinearLayout.LayoutParams(0,-2,1f))
-        replyBar.addView(RabtaUi.iconButton(this,"close","Cancel reply") { replyTo=null;replyBar.visibility=View.GONE })
+        replyBar.addView(RabtaUi.iconButton(this,"close","Cancel reply") { replyTo=null;draftReplyId=null;replyBar.visibility=View.GONE;saveDraft() })
         root.addView(replyBar)
         // ── Composer: one rounded pill (emoji · message · sticker · attach · camera) and a round mic/send button ──
         composerBar=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;clipChildren=false;clipToPadding=false }
@@ -512,6 +528,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             addTextChangedListener(object:TextWatcher{
                 override fun beforeTextChanged(s:CharSequence?,a:Int,b:Int,c:Int){}
                 override fun onTextChanged(s:CharSequence?,a:Int,b:Int,c:Int){
+                    uiHandler.removeCallbacks(saveDraftTask);uiHandler.postDelayed(saveDraftTask,500)
                     val has = !s.isNullOrBlank()
                     sendBtn.visibility = if(has) View.VISIBLE else View.GONE
                     micBtn.visibility  = if(has) View.GONE   else View.VISIBLE
@@ -735,7 +752,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
 
     private fun selectReply(m:Db.Message,focus:Boolean=true) {
         clearSelection()
-        replyTo=m
+        replyTo=m;draftReplyId=null;saveDraft()
         val author=if(m.mine) "You" else Names.of(this,m.fromId,m.fromName.ifBlank { peerName })
         replyPreview.text="Reply to $author\n${MessageActions.preview(m)}"
         replyBar.visibility=View.VISIBLE
@@ -1124,7 +1141,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         val quote=replyTo
         if(quote!=null&&!WsClient.connected){toast("Replies need internet. Cancel the reply to send plain text nearby.");return}
         val accepted=if(quote==null)sendContent(text,"text")else sendContent(org.json.JSONObject().put("text",text).put("reply",MessageActions.preview(quote)).toString(),"rich")
-        if(accepted) { replyTo=null;replyBar.visibility=View.GONE;input.setText("");scrollBottom(true) }
+        if(accepted) { replyTo=null;draftReplyId=null;replyBar.visibility=View.GONE;input.setText("");saveDraft();scrollBottom(true) }
     }
     private fun sendContent(body: String, msgType: String):Boolean {
         if(!isGroup&&Privacy.blocked(this,peerId)){toast("Unblock this contact to send a message");return false}
