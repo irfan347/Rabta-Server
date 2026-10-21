@@ -66,6 +66,18 @@ class FeatureUpgradeTest {
         }
         waitFor("Swipe selects reply") {all(a.window.decorView).filterIsInstance<TextView>().any {it.isShown&&it.text.toString().startsWith("Reply to Fixture friend")}}
     }
+    @Test fun leftSwipeHighlightsWithoutReplying() {
+        val a=chat();var row:View?=null
+        waitFor("Message row loads") {row=all(a.window.decorView).firstOrNull {it.tag=="message:FEA700000003"};row!=null}
+        ui {
+            val d=a.resources.displayMetrics.density;val now=SystemClock.uptimeMillis()
+            for((action,x) in listOf(MotionEvent.ACTION_DOWN to 160f,MotionEvent.ACTION_MOVE to 125f,MotionEvent.ACTION_MOVE to 50f,MotionEvent.ACTION_UP to 50f)) {
+                val e=MotionEvent.obtain(now,now+50,action,x*d,20*d,0);row!!.dispatchTouchEvent(e);e.recycle()
+            }
+        }
+        waitFor("Left swipe selects message") {androidx.core.view.ViewCompat.getStateDescription(row!!)?.toString()=="Selected"}
+        ui {assertFalse(all(a.window.decorView).filterIsInstance<TextView>().any {it.isShown&&it.text.toString().startsWith("Reply to Fixture friend")})}
+    }
     @Test fun requestHidesMessageUntilAcceptedAndBlocksCalls() {
         Privacy.markRequest(ctx,peer);assertFalse(Privacy.allowCall(ctx,peer))
         val a=chat()

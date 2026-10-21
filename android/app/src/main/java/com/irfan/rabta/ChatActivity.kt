@@ -935,13 +935,12 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         private var startY=0f
         private var swiping=false
         private var vertical=false
-        private val direction get()=if(layoutDirection==View.LAYOUT_DIRECTION_RTL) -1 else 1
         override fun onInterceptTouchEvent(ev:MotionEvent):Boolean {
             if(selectedIds.isNotEmpty()) return true
             when(ev.actionMasked) {
                 MotionEvent.ACTION_DOWN -> { startX=ev.x;startY=ev.y;swiping=false;vertical=false }
                 MotionEvent.ACTION_MOVE -> {
-                    val dx=(ev.x-startX)*direction;val dy=kotlin.math.abs(ev.y-startY)
+                    val dx=kotlin.math.abs(ev.x-startX);val dy=kotlin.math.abs(ev.y-startY)
                     if(dy>dp(12)&&dy>kotlin.math.abs(dx)) vertical=true
                     if(!vertical&&dx>dp(16)&&dx>dy*1.5f) { swiping=true;parent.requestDisallowInterceptTouchEvent(true);return true }
                 }
@@ -952,12 +951,14 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         override fun onTouchEvent(ev:MotionEvent):Boolean {
             if(selectedIds.isNotEmpty()) { gestures.onTouchEvent(ev);return true }
             if(!swiping) return super.onTouchEvent(ev)
-            val distance=((ev.x-startX)*direction).coerceIn(0f,dp(96).toFloat())
+            // Physical left selects and physical right replies, including in RTL layouts.
+            val distance=(ev.x-startX).coerceIn(-dp(96).toFloat(),dp(96).toFloat())
             when(ev.actionMasked) {
-                MotionEvent.ACTION_MOVE -> translationX=distance*direction
+                MotionEvent.ACTION_MOVE -> translationX=distance
                 MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL -> {
-                    if(ev.actionMasked==MotionEvent.ACTION_UP&&distance>=dp(64)) shownMessages[id]?.let {
-                        performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP);selectReply(it)
+                    if(ev.actionMasked==MotionEvent.ACTION_UP&&kotlin.math.abs(distance)>=dp(64)) shownMessages[id]?.let {
+                        performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                        if(distance<0) toggleSelected(id) else selectReply(it)
                     }
                     animate().translationX(0f).setDuration(160).start();swiping=false;parent.requestDisallowInterceptTouchEvent(false)
                 }
