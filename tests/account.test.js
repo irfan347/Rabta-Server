@@ -12,7 +12,7 @@ function server(database = false) {
   const express = () => app; express.json = () => () => {};
   class WebSocketServer { on(event, cb) { if (event === 'connection') connect = cb; } }
   class Pool { async query(sql, args) { queries.push([sql, args]); return { rows: [] }; } }
-  const context = vm.createContext({ require(name) { if (name === './features') return require('../features'); if (name === './account') return require('../account'); if (name === './push') return require('../push'); if (name === 'express') return express; if (name === 'ws') return { WebSocketServer }; if (name === 'http') return { createServer() { return { listen() {} }; } }; if (name === 'pg') return { Pool }; return require(name); },
+  const context = vm.createContext({ require(name) { if (name === './discovery') return require('../discovery'); if (name === './features') return require('../features'); if (name === './account') return require('../account'); if (name === './push') return require('../push'); if (name === 'express') return express; if (name === 'ws') return { WebSocketServer }; if (name === 'http') return { createServer() { return { listen() {} }; } }; if (name === 'pg') return { Pool }; return require(name); },
     setTimeout: (fn, ms) => ({ unref() {} }), clearTimeout() {}, setInterval: (fn, ms) => ({ unref() {} }), process: { env: database ? { DATABASE_URL: 'test' } : {}, exitCode: 0 }, console, Buffer, URL });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../index.js'), 'utf8'), context);
   async function call(method, route, { body = {}, token, params = {}, query = {}, headers = {} } = {}) {

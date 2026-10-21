@@ -20,6 +20,8 @@ class AuthActivity : ThemedActivity() {
     private lateinit var usernameField: EditText
     private lateinit var pinField: EditText
     private lateinit var nameField: EditText
+    private lateinit var phoneField: EditText
+    private var experience = "Standard"
     private lateinit var confirmField: EditText
     private lateinit var usernameHint: TextView
     private lateinit var statusText: TextView
@@ -37,12 +39,13 @@ class AuthActivity : ThemedActivity() {
         super.onCreate(savedInstanceState)
         Session.init(this)
         if (Session.loggedIn && !intent.getBooleanExtra("reauth",false)) { goHome(); return }
+        experience=savedInstanceState?.getString("experience")?:"Standard"
         buildUi()
         creating = savedInstanceState?.getBoolean("creating") == true && !intent.getBooleanExtra("reauth",false)
         setMode(creating)
         if(intent.getBooleanExtra("reauth",false)){usernameField.setText(Session.username);statusText.text="Sign in again to reconnect. Your local chats stay on this phone.";statusText.setTextColor(AppTheme.sub(this));registerBtn.visibility=View.GONE}
     }
-    override fun onSaveInstanceState(state: Bundle) { state.putBoolean("creating", creating); super.onSaveInstanceState(state) }
+    override fun onSaveInstanceState(state: Bundle) { state.putBoolean("creating", creating);state.putString("experience",experience); super.onSaveInstanceState(state) }
     override fun onDestroy() { handler.removeCallbacksAndMessages(null); super.onDestroy() }
 
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
@@ -111,6 +114,21 @@ class AuthActivity : ThemedActivity() {
             filters = arrayOf(android.text.InputFilter.LengthFilter(30))
         }
         form.addView(nameLabel); form.addView(nameField, lp().apply { bottomMargin = dp(14) })
+        val phoneLabel = label("Phone number")
+        phoneField = field("+923001234567", InputType.TYPE_CLASS_PHONE).apply { filters = arrayOf(android.text.InputFilter.LengthFilter(24)) }
+        val phoneNote = label("Private account detail. Not SMS verified or used to sign in.")
+        form.addView(phoneLabel); form.addView(phoneField); form.addView(phoneNote, lp(6))
+        val modeLabel = label("Choose your experience")
+        val modeGroup = android.widget.RadioGroup(this)
+        Experience.modes.forEachIndexed { i, mode ->
+            modeGroup.addView(android.widget.RadioButton(this).apply {
+                id = 2000 + i; text = "$mode: ${Experience.descriptions[i]}"; minHeight = dp(48)
+                setTextColor(AppTheme.text(this@AuthActivity)); isChecked = mode == experience
+            })
+        }
+        modeGroup.setOnCheckedChangeListener { _, id -> experience = Experience.modes[id - 2000] }
+        form.addView(modeLabel, lp(12)); form.addView(modeGroup)
+        createOnly += listOf(phoneLabel, phoneField, phoneNote, modeLabel, modeGroup)
         val usernameLabel = label("Username")
         form.addView(usernameLabel)
         usernameField = field("username", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS).apply {
@@ -189,6 +207,7 @@ class AuthActivity : ThemedActivity() {
         val u = usernameField.text.toString().trim()
         val p = pinField.text.toString().trim()
         val error = when {
+            creating && !phoneField.text.toString().replace(Regex("[ ()-]"), "").matches(Regex("\\+[1-9][0-9]{7,14}")) -> "Enter your phone number with country code, such as +923001234567"
             creating && nameField.text.toString().isBlank() -> "Enter your display name"
             u.length !in 3..20 || !u.matches(Regex("[a-zA-Z0-9_]+")) -> "Username must be 3–20 letters, numbers or _"
             !p.matches(Regex("[0-9]{4,8}")) -> "PIN must be 4–8 digits"
@@ -252,7 +271,7 @@ class AuthActivity : ThemedActivity() {
         val un = usernameField.text.toString().trim().lowercase()
         val name = nameField.text.toString().replace(Regex("\\s+"), " ").trim()
         statusText.text = ""; setLoading(true)
-        WsClient.register(this, Config.SERVER, un, pinField.text.toString().trim(), name) { ok, msg, data ->
+        WsClient.register(this, Config.SERVER, un, pinField.text.toString().trim(), name, phoneField.text.toString().replace(Regex("[ ()-]"), "")) { ok, msg, data ->
             setLoading(false)
             if (ok && data != null) { saveAndGo(data); return@register }
             // One account per phone: this phone already has one, so sign-in opens with its username filled in.
@@ -268,6 +287,7 @@ class AuthActivity : ThemedActivity() {
         Session.id = data.optString("id"); Session.username = data.optString("username")
         Session.name = data.optString("name").ifEmpty { data.optString("username") }
         Session.token = data.optString("token"); Session.serverUrl = Config.SERVER
+        if(creating) Experience.set(this, experience)
         val code = data.optString("recoveryCode")
         if (code.isNotEmpty()) AccountUi.showRecoveryCode(this, code) { goHome() } else goHome()
     }

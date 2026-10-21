@@ -1,0 +1,67 @@
+# Rabta feature upgrade handoff
+
+2026-10-21. Workspace: `/home/saif/rabta/Rabta-Server`. Branch: `feat/chat-privacy-modes`.
+
+## Scope and authorization
+
+Saif requested messaging gestures/reactions/animated emoji, status reactions, phone collection (explicitly without SMS), Easy/Standard/Developer modes, capture protection, individual chat locking, wallpapers, all-chat and per-chat stars, phone-contact discovery, live username search, unknown-message/call protection, improved voice/video controls, the frozen call-bar timer fix, main-tab swipes, mesh auto-switch preservation, and Render optimization. User has warned only 8% of the session usage remains: finish essential verification, avoid optional expansion.
+
+## Implementation
+
+- Additive server phone_number and phone_discoverable columns. Older clients can omit numbers. Numbers are unverified and private by default. New discovery.js provides authenticated prefix search, opt-in matching, owner-only contact preferences, bounded inputs and shared per-account rate limits. No address-book lookup lists are stored.
+- Signup phone input and three experience choices. Easy increases text and simplifies composer. Developer exposes typing/read receipt preferences, animation control, existing custom colors and diagnostics.
+- Secure activity windows. Chat lock uses Android biometrics/device credentials, hides locked message previews and notification actions, gates deep-link entry, and rechecks on return. Starred messages and backup export authenticate before exposing locked content.
+- Swipe to quote; dedicated React selection action reuses real existing reactions. One-to-three emoji display large with an entry animation honoring Android animation settings. Existing real status emoji replies now animate on acceptance.
+- Account/conversation-scoped wallpaper presets. Global or per-chat starred view.
+- Contact search debounces requests and ignores stale results; selecting a result asks to add the contact rather than jumping into chat. Phone-contact permission and upload consent are explicit. Unverified phone matches appear as suggestions and require user confirmation.
+- Incoming unknown contacts are marked as requests before existing auto-contact-saving runs. Accept/Block/Report gate hides content until accepted. Unknown/pending calls are rejected before ringing. Existing contacts preserved.
+- Fixed CallBar: stop canceled ticks, but start previously failed to restart when bar remained visible. CallRefreshLoop now owns restart/cancel behavior and has a regression unit test.
+- Voice screen styling and labeled, responsive video-control dock. Main-page horizontal gestures switch Chats/Nearby/Spaces/Calls and preserve vertical scrolling.
+- Existing DeliveryCoordinator/Outbox/Nearby protocols preserved. Physical two-phone mesh and calling must still be tested; do not claim those passed from unit tests.
+
+## Render changes already applied and verified
+
+Service `srv-db8bs9e7bikc73b9fe7g`, https://rabta-server-1e2i.onrender.com, repository irfan347/Rabta-Server, main branch.
+
+- healthCheckPath changed from empty to `/health`.
+- buildFilter ignoredPaths: `android/**`, `**/*.md`, `tests/**`; paths empty. Backend changes still autodeploy.
+- Plan unchanged: 1c-2g; one instance, Oregon. No deployment was manually triggered, no secrets/data changed.
+- Live /health returned db:true and push:true. Recent sampled memory ~79–81 MiB; CPU below 0.1 core-percent. No error logs in explicit two-hour window. No justified capacity upgrade.
+- API settings verified after update. `/health` currently reports pool presence, not a database SELECT readiness probe.
+
+## Verification and tooling
+
+- Existing baseline backend suite: 77 passed. After discovery tests: 81 passed. Two more registration privacy/validation tests added and targeted server/discovery run: 44 passed. Run full npm test for final total (expected 83).
+- Python Android checks: 19 passed before latest UI-only edits.
+- First Android compilation caught a typo (`scroll` vs `chatScroll`), fixed.
+- Subsequent build compiled app and test sources; new emoji unit test caught skin-tone handling (catalog stores base forms), fixed. Rebuild pending at handoff creation. Logs: /tmp/rabta-build.log.
+- Toolchain found in /home/saif/video_maker_app/.tools. SDK 36 added with sdkmanager; Java 17 and existing Gradle 8.13 used. Repository documents Gradle 8.11.1, but 8.13 compiles with its AGP.
+- Connected phone: Redmi 10C, adb serial 7a2662bf. Existing production package com.irfan.rabta is installed: DO NOT replace or clear it. Use `.testing` device build only. Initially no com.irfan.rabta.testing package on user 0. Always specify `--user 0` for package queries (work-profile user 10 denies shell access).
+- Added `-PrabtaTestBuildType=device` to select isolated instrumentation target. FeatureUpgradeTest covers secure flag, swipe reply, request gating, locked entry, modes/wallpaper and tab gestures. Existing AutoSwitchTest can verify mock-server reconnect/no-duplicate flows.
+
+Build command:
+
+```sh
+JAVA_HOME=/usr/lib/jvm/java-17-openjdk \
+ANDROID_HOME=/home/saif/video_maker_app/.tools/android-sdk \
+GRADLE_USER_HOME=/home/saif/video_maker_app/.tools/gradle-home \
+bash /home/saif/video_maker_app/.tools/gradle-8.13/bin/gradle \
+  --project-dir android :app:testDebugUnitTest :app:assembleDevice :app:assembleDeviceAndroidTest \
+  -PrabtaTestBuildType=device --no-daemon
+```
+
+## Remaining completion steps
+
+1. Finish build and fix only evidenced failures. Read /tmp/rabta-build.log and XML test reports.
+2. Run full npm test; git diff --check. Install isolated device APK and its instrumentation APK only if successful. Phone may require its own USB installation confirmation; never bypass it.
+3. Run FeatureUpgradeTest and AutoSwitchTest on the isolated package. Report exact successes and unavailable checks. No real-account fixtures.
+4. Save a test APK in /home/saif/rabta for Saif. Commit the feature branch and create a draft PR with results and release limits.
+5. Do not merge main casually: main both deploys Render and publishes public APK/AAB updates through GitHub Actions. Backend must deploy before relying on new phone/discovery endpoints. Public signing/Play release and two-phone acceptance remain separate from local compilation.
+
+No production app release has been made. No Play Store submission. No repository source rebuild from scratch or account/storage reset.
+
+## Verified checkpoint and expanded feedback
+
+The feature checkpoint now builds successfully: 104 Android unit tests, 83 backend tests, and 19 Python checks passed. Device and device-instrumentation APKs built. Copy: `/home/saif/rabta/Rabta-Test-feature-upgrade.apk`. Physical installation was rejected with INSTALL_FAILED_USER_RESTRICTED; production Rabta was not touched.
+
+Saif subsequently said the usage limit reset and asked to continue with feedback from a ZIP. Two personal screenshots were read outside the repository; never commit these. New work: edit messages, delete for everyone, disappearing messages, view-once media, persistent drafts, hidden locked-chat collection, online/last-seen and profile visibility, status audience shortcuts, blue-tick preference in Privacy, clearer settings categories/profile identity placement. Clarified: “freeze” means hide online/last-seen, not an app hang; left swipe selects and right swipe replies.

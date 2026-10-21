@@ -97,6 +97,7 @@ object AppTheme {
 open class ThemedActivity : androidx.fragment.app.FragmentActivity() {
     private var appliedSettings=""
     private var unlocking=false
+    protected open fun ownsPrivacyAuthentication()=false
     override fun attachBaseContext(base:Context) { super.attachBaseContext(L.context(base)) }
     /**
      * What back does on this screen; [handled] false closes it as usual. Android 16 no longer calls onBackPressed in
@@ -114,6 +115,8 @@ open class ThemedActivity : androidx.fragment.app.FragmentActivity() {
         setTheme(AppTheme.style(this))
         super.onCreate(state)
         Session.init(this)
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        if(AppLock.needed(this)&&!ownsPrivacyAuthentication())window.decorView.alpha=0f
         RabtaUi.edgeToEdge(this)
         window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN or android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
     }
@@ -129,7 +132,7 @@ open class ThemedActivity : androidx.fragment.app.FragmentActivity() {
         // Back on screen: connected at once, not after the reconnect timer that stood still while the phone slept.
         if(Session.loggedIn) WsClient.wake(onScreen=true)
         if(Privacy.prefs(this).getBoolean("lock",false)) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
-        if(AppLock.needed(this)&&!unlocking) {
+        if(AppLock.needed(this)&&!unlocking&&!ownsPrivacyAuthentication()) {
             unlocking=true;window.decorView.alpha=0f
             AppLock.authenticate(this) { unlocking=false;window.decorView.alpha=1f }
         }

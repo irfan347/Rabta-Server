@@ -302,7 +302,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         nearbyScroll=ScrollView(this).apply {
             addView(nearbyPanel.view.apply { setPadding(dp(16),dp(4),dp(16),dp(20)) });isVerticalScrollBarEnabled=false
         }
-        val content=FrameLayout(this)
+        val content=TabSwipeLayout(this,{selected.isEmpty()&&!archiveOpen},{direction -> switchTab((activeTab+direction).coerceIn(0,3))})
         listOf(chatsScroll,nearbyScroll,spacesScroll,callsScroll).forEach { content.addView(it,FrameLayout.LayoutParams(-1,-1)) }
         root.addView(content,LinearLayout.LayoutParams(-1,0,1f))
         fab=RabtaUi.iconButton(this,"chat_add","New chat") { if(activeTab==2) newGroup() else newChat() }.apply {
@@ -520,7 +520,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         // Nearby means a key-verified peer is directly connected right now.
         val nearby=MeshBridge.snapshot().peers.filter { it.keyMatched }.map { it.id }.toSet()
         Thread {
-                val found=runCatching { db.searchConversations(query) }
+                val found=runCatching { db.searchConversations(query).filter { (!Privacy.chatLocked(this,it.peerId)&&!Privacy.request(this,it.peerId)) || query.isBlank() || it.shownName.contains(query,true) } }
                 val result=found.map { list -> list.filter {
                     when {
                         destination==2 -> it.isGroup
@@ -641,8 +641,8 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         mid.addView(top)
         val bot = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0,dp(2),0,0) }
         bot.addView(TextView(this).apply {
-            text = preview(c.lastMsg, last?.takeIf { it.first }?.second); textSize = 14f; setTextColor(SUB); maxLines = 1;ellipsize=android.text.TextUtils.TruncateAt.END
-            last?.takeIf { it.first }?.let { contentDescription = "You: ${c.lastMsg}. ${MessageDelivery.label(it.second).removePrefix("✓✓ ").removePrefix("✓ ")}" }
+            text = if(Privacy.request(this@ConversationListActivity,c.peerId)) "Message request" else if(Privacy.chatLocked(this@ConversationListActivity,c.peerId)) "Locked chat" else preview(c.lastMsg, last?.takeIf { it.first }?.second); textSize = 14f; setTextColor(SUB); maxLines = 1;ellipsize=android.text.TextUtils.TruncateAt.END
+            last?.takeIf { it.first && !Privacy.chatLocked(this@ConversationListActivity,c.peerId) && !Privacy.request(this@ConversationListActivity,c.peerId) }?.let { contentDescription = "You: ${c.lastMsg}. ${MessageDelivery.label(it.second).removePrefix("✓✓ ").removePrefix("✓ ")}" }
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         if (muted) bot.addView(UiIcons.image(this,"volume_off",SUB,16,L.t(this,"Muted")),LinearLayout.LayoutParams(dp(20),dp(20)).apply { marginStart=dp(6) })
         if (c.pinned>0) bot.addView(UiIcons.image(this,"pin",SUB,16,L.t(this,"Pinned")),LinearLayout.LayoutParams(dp(20),dp(20)).apply { marginStart=dp(6) })

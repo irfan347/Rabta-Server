@@ -21,6 +21,7 @@ object Inbox {
             try {
                 if(msgType=="reaction") { val o=org.json.JSONObject(body);val target=o.getString("target");if(d.conversationForMessage(target)==convId){d.react(target,fromId,o.optString("emoji").take(16));RabtaEvents.postHistoryChanged(convId)};stored();return@execute }
                 if(d.hasMessage(msgId)) { stored(); return@execute }
+                if(!isGroup && d.contact(fromId)==null && fromId!=Session.id) Privacy.markRequest(context,fromId)
                 val localBody=Attachments.receive(context,body,msgType)
                 val isNew = d.saveIfNew(msgId, convId, fromId, fromName, localBody, sentAt, false, "received", msgType)
                 if (isNew) {
