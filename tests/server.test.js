@@ -12,7 +12,7 @@ async function fixture(database=false) {
   class WebSocketServer { on(event,cb){if(event==='connection')connect=cb;} }
   let failing=null,responder=null; // SQL that should throw / custom rows, for storage tests
   class Pool { async query(sql,args){ queries.push([sql,args]); if(failing?.test(sql)) throw new Error('db unavailable'); return {rows:responder?.(sql,args)||[]}; } }
-  const context=vm.createContext({require(name){if(name==='./features')return require('../features');if(name==='./account')return require('../account');if(name==='./push')return ()=>({init:async()=>{},enabled:()=>false,wake:(id,kind='message')=>wakes.push([id,kind]),forgetUser:async()=>{}});if(name==='express')return express;if(name==='ws')return {WebSocketServer};if(name==='http')return {createServer(){return {listen(){}}}};if(name==='pg')return {Pool};return require(name)},setTimeout,clearTimeout,setInterval:fn=>{intervals.push(fn);return {unref(){}};},process:{env:database?{DATABASE_URL:'test'}:{}},console,Buffer,URL});
+  const context=vm.createContext({require(name){if(name==='./discovery')return require('../discovery');if(name==='./features')return require('../features');if(name==='./account')return require('../account');if(name==='./push')return ()=>({init:async()=>{},enabled:()=>false,wake:(id,kind='message')=>wakes.push([id,kind]),forgetUser:async()=>{}});if(name==='express')return express;if(name==='ws')return {WebSocketServer};if(name==='http')return {createServer(){return {listen(){}}}};if(name==='pg')return {Pool};return require(name)},setTimeout,clearTimeout,setInterval:fn=>{intervals.push(fn);return {unref(){}};},process:{env:database?{DATABASE_URL:'test'}:{}},console,Buffer,URL});
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../index.js'),'utf8'),context);
   const register=async name=>{let value;await routes.get('POST /api/register')({body:{username:name,pin:'123456',name}},{json(v){value=v},status(){return this}});return value;};
   const alice=await register('alice'),bob=await register('bob'),eve=await register('eve');
@@ -383,3 +383,23 @@ test('a deleted account leaves its groups, its calls end, and messages it sent t
   assert.equal(b.messages.at(-1).status,'sent','The group goes on without it');
 });
 
+
+test('registration stores a private international phone number without treating it as identity',async()=>{
+  const f=await fixture(true);let data,status=200;
+  await f.routes.get('POST /api/register')({body:{username:'number_user',name:'Number user',pin:'123456',phoneNumber:'+923001234567'}},{json(v){data=v},status(n){status=n;return this}});
+  assert.equal(status,200);assert.ok(data.id);assert.equal(data.phoneNumber,undefined);assert.equal(data.phone_number,undefined);
+  const query=f.queries.find(([sql,args])=>sql.startsWith('INSERT INTO ru_users')&&args[1]==='number_user');
+  assert.equal(query[1][6],'+923001234567');
+  let other;
+  await f.routes.get('GET /api/user/:username')({params:{username:'number_user'}},{json(v){other=v}});
+  assert.equal(other.phoneNumber,undefined);assert.equal(other.phone_number,undefined);
+});
+test('invalid phone formats are rejected before creating an account; legacy clients still register',async()=>{
+  const f=await fixture();
+  for(const number of ['', '03001234567', '+0', '+923001234567<script>', 923001234567, null]) {
+    let status=200;
+    await f.routes.get('POST /api/register')({body:{username:'invalid_number',pin:'123456',phoneNumber:number}},{json(){},status(n){status=n;return this}});
+    assert.equal(status,400);
+  }
+  assert.ok((await f.register('legacy_user')).id);
+});

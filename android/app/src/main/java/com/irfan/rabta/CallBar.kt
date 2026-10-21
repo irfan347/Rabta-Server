@@ -18,16 +18,18 @@ class CallBar(private val a: Activity, private val hiddenHere: () -> Boolean = {
         setBackgroundColor(0xFF15803D.toInt()); visibility = View.GONE; isFocusable = true
         setOnClickListener { open() }
     }
-    private val tick = object : Runnable { override fun run() { refresh(); if (view.visibility == View.VISIBLE) view.postDelayed(this, 1000) } }
+    private val loop=CallRefreshLoop({view.postDelayed(it,1000)},{view.removeCallbacks(it)},{render()})
 
     /** From onResume to onPause. */
-    fun start() { VoiceCall.watch(this); VideoCall.watch(this); refresh() }
-    fun stop() { VoiceCall.unwatch(this); VideoCall.unwatch(this); view.removeCallbacks(tick) }
+    fun start() { loop.start();VoiceCall.watch(this); VideoCall.watch(this) }
+    fun stop() { loop.stop();VoiceCall.unwatch(this); VideoCall.unwatch(this) }
     override fun callChanged() = refresh()
 
     private fun clock(seconds: Long) = "%d:%02d".format(seconds / 60, seconds % 60)
 
-    fun refresh() {
+    fun refresh() = loop.refresh()
+
+    private fun render():Boolean {
         val (icon, words) = when {
             VoiceCall.active && !hiddenHere() -> "phone" to "${Names.of(a, VoiceCall.peerId, VoiceCall.peerName.ifBlank { "Voice call" })} · ${if (VoiceCall.connectedAt > 0) clock(VoiceCall.seconds()) else VoiceCall.status}"
             VideoCall.active && !VideoCall.shown -> "video" to "${Names.of(a, VideoCall.peerId, VideoCall.peerName.ifBlank { "Video call" })} · ${if (VideoCall.connectedAt > 0) clock(VideoCall.seconds()) else VideoCall.status}"
@@ -39,9 +41,8 @@ class CallBar(private val a: Activity, private val hiddenHere: () -> Boolean = {
             view.contentDescription = "Ongoing call with $words. Tap to return to the call"
             view.setCompoundDrawablesRelative(UiIcons.drawable(a, icon!!, Color.WHITE, 18), null, null, null)
         }
-        val was = view.visibility == View.VISIBLE
         view.visibility = if (showing) View.VISIBLE else View.GONE
-        if (showing && !was) { view.removeCallbacks(tick); view.postDelayed(tick, 1000) }
+        return showing
     }
 
     private fun open() {

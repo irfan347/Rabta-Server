@@ -58,6 +58,7 @@ android {
             matchingFallbacks += listOf("debug")
         }
     }
+    testBuildType = providers.gradleProperty("rabtaTestBuildType").getOrElse("debug")
     // Reuse the existing debug network configuration for the isolated device-test build.
     sourceSets.getByName("device").manifest.srcFile("src/debug/AndroidManifest.xml")
     sourceSets.getByName("device").res.srcDir("src/debug/res")

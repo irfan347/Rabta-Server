@@ -317,7 +317,13 @@ class StatusViewerActivity:ThemedActivity() {
     }
     private fun quickReply(status:JSONObject,emoji:String) {
         if(Privacy.blocked(this,status.optString("owner"))){Toast.makeText(this,"Unblock this contact to reply",Toast.LENGTH_SHORT).show();return}
-        if(send(status,emoji))Toast.makeText(this,"Sent $emoji",Toast.LENGTH_SHORT).show()
+        if(send(status,emoji)) {
+            Toast.makeText(this,"Sent $emoji",Toast.LENGTH_SHORT).show()
+            val reaction=RabtaUi.text(this,emoji,64f).apply { gravity=Gravity.CENTER }
+            val decor=window.decorView as android.view.ViewGroup
+            decor.addView(reaction,android.view.ViewGroup.LayoutParams(-1,-1));EmojiMotion.play(reaction)
+            reaction.postDelayed({ decor.removeView(reaction) },700)
+        }
     }
     /**
      * The reply quotes the update: "reply" is the line older apps show, and "status" lets chats show a card with the

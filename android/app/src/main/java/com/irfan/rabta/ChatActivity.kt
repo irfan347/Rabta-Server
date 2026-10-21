@@ -63,6 +63,18 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     private lateinit var replyPreview:TextView
     private lateinit var offlineBanner:TextView
     private var draftReplyId:String?=null
+    private var draftAccount=""
+    private val saveDraftTask=Runnable { saveDraft() }
+    private fun draftPrefs()=getSharedPreferences("drafts_$draftAccount",0)
+    private fun draftKey()=(if(isGroup) "group:" else "direct:")+peerId
+    private fun saveDraft() {
+        if(!::input.isInitialized||draftAccount.isEmpty()||draftAccount!=Session.id||peerId.isEmpty())return
+        val text=input.text.toString();val reply=replyTo?.id?:draftReplyId
+        val edit=draftPrefs().edit()
+        if(text.isEmpty()&&reply==null)edit.remove(draftKey())
+        else edit.putString(draftKey(),org.json.JSONObject().put("text",text).put("reply",reply).toString())
+        edit.apply()
+    }
     private var firstHistory=true
     private var scrollAfterSend=false
     private var renderedHistory:List<Triple<Db.Message,Pair<Boolean,String>,Int?>>?=null
@@ -145,6 +157,11 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         typingTv.visibility = View.GONE; statusTv.visibility = View.VISIBLE
     }}
 
+    override fun ownsPrivacyAuthentication()=Privacy.chatLocked(this,intent.getStringExtra("peerId").orEmpty())
+    private var chatUnlocked = false
+    private var chatUnlocking = false
+    private var initialState: Bundle? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         onBack { when { callShown -> { hideCallScreen(); true }; selectedIds.isNotEmpty() -> { clearSelection(); true }; panelOpen() -> { hidePanel(); true }; else -> false } }
@@ -153,13 +170,31 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         peerName = intent.getStringExtra("peerName") ?: "User"
         isGroup  = intent.getBooleanExtra("isGroup", false)
         self = !isGroup && People.isSelf(peerId)
+        if(!isGroup&&Privacy.request(this,peerId)) {
+            val page=FeatureUi.page(this,"Message request")
+            page.addView(FeatureUi.text(this,"$peerName wants to message you. Accept only if you recognize this person. Their calls are blocked until you accept."))
+            page.addView(FeatureUi.button(this,"Accept") { Privacy.accept(this,peerId);Db.get(this).saveContact(peerId,peerName);recreate() })
+            page.addView(FeatureUi.button(this,"Block") { MessageActions.toggleBlock(this,peerId) {finish()} })
+            page.addView(FeatureUi.button(this,"Report") { MessageActions.report(this,peerId) })
+            return
+        }
+        initialState = savedInstanceState
+        if(Privacy.chatLocked(this,peerId)) {
+            setContentView(RabtaUi.text(this,"Locked chat",20f).apply { gravity=Gravity.CENTER })
+        } else { chatUnlocked=true; initializeChat(savedInstanceState) }
+    }
+
+    private fun initializeChat(savedInstanceState:Bundle?) {
         db = Db.get(this)
         // Opening another chat in this screen recreates it: the last chat's draft and search stay with that chat.
         val saved=savedInstanceState?.takeIf { (it.getString("statePeer") ?: peerId)==peerId }
         searchQuery=saved?.getString("searchQuery")?:intent.getStringExtra("searchQuery").orEmpty()
-        draftReplyId=saved?.getString("replyId")
+        draftAccount=Session.id
+        val draft=runCatching { org.json.JSONObject(draftPrefs().getString(draftKey(),"{}").orEmpty()) }.getOrDefault(org.json.JSONObject())
+        draftReplyId=if(saved!=null) saved.getString("replyId") else draft.optString("reply").takeIf {it.isNotEmpty()}
         buildUi()
-        input.setText(saved?.getString("draft").orEmpty())
+        input.setText(if(saved!=null) saved.getString("draft").orEmpty() else draft.optString("text"))
+        input.setSelection(input.length())
         RabtaEvents.add(this)
         loadHistory()
         if (VoiceCall.with(peerId) && (intent.getBooleanExtra("showCall", false) || saved?.getBoolean("callShown") == true)) showCallScreen()
@@ -173,6 +208,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         // over. Recreating this screen instead was unreliable on Android 10 and could bring back the previous chat.
         if(newIntent.getStringExtra("peerId")!=peerId) { finish(); startActivity(Intent(newIntent).setFlags(0)); overridePendingTransition(0,0); return }
         setIntent(newIntent)
+        if(!chatUnlocked) return
         if(newIntent.getBooleanExtra("showCall",false)) showCallScreen()
         if(newIntent.getBooleanExtra("autoAnswer",false)) startCall(false)
         consumeCallRequest()
@@ -189,7 +225,25 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     }
 
     override fun onResume() {
-        super.onResume(); if (!::db.isInitialized) return
+        super.onResume()
+        if(!isGroup&&Privacy.request(this,peerId))return
+        if(Privacy.chatLocked(this,peerId) && !chatUnlocked) {
+            window.decorView.visibility=View.INVISIBLE
+            if(!chatUnlocking) {
+                chatUnlocking=true
+                AppLock.authenticate(this, failed={ chatUnlocking=false;finish() }) {
+                    chatUnlocking=false;chatUnlocked=true
+                    if(!::db.isInitialized) initializeChat(initialState)
+                    window.decorView.visibility=View.VISIBLE
+                    resumeChat()
+                }
+            }
+            return
+        }
+        resumeChat()
+    }
+    private fun resumeChat() {
+        if (!::db.isInitialized) return
         openPeer = peerId; ChatNotifications.clear(this, peerId)
         uiHandler.post(statusTick); uiHandler.post(presenceTick); RabtaEvents.add(this)
         resumed = true; VoiceCall.watch(callWatcher); callBar.start(); voiceBar.start(); syncCall()
@@ -199,8 +253,12 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         if (!isGroup && !self) { WsClient.sendRead(peerId, "all"); WsClient.watch(peerId) }
     }
     override fun onPause() {
+        uiHandler.removeCallbacks(saveDraftTask);saveDraft()
         // A voice message playing goes on, as in WhatsApp; the bar in the chats shows it.
-        super.onPause(); openPeer = null; uiHandler.removeCallbacks(statusTick); uiHandler.removeCallbacks(presenceTick); if(recording) stopVoiceRecord(false)
+        super.onPause()
+        if(Privacy.chatLocked(this,peerId)) { chatUnlocked=false;window.decorView.visibility=View.INVISIBLE;VoicePlayer.stop() }
+        RabtaEvents.remove(this)
+        openPeer = null; uiHandler.removeCallbacks(statusTick); uiHandler.removeCallbacks(presenceTick); if(recording) stopVoiceRecord(false)
         WsClient.unwatch(peerId)
         resumed = false; if (::callBar.isInitialized) { VoiceCall.unwatch(callWatcher); callBar.stop(); voiceBar.stop(); uiHandler.removeCallbacks(callTick); earpiece(false) }
     }
@@ -306,16 +364,21 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         hdr.addView(hdrCol, LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
         if (!isGroup && !self) hdr.addView(headerAction("phone","Voice call") { startCall(true) })
         if (!isGroup && !self) hdr.addView(headerAction("video","Video call") { startVideoCall() })
-        hdr.addView(headerAction("search","Search chat") {
-            if(searchField.visibility==View.VISIBLE) { searchField.setText("");searchField.visibility=View.GONE;input.requestFocus() }
-            else openSearch()
-        })
         if(!isGroup) {
             hdrCol.setOnClickListener { openContactProfile() }
             headerAvatar.setOnClickListener { openContactProfile() }
             headerAvatar.isFocusable=true;headerAvatar.importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_YES
             headerAvatar.contentDescription="$shownName. Open profile"
         }
+        hdr.addView(headerAction("more","Chat options") {
+            RabtaUi.sheet(this,"Chat options",listOf(
+                RabtaUi.SheetAction("Search chat") { openSearch() },
+                RabtaUi.SheetAction(if(Privacy.chatLocked(this,peerId)) "Remove chat lock" else "Lock chat") { toggleChatLock() },
+                RabtaUi.SheetAction("Chat wallpaper") { Wallpapers.choose(this,peerId) { chatScroll.background=Wallpapers.drawable(this,peerId) } },
+                RabtaUi.SheetAction("Starred messages in this chat") { startActivity(Intent(this,StarredActivity::class.java).putExtra("peerId",peerId)) },
+                RabtaUi.SheetAction("All starred messages") { startActivity(Intent(this,StarredActivity::class.java)) }
+            ))
+        })
         headerBar=hdr
         root.addView(hdr)
         selectionBar=buildSelectionBar()
@@ -335,7 +398,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         updateStatus()
 
         // ── Call overlay ──
-        callOverlay = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; background=GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,intArrayOf(0xFF182E2C.toInt(),DARK)); visibility=View.GONE }
+        callOverlay = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; background=GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,intArrayOf(0xFF183A3D.toInt(),0xFF101827.toInt(),0xFF080D14.toInt())); visibility=View.GONE }
         // Top: name + status
         // Like WhatsApp: the arrow (or Back) shows the chats again while the call goes on.
         callOverlay.addView(LinearLayout(this).apply {
@@ -343,7 +406,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             addView(RabtaUi.iconButton(this@ChatActivity,"back","Minimize call") { hideCallScreen() }.apply { UiIcons.set(this,"back",Color.WHITE,label="Minimize call") })
         })
         val callTop = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; gravity=Gravity.CENTER; setPadding(0,dp(8),0,0) }
-        callNameTv = TextView(this).apply { text=shownName; textSize=28f; typeface=Typeface.DEFAULT_BOLD; setTextColor(Color.WHITE); gravity=Gravity.CENTER }
+        callNameTv = TextView(this).apply { text=shownName; textSize=30f; typeface=Typeface.create("sans-serif-medium",Typeface.NORMAL);maxLines=2;ellipsize=android.text.TextUtils.TruncateAt.END; setTextColor(Color.WHITE); gravity=Gravity.CENTER }
         callStatusTv = TextView(this).apply { textSize=14f; setTextColor(0xBBFFFFFF.toInt()); gravity=Gravity.CENTER; setPadding(0,dp(6),0,0) }
         callTop.addView(callNameTv); callTop.addView(callStatusTv)
         callOverlay.addView(callTop)
@@ -353,18 +416,18 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         callAvatarFrame.addView(avatar(peerName, dp(112)), FrameLayout.LayoutParams(dp(112),dp(112)).apply { gravity=Gravity.CENTER })
         callOverlay.addView(callAvatarFrame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,0,1f))
         // Bottom: call controls
-        val panel = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; background=pill(DARK2,32); setPadding(dp(20),dp(20),dp(20),dp(24)) }
+        val panel = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; background=RabtaUi.shape(this@ChatActivity,0xEE172230.toInt(),28,0xFF334155.toInt()); setPadding(dp(16),dp(20),dp(16),dp(20)) }
         val row1 = LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER }
         val speakerBtn = callBtn("🔊","Speaker") { toggleSpeaker(it) }
         speakerControl=speakerBtn.getChildAt(0) as TextView
-        val muteBtnLayout = callBtn("🎤","Mic") { toggleMute(it) }
+        val muteBtnLayout = callBtn("🎤","Mute") { toggleMute(it) }
         muteControl=muteBtnLayout.getChildAt(0) as TextView
         val vidBtn2 = callBtn("📹","Video") { startVideoCall() }
         row1.addView(speakerBtn, LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
         row1.addView(vidBtn2,    LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
         row1.addView(muteBtnLayout, LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
         val row2 = LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER; setPadding(0,dp(20),0,0) }
-        val endBtnPanel = callBtnRed("📵","End") { endCall() }
+        val endBtnPanel = callBtnRed("📵","End call") { endCall() }
         row2.addView(LinearLayout(this).apply {}, LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
         row2.addView(endBtnPanel, LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
         row2.addView(LinearLayout(this).apply {}, LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
@@ -387,7 +450,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
 
         // ── Chat area ──
         chatScroll = ScrollView(this).apply {
-            background=ChatWallpaper(this@ChatActivity);isVerticalScrollBarEnabled=false;isSmoothScrollingEnabled=true
+            background=Wallpapers.drawable(this@ChatActivity,peerId);isVerticalScrollBarEnabled=false;isSmoothScrollingEnabled=true
             descendantFocusability=ViewGroup.FOCUS_BLOCK_DESCENDANTS;clipToPadding=false
         }
         chatBox = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(10),dp(6),dp(10),dp(12)) }
@@ -400,7 +463,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         }
         replyPreview=RabtaUi.text(this,"",14f,color=SUB).apply { maxLines=3;ellipsize=android.text.TextUtils.TruncateAt.END;setPadding(dp(12),dp(4),dp(8),dp(4));background=RabtaUi.shape(this@ChatActivity,SENT,12) }
         replyBar.addView(replyPreview,LinearLayout.LayoutParams(0,-2,1f))
-        replyBar.addView(RabtaUi.iconButton(this,"close","Cancel reply") { replyTo=null;replyBar.visibility=View.GONE })
+        replyBar.addView(RabtaUi.iconButton(this,"close","Cancel reply") { replyTo=null;draftReplyId=null;replyBar.visibility=View.GONE;saveDraft() })
         root.addView(replyBar)
         // ── Composer: one rounded pill (emoji · message · sticker · attach · camera) and a round mic/send button ──
         composerBar=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;clipChildren=false;clipToPadding=false }
@@ -465,6 +528,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             addTextChangedListener(object:TextWatcher{
                 override fun beforeTextChanged(s:CharSequence?,a:Int,b:Int,c:Int){}
                 override fun onTextChanged(s:CharSequence?,a:Int,b:Int,c:Int){
+                    uiHandler.removeCallbacks(saveDraftTask);uiHandler.postDelayed(saveDraftTask,500)
                     val has = !s.isNullOrBlank()
                     sendBtn.visibility = if(has) View.VISIBLE else View.GONE
                     micBtn.visibility  = if(has) View.GONE   else View.VISIBLE
@@ -491,6 +555,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         holdStrip.addView(holdTimer)
         holdStrip.addView(RabtaUi.text(this,"‹  Slide to cancel",14f,color=SUB).apply { gravity=Gravity.END;maxLines=1 },LinearLayout.LayoutParams(0,-2,1f))
         pill.addView(holdStrip,LinearLayout.LayoutParams(0,-2,1f))
+        if(Experience.easy(this)) { stickerBtn.visibility=View.GONE;cameraBtn.visibility=View.GONE;emojiBtn.visibility=View.GONE }
         pillContent=listOf(emojiBtn,input,stickerBtn,attachBtn,cameraBtn)
         barRow.addView(pill,LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f).apply { marginEnd=dp(6) })
         sendBtn = TextView(this).apply {
@@ -565,7 +630,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     // Shared call controls
     private fun callBtn(icon: String, label: String, onClick: (TextView) -> Unit): LinearLayout {
         val col = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; gravity=Gravity.CENTER }
-        val btn = TextView(this).apply { UiIcons.set(this,UiIcons.fromSymbol(icon) ?: "phone",label=label); textSize=24f; gravity=Gravity.CENTER; background=oval(GRAY_BTN); isClickable=true }
+        val btn = TextView(this).apply { UiIcons.set(this,UiIcons.fromSymbol(icon) ?: "phone",Color.WHITE,26,label); textSize=24f; gravity=Gravity.CENTER; background=RabtaUi.ripple(this@ChatActivity,0xFF2C3B4D.toInt(),20); isClickable=true;isFocusable=true }
         btn.setOnClickListener { onClick(btn) }
         col.addView(btn, LinearLayout.LayoutParams(dp(60),dp(60)))
         col.addView(TextView(this).apply { this.text=label; textSize=12f; setTextColor(0xCCFFFFFF.toInt()); gravity=Gravity.CENTER; setPadding(0,dp(6),0,0) })
@@ -573,7 +638,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     }
     private fun callBtnRed(icon: String, label: String, onClick: () -> Unit): LinearLayout {
         val col = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; gravity=Gravity.CENTER }
-        col.addView(TextView(this).apply { UiIcons.set(this,"end",label=label); textSize=24f; gravity=Gravity.CENTER; background=oval(RED); isClickable=true; setOnClickListener{onClick()} }, LinearLayout.LayoutParams(dp(68),dp(68)))
+        col.addView(TextView(this).apply { UiIcons.set(this,"end",Color.WHITE,28,label); textSize=24f; gravity=Gravity.CENTER; background=oval(RED); isClickable=true; setOnClickListener{onClick()} }, LinearLayout.LayoutParams(dp(68),dp(68)))
         col.addView(TextView(this).apply { this.text=label; textSize=12f; setTextColor(0xCCFFFFFF.toInt()); gravity=Gravity.CENTER; setPadding(0,dp(6),0,0) })
         return col
     }
@@ -687,7 +752,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
 
     private fun selectReply(m:Db.Message,focus:Boolean=true) {
         clearSelection()
-        replyTo=m
+        replyTo=m;draftReplyId=null;saveDraft()
         val author=if(m.mine) "You" else Names.of(this,m.fromId,m.fromName.ifBlank { peerName })
         replyPreview.text="Reply to $author\n${MessageActions.preview(m)}"
         replyBar.visibility=View.VISIBLE
@@ -749,7 +814,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
                     },LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(8) })
                     val text=o.optString("text")
                     // A quick emoji reply to a status shows big, like WhatsApp's.
-                    if(status!=null&&emojiOnly(text)) bubble.addView(RabtaUi.text(this,text,44f).apply { includeFontPadding=false;setPadding(dp(4),0,dp(4),0) })
+                    if(EmojiMotion.count(text)>0) bubble.addView(largeEmoji(text))
                     else { bubble.addView(InlineMetaLayout(this,textLine(text),msgFooter(m)));timeInline=true }
                 } else bubble.addView(textLine("Reply could not be displayed"))
             }
@@ -806,6 +871,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             else -> {
                 val card=if(m.msgType=="text") contactCard.matchEntire(m.body) else null
                 if(card!=null) bubble.addView(contactView(card.groupValues[1],card.groupValues[2]),LinearLayout.LayoutParams(dp(250),-2))
+                else if(m.msgType=="text"&&EmojiMotion.count(m.body)>0) bubble.addView(largeEmoji(m.body))
                 else { bubble.addView(InlineMetaLayout(this,textLine(m.body),msgFooter(m)));timeInline=true }
             }
         }
@@ -839,6 +905,22 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         if(at>=0) chatBox.addView(wrap,at,LinearLayout.LayoutParams(-1,-2)) else chatBox.addView(wrap,LinearLayout.LayoutParams(-1,-2))
         messageRows[m.id]=wrap;paintSelection(m.id)
     }
+    private fun toggleChatLock() {
+            val locked=Privacy.chatLocked(this,peerId)
+            android.app.AlertDialog.Builder(this).setTitle(if(locked) "Remove chat lock?" else "Lock this chat?")
+                .setMessage("Use your fingerprint or device screen lock each time you return. The chat will disappear from the main list and search. Open it from Settings → Privacy & security → Locked chats. Message previews and notification replies will be hidden.")
+                .setNegativeButton("Cancel",null).setPositiveButton("Continue") { _,_ ->
+                    AppLock.authenticate(this) { Privacy.setChatLocked(this,peerId,!locked);recreate() }
+                }.show()
+    }
+    private fun largeEmoji(text:String)=RabtaUi.text(this,text,if(EmojiMotion.count(text)==1) 54f else 42f).apply {
+        includeFontPadding=true;setPadding(dp(12),dp(10),dp(12),dp(10))
+        setLineSpacing(0f,1f);if(android.os.Build.VERSION.SDK_INT>=28) setFallbackLineSpacing(true)
+        addOnAttachStateChangeListener(object:View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v:View) { EmojiMotion.play(v) }
+            override fun onViewDetachedFromWindow(v:View) { v.animate().cancel() }
+        })
+    }
     private fun forwardButton(m:Db.Message)=UiIcons.image(this,"share_forward",TXT,18,L.t(this,"Forward")).apply {
         isFocusable=true;tag="forward:${m.id}"
         background=RabtaUi.ripple(this@ChatActivity,(AppTheme.surface(this@ChatActivity) and 0x00FFFFFF) or 0xD9000000.toInt(),999)
@@ -867,9 +949,40 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             override fun onSingleTapUp(e:MotionEvent):Boolean { toggleSelected(id);return true }
             override fun onLongPress(e:MotionEvent) { toggleSelected(id) }
         }) }
-        override fun onInterceptTouchEvent(ev:MotionEvent)=selectedIds.isNotEmpty()
+        private var startX=0f
+        private var startY=0f
+        private var swiping=false
+        private var vertical=false
+        override fun onInterceptTouchEvent(ev:MotionEvent):Boolean {
+            if(selectedIds.isNotEmpty()) return true
+            when(ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { startX=ev.x;startY=ev.y;swiping=false;vertical=false }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx=kotlin.math.abs(ev.x-startX);val dy=kotlin.math.abs(ev.y-startY)
+                    if(dy>dp(12)&&dy>kotlin.math.abs(dx)) vertical=true
+                    if(!vertical&&dx>dp(16)&&dx>dy*1.5f) { swiping=true;parent.requestDisallowInterceptTouchEvent(true);return true }
+                }
+            }
+            return false
+        }
         @android.annotation.SuppressLint("ClickableViewAccessibility")
-        override fun onTouchEvent(ev:MotionEvent):Boolean = if(selectedIds.isNotEmpty()) { gestures.onTouchEvent(ev);true } else super.onTouchEvent(ev)
+        override fun onTouchEvent(ev:MotionEvent):Boolean {
+            if(selectedIds.isNotEmpty()) { gestures.onTouchEvent(ev);return true }
+            if(!swiping) return super.onTouchEvent(ev)
+            // Physical left selects and physical right replies, including in RTL layouts.
+            val distance=(ev.x-startX).coerceIn(-dp(96).toFloat(),dp(96).toFloat())
+            when(ev.actionMasked) {
+                MotionEvent.ACTION_MOVE -> translationX=distance
+                MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL -> {
+                    if(ev.actionMasked==MotionEvent.ACTION_UP&&kotlin.math.abs(distance)>=dp(64)) shownMessages[id]?.let {
+                        performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                        if(distance<0) toggleSelected(id) else selectReply(it)
+                    }
+                    animate().translationX(0f).setDuration(160).start();swiping=false;parent.requestDisallowInterceptTouchEvent(false)
+                }
+            }
+            return true
+        }
     }
     private fun buildSelectionBar()=LinearLayout(this).apply {
         gravity=Gravity.CENTER_VERTICAL;setBackgroundColor(RECV);setPadding(dp(6),dp(8),dp(6),dp(8));visibility=View.GONE
@@ -880,6 +993,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         starAction=headerAction("star","Star") { selectionAction("star") }.also { addView(it) }
         addView(headerAction("trash","Delete") { selectionAction("delete") })
         addView(headerAction("share_forward","Forward") { selectionAction("forward") })
+        addView(headerAction("emoji","React") { shownMessages.values.filter { it.id in selectedIds }.singleOrNull()?.let { m -> clearSelection();MessageActions.react(this@ChatActivity,m,isGroup) { loadHistory() } } })
         addView(headerAction("more","More options") { selectionAction("more") })
     }
     private fun toggleSelected(id:String) {
@@ -1027,7 +1141,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         val quote=replyTo
         if(quote!=null&&!WsClient.connected){toast("Replies need internet. Cancel the reply to send plain text nearby.");return}
         val accepted=if(quote==null)sendContent(text,"text")else sendContent(org.json.JSONObject().put("text",text).put("reply",MessageActions.preview(quote)).toString(),"rich")
-        if(accepted) { replyTo=null;replyBar.visibility=View.GONE;input.setText("");scrollBottom(true) }
+        if(accepted) { replyTo=null;draftReplyId=null;replyBar.visibility=View.GONE;input.setText("");saveDraft();scrollBottom(true) }
     }
     private fun sendContent(body: String, msgType: String):Boolean {
         if(!isGroup&&Privacy.blocked(this,peerId)){toast("Unblock this contact to send a message");return false}
@@ -1167,7 +1281,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     private fun showRecordingUi() {
         val holding=recording&&!recordingLocked
         pillContent.forEach { it.visibility=if(holding) View.GONE else View.VISIBLE }
-        if(!holding) { val has=!input.text.isNullOrBlank();stickerBtn.visibility=if(has) View.GONE else View.VISIBLE;cameraBtn.visibility=if(has) View.GONE else View.VISIBLE }
+        if(!holding) { emojiBtn.visibility=if(Experience.easy(this)) View.GONE else View.VISIBLE;val has=!input.text.isNullOrBlank()||Experience.easy(this);stickerBtn.visibility=if(has) View.GONE else View.VISIBLE;cameraBtn.visibility=if(has) View.GONE else View.VISIBLE }
         holdStrip.visibility=if(holding) View.VISIBLE else View.GONE
         lockHint.visibility=if(holding) View.VISIBLE else View.GONE
         lockedPanel.visibility=if(recording&&recordingLocked) View.VISIBLE else View.GONE
@@ -1227,10 +1341,10 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     }
     private fun updateCallControls() {
         val muted=VoiceCall.muted;val speaker=VoiceCall.speaker
-        UiIcons.set(muteControl,if(muted) "muted" else "mic",label=if(muted) "Unmute microphone" else "Mute microphone")
-        muteControl.background=oval(if(muted) GREEN else GRAY_BTN); muteControl.isSelected=muted
-        UiIcons.set(speakerControl,"speaker",label=if(speaker) "Speaker on" else "Speaker off")
-        speakerControl.background=oval(if(speaker) GREEN else GRAY_BTN); speakerControl.isSelected=speaker
+        UiIcons.set(muteControl,if(muted) "muted" else "mic",Color.WHITE,26,label=if(muted) "Unmute microphone" else "Mute microphone")
+        muteControl.background=RabtaUi.ripple(this,if(muted) 0xFF256D5C.toInt() else 0xFF2C3B4D.toInt(),20); muteControl.isSelected=muted
+        UiIcons.set(speakerControl,"speaker",Color.WHITE,26,label=if(speaker) "Speaker on" else "Speaker off")
+        speakerControl.background=RabtaUi.ripple(this,if(speaker) 0xFF256D5C.toInt() else 0xFF2C3B4D.toInt(),20); speakerControl.isSelected=speaker
     }
     /** The call screen for this chat's call; the chat stays underneath. */
     private fun showCallScreen() {

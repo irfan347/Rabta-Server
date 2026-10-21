@@ -134,6 +134,11 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
 
     override fun onResume() {
         super.onResume();if(!::connectionTv.isInitialized)return
+        // Drop cached rows before the first resumed frame after a chat was locked elsewhere.
+        if(Privacy.anyChatLocked(this)) {
+            ++loadVersion;convList.removeAllViews();spacesList.removeAllViews();rows.clear()
+            chatsBadge.visibility=View.GONE
+        }
         AccountUi.ensureTrustedPhone(this)
         resumed=true;refreshAvatar();ProfilePhoto.sync { if(!isDestroyed) refreshAvatar() };MessageService.start(this);RabtaEvents.add(this)
         uiHandler.removeCallbacks(connectionTick);uiHandler.post(connectionTick)
@@ -302,7 +307,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         nearbyScroll=ScrollView(this).apply {
             addView(nearbyPanel.view.apply { setPadding(dp(16),dp(4),dp(16),dp(20)) });isVerticalScrollBarEnabled=false
         }
-        val content=FrameLayout(this)
+        val content=TabSwipeLayout(this,{selected.isEmpty()&&!archiveOpen},{direction -> switchTab((activeTab+direction).coerceIn(0,3),swipe=true)}).apply { canMove={ direction -> activeTab+direction in 0..3 } }
         listOf(chatsScroll,nearbyScroll,spacesScroll,callsScroll).forEach { content.addView(it,FrameLayout.LayoutParams(-1,-1)) }
         root.addView(content,LinearLayout.LayoutParams(-1,0,1f))
         fab=RabtaUi.iconButton(this,"chat_add","New chat") { if(activeTab==2) newGroup() else newChat() }.apply {
@@ -388,7 +393,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         if(::bottomNav.isInitialized) bottomNav.visibility=if(visible) View.GONE else View.VISIBLE
     }
 
-    private fun switchTab(idx:Int,animate:Boolean=true) {
+    private fun switchTab(idx:Int,animate:Boolean=true,swipe:Boolean=false) {
         val destination=idx.coerceIn(0,3)
         if(animate&&::searchField.isInitialized) queries[activeTab]=searchQuery
         if(destination!=activeTab) { archiveOpen=false;clearSelection() }
@@ -425,7 +430,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         UiIcons.set(fab,if(destination==2) "group_add" else "chat_add",AppTheme.onPrimary(this),26,L.t(this,if(destination==2) "New group" else "New chat"))
         if(destination==1 && resumed) nearbyPanel.resume() else nearbyPanel.pause()
         if(destination==3) loadCalls() else if(searchable) loadConvs()
-        if(animate) RabtaUi.enter(pages[destination])
+        if(animate&&!swipe) RabtaUi.enter(pages[destination])
     }
 
     // ── Moments: real 24-hour statuses from the server; nothing is shown when there are none ──
@@ -520,7 +525,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         // Nearby means a key-verified peer is directly connected right now.
         val nearby=MeshBridge.snapshot().peers.filter { it.keyMatched }.map { it.id }.toSet()
         Thread {
-                val found=runCatching { db.searchConversations(query) }
+                val found=runCatching { db.searchConversations(query).filter { !Privacy.chatLocked(this,it.peerId) && (!Privacy.request(this,it.peerId) || query.isBlank() || it.shownName.contains(query,true)) } }
                 val result=found.map { list -> list.filter {
                     when {
                         destination==2 -> it.isGroup
@@ -536,7 +541,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
                     }
                 } }
                 val archived=if(destination==0&&!archive&&query.isBlank()&&filter==0) found.getOrNull()?.filter { it.archived }.orEmpty() else emptyList()
-                val unreadChats=runCatching { db.searchConversations("").count { it.unread>0&&!it.archived } }.getOrDefault(0)
+                val unreadChats=runCatching { db.searchConversations("").count { it.unread>0&&!it.archived&&!Privacy.chatLocked(this,it.peerId) } }.getOrDefault(0)
                 // The newest message's real delivery state drives the ✓ / ✓✓ / blue ✓✓ in each row.
                 val ticks=result.getOrNull()?.associate { it.peerId to runCatching { db.lastMessageState(it.peerId) }.getOrNull() }.orEmpty()
             uiHandler.post {
@@ -641,8 +646,8 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         mid.addView(top)
         val bot = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0,dp(2),0,0) }
         bot.addView(TextView(this).apply {
-            text = preview(c.lastMsg, last?.takeIf { it.first }?.second); textSize = 14f; setTextColor(SUB); maxLines = 1;ellipsize=android.text.TextUtils.TruncateAt.END
-            last?.takeIf { it.first }?.let { contentDescription = "You: ${c.lastMsg}. ${MessageDelivery.label(it.second).removePrefix("✓✓ ").removePrefix("✓ ")}" }
+            text = if(Privacy.request(this@ConversationListActivity,c.peerId)) "Message request" else if(Privacy.chatLocked(this@ConversationListActivity,c.peerId)) "Locked chat" else preview(c.lastMsg, last?.takeIf { it.first }?.second); textSize = 14f; setTextColor(SUB); maxLines = 1;ellipsize=android.text.TextUtils.TruncateAt.END
+            last?.takeIf { it.first && !Privacy.chatLocked(this@ConversationListActivity,c.peerId) && !Privacy.request(this@ConversationListActivity,c.peerId) }?.let { contentDescription = "You: ${c.lastMsg}. ${MessageDelivery.label(it.second).removePrefix("✓✓ ").removePrefix("✓ ")}" }
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         if (muted) bot.addView(UiIcons.image(this,"volume_off",SUB,16,L.t(this,"Muted")),LinearLayout.LayoutParams(dp(20),dp(20)).apply { marginStart=dp(6) })
         if (c.pinned>0) bot.addView(UiIcons.image(this,"pin",SUB,16,L.t(this,"Pinned")),LinearLayout.LayoutParams(dp(20),dp(20)).apply { marginStart=dp(6) })

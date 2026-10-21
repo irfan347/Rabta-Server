@@ -18,6 +18,10 @@ class SettingsActivity : ThemedActivity() {
         content = FeatureUi.page(this, "Settings")
         content.addView(FeatureUi.text(this, "Your Rabta preferences and account tools."))
 
+        section("APP MODE") {
+            row("Change app mode", "${Experience.mode(this@SettingsActivity)} · Easy, Standard or Developer", "appearance") { Experience.choose(this@SettingsActivity) }
+        }
+
         section("ACCOUNT") {
             row("Profile", "${Session.name} · @${Session.username}", "profile") {
                 startActivity(Intent(this@SettingsActivity, ProfileActivity::class.java))
@@ -35,15 +39,43 @@ class SettingsActivity : ThemedActivity() {
         }
 
         section("PRIVACY & SECURITY") {
+            row("Screen capture protection", "Screenshots and screen recording are blocked inside Rabta", "privacy") {
+                themedInfo("Screen capture protection", "Android protects Rabta screens from ordinary screenshots and recording. A camera or a modified device can still capture content. Files opened in other apps follow those apps' rules.")
+            }
+            row("Status audience", "Choose who can see future status updates", "privacy") {
+                StatusPost.chooseAudience(this@SettingsActivity,StatusPost.audience(this@SettingsActivity)) { recreate() }
+            }
+            row("Online, last seen & photo", "Account visibility and Rabta freeze", "privacy") { VisibilitySettings.open(this@SettingsActivity) }
+            toggle("Send read receipts", "Let contacts see when you open messages", Privacy.prefs(this@SettingsActivity).getBoolean("send_read",true)) { enabled -> Privacy.prefs(this@SettingsActivity).edit().putBoolean("send_read",enabled).apply() }
+            toggle("Send typing indicators", "Let contacts see when you type or record", Privacy.prefs(this@SettingsActivity).getBoolean("send_typing",true)) { enabled -> Privacy.prefs(this@SettingsActivity).edit().putBoolean("send_typing",enabled).apply() }
+
+            toggle("Block calls from unknown people", "Message requests must be accepted before calling", Privacy.prefs(this@SettingsActivity).getBoolean("silence_unknown_calls",true)) { enabled -> Privacy.prefs(this@SettingsActivity).edit().putBoolean("silence_unknown_calls",enabled).apply() }
             toggle("Hide notification previews", "App lock also hides previews", Privacy.prefs(this@SettingsActivity).getBoolean("hide_previews", false)) { enabled ->
                 Privacy.prefs(this@SettingsActivity).edit().putBoolean("hide_previews", enabled).apply()
             }
             row("App lock", if (Privacy.prefs(this@SettingsActivity).getBoolean("lock", false)) "Enabled · device screen lock" else "Use your device unlock") {
                 toggleAppLock()
             }
+            row("Locked chats", "Unlock to view hidden conversations", "privacy") { startActivity(Intent(this@SettingsActivity,LockedChatsActivity::class.java)) }
             row("Blocked contacts", "${blockedContacts().size} blocked", "privacy") { showBlockedContacts() }
         }
 
+        section("CONTACTS") {
+            row("Phone number and discovery", "Choose whether people with your number can find you", "people") { PhoneContacts.settings(this@SettingsActivity) }
+            toggle("Sync phone contacts", "Find opted-in accounts when opening Contacts", PhoneContacts.enabled(this@SettingsActivity)) { enabled ->
+                if(enabled) startActivity(Intent(this@SettingsActivity,SelectContactActivity::class.java).putExtra("enablePhoneContacts",true))
+                else Privacy.prefs(this@SettingsActivity).edit().putBoolean("sync_contacts",false).apply()
+            }
+        }
+        if(Experience.mode(this)=="Developer") section("ADVANCED CONTROLS") {
+            toggle("Animated emoji", "Animate large emoji and status reactions", Experience.animate(this@SettingsActivity)) { enabled -> L.prefs(this@SettingsActivity).edit().putBoolean("animate_emoji",enabled).apply() }
+            row("Custom colors", "Choose your own accent and chat palette", "appearance") { AppTheme.choose(this@SettingsActivity) }
+            row("Connection diagnostics", "Inspect online and nearby connection health", "connection") { startActivity(Intent(this@SettingsActivity, ConnectivityDiagnosticsActivity::class.java)) }
+        }
+        section("CHATS") {
+            row("Chat wallpaper", "Default background for all chats", "appearance") { Wallpapers.choose(this@SettingsActivity) }
+            row("All starred messages", "Saved messages from every chat", "star") { startActivity(Intent(this@SettingsActivity,StarredActivity::class.java)) }
+        }
         section("APPEARANCE") {
             row("Theme", "${AppTheme.palette(this@SettingsActivity).name} · ${AppTheme.mode(this@SettingsActivity)}", "appearance") { AppTheme.choose(this@SettingsActivity) }
             row("Language", if (L.prefs(this@SettingsActivity).getString("language", "en") == "ur") "اردو" else "English", "language") {
@@ -254,9 +286,10 @@ class SettingsActivity : ThemedActivity() {
                 val pass = password.text.toString()
                 if (pass.length < 10 || (req == 41 && pass != confirm.text.toString())) { password.error = "Use 10+ matching characters"; return@setOnClickListener }
                 dialog.dismiss(); Toast.makeText(this, "Working…", Toast.LENGTH_SHORT).show()
-                FeatureApi.run(this, { if (req == 41) ChatBackup.export(this, uri, pass.toCharArray()) else ChatBackup.restore(this, uri, pass.toCharArray()) }) {
+                val work = { FeatureApi.run(this, { if (req == 41) ChatBackup.export(this, uri, pass.toCharArray()) else ChatBackup.restore(this, uri, pass.toCharArray()) }) {
                     Toast.makeText(this, if (req == 41) "Encrypted backup saved" else "Chats restored", Toast.LENGTH_LONG).show()
-                }
+                } }
+                if(req==41&&Privacy.anyChatLocked(this)) AppLock.authenticate(this,done=work) else work()
             }
         }
         dialog.show()

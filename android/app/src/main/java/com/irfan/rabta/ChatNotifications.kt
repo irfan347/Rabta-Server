@@ -87,6 +87,13 @@ object ChatNotifications {
     /** One popup per chat holding its latest messages, with Reply, Mark as read and Mute. */
     fun message(c: Context, convId: String, title: String, isGroup: Boolean, fromId: String, fromName: String, text: String) {
         if (muted(c, convId)) return
+        if(Privacy.chatLocked(c,convId)||Privacy.request(c,convId)) {
+            val b=Notification.Builder(c,MessageService.MSG_CHANNEL).setSmallIcon(R.drawable.ic_stat_rabta)
+                .setContentTitle("Rabta").setContentText(if(Privacy.request(c,convId)) "New message request" else "New message in a locked chat")
+                .setVisibility(Notification.VISIBILITY_SECRET).setAutoCancel(true)
+                .setContentIntent(PendingIntent.getActivity(c,id(convId),chat(c,convId,title,isGroup),PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
+            runCatching { manager(c)?.notify(id(convId),b.build()) };return
+        }
         val lines = synchronized(recent) {
             recent.getOrPut(convId) { mutableListOf() }.apply { add(Line(text, System.currentTimeMillis(), fromId, fromName)); while (size > 6) removeAt(0) }.toList()
         }
@@ -172,6 +179,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
         if (!Session.loggedIn) return
         if (intent.action == ChatNotifications.HANG_UP) { if (VideoCall.active) VideoCall.hangUp() else VoiceCall.end(); return }
         val id = intent.getStringExtra("id").orEmpty().ifEmpty { return }
+        if((Privacy.chatLocked(c,id)||Privacy.request(c,id)) && intent.action in setOf(ChatNotifications.REPLY,ChatNotifications.READ)) return
         val isGroup = intent.getBooleanExtra("isGroup", false)
         when (intent.action) {
             ChatNotifications.REPLY -> ChatNotifications.reply(c, id, intent.getStringExtra("title").orEmpty(), isGroup,

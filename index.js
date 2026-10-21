@@ -37,6 +37,8 @@ async function initDb() {
       id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL,
       pass_hash TEXT NOT NULL, name TEXT, created_at BIGINT, last_seen BIGINT
     );
+    ALTER TABLE ru_users ADD COLUMN IF NOT EXISTS phone_number TEXT;
+    ALTER TABLE ru_users ADD COLUMN IF NOT EXISTS phone_discoverable BOOLEAN NOT NULL DEFAULT FALSE;
     CREATE TABLE IF NOT EXISTS ru_messages (
       id SERIAL PRIMARY KEY, msg_id TEXT NOT NULL, from_id TEXT, from_name TEXT,
       to_id TEXT NOT NULL, body TEXT, type TEXT DEFAULT 'text',
@@ -48,7 +50,7 @@ async function initDb() {
     CREATE TABLE IF NOT EXISTS rg_groups(id TEXT PRIMARY KEY, name TEXT, creator TEXT, members TEXT, created_at BIGINT);
     CREATE TABLE IF NOT EXISTS ru_receipts(msg_id TEXT NOT NULL, by_id TEXT NOT NULL, to_id TEXT NOT NULL, at BIGINT, PRIMARY KEY(msg_id, by_id, to_id));
   `);
-  const rows = (await pool.query('SELECT id,username,pass_hash,name FROM ru_users')).rows;
+  const rows = (await pool.query('SELECT id,username,pass_hash,name,phone_number,phone_discoverable FROM ru_users')).rows;
   for (const r of rows) memUsers.set(r.id, r);
   await account.init();
   for (const g of (await pool.query('SELECT * FROM rg_groups')).rows) groups.set(g.id, { ...g, members: new Set(g.members.split(',')) });
@@ -93,6 +95,11 @@ app.post('/api/register', async (req, res) => {
   const username = String(req.body?.username || '').trim().toLowerCase();
   const pin = String(req.body?.pin || '');
   const name = account.cleanName(req.body?.name || username) || username;
+  // Optional for older clients; supplied numbers are private, unverified metadata, never identity proof.
+  const rawNumber = req.body?.phoneNumber;
+  if (rawNumber !== undefined && (typeof rawNumber !== 'string' || !/^\+[1-9][0-9]{7,14}$/.test(rawNumber)))
+    return res.status(400).json({ error: 'Enter a phone number with country code' });
+  const phoneNumber = rawNumber ?? null;
   if (!UN_RE.test(username)) return res.status(400).json({ error: 'Username 3-20 letters/numbers only' });
   if (!/^\d{4,8}$/.test(pin)) return res.status(400).json({ error: 'PIN must be 4-8 digits' });
   // One account per phone: this phone already has one, so it signs in to that instead.
@@ -101,14 +108,14 @@ app.post('/api/register', async (req, res) => {
   const status = account.usernameStatus(username);
   if (!status.available) return res.status(409).json({ error: status.error });
   const id = crypto.randomBytes(6).toString('hex').toUpperCase();
-  const user = { id, username, pass_hash: hashPin(pin), name, created_at: Date.now(), last_seen: Date.now() };
+  const user = { id, username, phone_number:phoneNumber, phone_discoverable:false, pass_hash: hashPin(pin), name, created_at: Date.now(), last_seen: Date.now() };
   memUsers.set(id, user); // reserves the username while the insert is in flight
   // ...and the phone, in memory at once; saving it never fails the sign-up.
   const phoneSaved = account.linkPhone(req.body?.phone, id).catch(e => console.error('Phone link failed:', e.message));
   if (pool) {
     try {
-      await pool.query('INSERT INTO ru_users(id,username,pass_hash,name,created_at,last_seen) VALUES($1,$2,$3,$4,$5,$6)',
-        [id, username, user.pass_hash, name, user.created_at, user.last_seen]);
+      await pool.query('INSERT INTO ru_users(id,username,pass_hash,name,created_at,last_seen,phone_number) VALUES($1,$2,$3,$4,$5,$6,$7)',
+        [id, username, user.pass_hash, name, user.created_at, user.last_seen, phoneNumber]);
     } catch (e) {
       memUsers.delete(id); account.unlinkPhone(req.body?.phone, id);
       if (e.code === '23505') return res.status(409).json({ error: 'Username already used' });
@@ -147,15 +154,15 @@ app.post('/api/login', async (req, res) => {
 app.get('/api/user/:username', (req, res) => {
   const user = [...memUsers.values()].find(u => u.username === req.params.username.toLowerCase());
   if (!user) return res.status(404).json({ error: 'User not found' });
-  const onlineNow = isOnline(user.id);
-  res.json({ id: user.id, username: user.username, name: user.name, online: onlineNow, lastSeen: user.last_seen });
+  const presence = presenceOf(user.id,authId(req));
+  res.json({ id: user.id, username: user.username, name: user.name, online: presence.online, lastSeen: presence.lastSeen });
 });
 // Contact info by account ID (signed-in callers only): the same public fields as a username lookup.
 app.get('/api/user/id/:id', (req, res) => {
   const me = authId(req); if (!me) return res.status(401).json({ error: 'login required' });
   const user = memUsers.get(String(req.params.id || '').toUpperCase());
   if (!user || features.blocked(user.id, me)) return res.status(404).json({ error: 'User not found' });
-  res.json({ id: user.id, username: user.username, name: user.name, online: isOnline(user.id), lastSeen: user.last_seen });
+  res.json({ id: user.id, username: user.username, name: user.name, online: presenceOf(user.id,me).online, lastSeen: presenceOf(user.id,me).lastSeen });
 });
 app.get('/api/me', (req, res) => {
   const id = authId(req); if (!id) return res.status(401).json({ error: 'login required' });
@@ -179,12 +186,11 @@ function isOnline(id) {
   const w = online.get(id); if (!w || w.rabtaActive === false) return false;
   return Date.now() - w.rabtaHeard < (w.rabtaActive ? SHOWN_MS : QUIET_MS);
 }
-function presenceOf(id) { return { type: 'presence', id, online: isOnline(id), lastSeen: memUsers.get(id)?.last_seen || 0 }; }
+function presenceOf(id,viewer) { return { type: 'presence', id, online: features.visible(id,viewer,'hideOnline') && isOnline(id), lastSeen: features.visible(id,viewer,'hideLastSeen') ? (memUsers.get(id)?.last_seen || 0) : 0 }; }
 // Tells the phones that have this contact's chat open (see 'watch').
 function presenceChanged(id) {
   const w = online.get(id); if (w) w.rabtaTold = isOnline(id);
-  const frame = JSON.stringify(presenceOf(id));
-  for (const x of online.values()) if (x.rabtaWatch === id && x.readyState === 1 && !features.blocked(id, x.rabtaUser)) try { x.send(frame); } catch (_) {}
+  for (const x of online.values()) if (x.rabtaWatch === id && x.readyState === 1 && !features.blocked(id, x.rabtaUser)) try { x.send(JSON.stringify(presenceOf(id,x.rabtaUser))); } catch (_) {}
 }
 // After anything that may change it ([was]: what watchers were told): last seen is when it stopped being online ([at]).
 function presenceUpdate(id, was, at = Date.now()) {
@@ -419,11 +425,11 @@ wss.on('connection', (ws, req) => {
       // The chat on screen: its contact's online and last seen now, and again whenever they change.
       const id = String(msg.id || '').toUpperCase();
       ws.rabtaWatch = id !== userId && memUsers.has(id) && !features.blocked(id, userId) ? id : '';
-      if (ws.rabtaWatch) ws.send(JSON.stringify(presenceOf(id)));
+      if (ws.rabtaWatch) ws.send(JSON.stringify(presenceOf(id,userId)));
     } else if (msg.type === 'typing') {
       // "recording" while a voice message is recorded; older phones show it as typing.
       const tgt = online.get(msg.to);
-      if (tgt && tgt.readyState === 1 && !features.blocked(userId, String(msg.to))) tgt.send(JSON.stringify({ type: 'typing', from: userId, ...(msg.kind === 'recording' ? { kind: 'recording' } : {}) }));
+      if (tgt && tgt.readyState === 1 && features.visible(userId, String(msg.to),'hideOnline')) tgt.send(JSON.stringify({ type: 'typing', from: userId, ...(msg.kind === 'recording' ? { kind: 'recording' } : {}) }));
     } else if (msg.type === 'read') {
       const tgt = online.get(msg.to); if (tgt && tgt.readyState === 1) tgt.send(JSON.stringify({ type: 'read', msgId: msg.msgId, by: userId }));
     } else if (msg.type === 'group_msg') {
@@ -576,6 +582,7 @@ const page = (title, body) => `<!doctype html><html lang="en"><head><meta charse
 app.get('/privacy', (req, res) => res.type('html').send(page('Rabta privacy policy', `<h1>Rabta privacy policy</h1><p>Updated 20 October 2026. Rabta is a messaging app for chats, voice and video calls, status updates and messages between nearby phones without internet.</p>
 <h2>What the Rabta server keeps, and why</h2><ul>
 <li><b>Your account:</b> your username, display name and account ID, and your PIN stored only as a salted hash, so you can sign in. When you were last online, which your contacts see. Your profile photo, if you add one.</li>
+<li><b>Your phone number:</b> newer app versions collect a private contact number at signup. It is not SMS verified or used as proof of identity. If you opt into phone discovery, people who already have that number can find your account. Contact matching sends numbers you select from your address book to the server; these lookup lists are not stored. It is deleted with your account.</li>
 <li><b>Your phone:</b> a one-way hash of the phone's Android ID, so a phone has one Rabta account, and the public keys of the phones you trust for signing in.</li>
 <li><b>Messages, photos, videos, voice messages and files</b> go through the server, which keeps a message only until it is delivered and a file only until the people it was sent to have saved it; then the content is deleted. Small delivery records (message IDs and times, no content) are kept for up to 30 days. Internet messages are protected by TLS on the way, but they are not end-to-end encrypted, so they pass through the server readable.</li>
 <li><b>Calls:</b> voice calls pass through the server as they happen, and video calls go between the phones or through a relay. Calls are never recorded or stored.</li>
@@ -601,9 +608,10 @@ const b=await r.json().catch(()=>({}));out.textContent=r.ok?'Your Rabta account 
 catch(_){out.textContent='No connection, please try again';}});</script>
 ${CONTACT ? `<p>Need help? <a href="mailto:${CONTACT}">${CONTACT}</a></p>` : ''}`)));
 
-app.get('/health', (req, res) => res.json({ ok: true, db: !!pool, online: online.size, users: memUsers.size, push: push.enabled(), ...push.stats?.() }));
+app.get('/health', (req, res) => res.json({ ok: true, capabilities: ['phone-collection','contact-discovery','account-visibility'], db: !!pool, online: online.size, users: memUsers.size, push: push.enabled(), ...push.stats?.() }));
 
-const features=require('./features')({app,authId,users:memUsers,getPool:()=>pool});
+const features=require('./features')({app,authId,users:memUsers,getPool:()=>pool,onPrivacyChanged:presenceChanged});
+require('./discovery')({app,authId,users:memUsers,blocked:features.blocked,getPool:()=>pool});
 const push=require('./push')({app,authId,getPool:()=>pool});
 const PORT = process.env.PORT || 3000;
 initDb().then(()=>features.init()).then(()=>push.init()).then(() => server.listen(PORT, () => console.log('Rabta server on', PORT)))

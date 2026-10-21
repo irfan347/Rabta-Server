@@ -148,7 +148,7 @@ class EmojiPanel(
     }
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
         super.onSizeChanged(w, h, ow, oh)
-        val next = (w / dp(44)).coerceIn(7, 10)
+        val next = ((w - dp(8)) / emojiCellSize()).coerceIn(1, 10)
         if (next != columns) { columns = next; post { rebuild() } }
     }
     private fun rebuild() {
@@ -185,7 +185,10 @@ class EmojiPanel(
         prefs().edit().putString("list", JSONArray((listOf(emoji) + recents()).distinct().take(columns * 3)).toString()).apply()
     }
 
+    private fun emojiCellSize() = maxOf(dp(48), (48 * resources.displayMetrics.scaledDensity).toInt())
+
     private fun cell(emoji: String, label: String) = TextView(a).apply {
+        includeFontPadding = true; if(android.os.Build.VERSION.SDK_INT>=28) setFallbackLineSpacing(true); setPadding(0, 0, 0, 0)
         text = emoji; textSize = 26f; gravity = Gravity.CENTER; isFocusable = true; contentDescription = label
         background = RabtaUi.ripple(a, Color.TRANSPARENT, 12); setOnClickListener { use(emoji) }
     }
@@ -202,7 +205,7 @@ class EmojiPanel(
                 text = row.title; androidx.core.view.ViewCompat.setAccessibilityHeading(this, true)
             }
             is Line -> ((convert as? LinearLayout)?.takeIf { it.childCount == columns } ?: LinearLayout(a).apply {
-                setPadding(dp(4), 0, dp(4), 0); repeat(columns) { addView(cell("", ""), LayoutParams(0, dp(48), 1f)) }
+                setPadding(dp(4), 0, dp(4), 0); repeat(columns) { addView(cell("", ""), LayoutParams(0, emojiCellSize(), 1f)) }
             }).apply {
                 for (i in 0 until columns) (getChildAt(i) as TextView).let { v ->
                     val item = row.emoji.getOrNull(i)
@@ -230,7 +233,7 @@ class EmojiPanel(
         val q = query.trim().lowercase()
         val found = if (q.isEmpty()) recents().map { it to it } else supported.flatten().filter { it.second.contains(q) }.take(60)
         if (found.isEmpty()) results.addView(RabtaUi.text(a, if (q.isEmpty()) "Type to search emoji" else "No emoji found", 13f, color = sub).apply { setPadding(dp(16), dp(12), dp(16), dp(12)) })
-        found.forEach { (e, name) -> results.addView(cell(e, name).apply { setOnClickListener { use(e) } }, LayoutParams(dp(46), dp(48))) }
+        found.forEach { (e, name) -> results.addView(cell(e, name).apply { setOnClickListener { use(e) } }, LayoutParams(emojiCellSize(), emojiCellSize())) }
     }
 
     // ── Stickers: real recents, favourites, Rabta's own and your imported ones ──

@@ -28,6 +28,38 @@ class SelectContactActivity : ThemedActivity() {
     private var lastChat: Map<String, Long> = emptyMap()
     private var query = ""
     private var version = 0
+    private var remoteGeneration=0
+    private var remoteQuery=""
+    private var remote=emptyList<org.json.JSONObject>()
+    private var phoneMatches=emptyList<Pair<String,org.json.JSONObject>>()
+    private var matching=false
+    private val remoteSearch=Runnable { searchRemote() }
+    fun refreshPhoneContacts() {
+        if(matching||!PhoneContacts.enabled(this))return
+        matching=true
+        Thread {
+            val result=runCatching {PhoneContacts.matches(this)}
+            runOnUiThread { matching=false;if(!isDestroyed) { result.onSuccess {phoneMatches=it;render()}.onFailure {android.widget.Toast.makeText(this,it.message?:"Contact sync unavailable",android.widget.Toast.LENGTH_LONG).show()} } }
+        }.start()
+    }
+    override fun onRequestPermissionsResult(code:Int,permissions:Array<out String>,results:IntArray) {
+        super.onRequestPermissionsResult(code,permissions,results)
+        if(code==PhoneContacts.REQUEST) { if(results.firstOrNull()==android.content.pm.PackageManager.PERMISSION_GRANTED)refreshPhoneContacts() else Privacy.prefs(this).edit().putBoolean("sync_contacts",false).apply() }
+    }
+    private fun searchRemote() {
+        val q=query.removePrefix("@").lowercase();val generation=++remoteGeneration
+        if(!Regex("[a-z0-9_]{2,20}").matches(q))return
+        Thread {
+            val result=runCatching {FeatureApi.request("/api/contacts/search?q=$q").getJSONArray("users")}
+            runOnUiThread {
+                if(isDestroyed||generation!=remoteGeneration||query.removePrefix("@").lowercase()!=q)return@runOnUiThread
+                remoteQuery=q
+                remote=result.getOrNull()?.let { arr -> (0 until arr.length()).map {arr.getJSONObject(it)} }.orEmpty()
+                render()
+                result.onFailure {subtitle.text="Online search unavailable. Saved contacts are still shown."}
+            }
+        }.start()
+    }
     private val render = Runnable { render() }
     private fun dp(n: Int) = RabtaUi.dp(this, n)
 
@@ -69,6 +101,8 @@ class SelectContactActivity : ThemedActivity() {
             override fun afterTextChanged(s: Editable?) {}
             override fun onTextChanged(s: CharSequence?, st: Int, b: Int, c: Int) {
                 query = s?.toString().orEmpty().trim(); clear.visibility = if (query.isEmpty()) View.GONE else View.VISIBLE
+                remoteGeneration++;remote=emptyList();remoteQuery=""
+                handler.removeCallbacks(remoteSearch);handler.postDelayed(remoteSearch,350)
                 handler.removeCallbacks(render); handler.postDelayed(render, 120)
             }
         })
@@ -78,14 +112,18 @@ class SelectContactActivity : ThemedActivity() {
         setContentView(root)
     }
 
-    override fun onResume() { super.onResume(); if (::db.isInitialized) load() }
+    override fun onResume() {
+        super.onResume(); if (::db.isInitialized) load()
+        if(intent.getBooleanExtra("enablePhoneContacts",false)) {intent.removeExtra("enablePhoneContacts");PhoneContacts.consent(this)}
+        else refreshPhoneContacts()
+    }
     override fun onDestroy() { handler.removeCallbacksAndMessages(null); super.onDestroy() }
 
     private fun load() {
         val v = ++version
         Thread {
             val result = runCatching {
-                val all = db.contacts().filter { !People.isSelf(it.peerId) && !Privacy.blocked(this, it.peerId) }
+                val all = db.contacts().filter { !People.isSelf(it.peerId) && !Privacy.blocked(this, it.peerId) && !Privacy.request(this,it.peerId) }
                 all to db.conversations().filter { !it.isGroup }.associate { it.peerId to it.lastTime }
             }
             runOnUiThread {
@@ -100,6 +138,13 @@ class SelectContactActivity : ThemedActivity() {
     private fun render() {
         list.removeAllViews()
         val q = query.removePrefix("@")
+        if(q.isBlank())list.addView(action("people","Phone contacts",if(PhoneContacts.enabled(this)) "Refresh matches" else "Find saved numbers on Rabta") { if(PhoneContacts.enabled(this))refreshPhoneContacts() else PhoneContacts.consent(this) })
+        if(remoteQuery.equals(q,true)) remote.filter { user -> contacts.none {it.peerId==user.optString("id")} }.forEach { user ->
+            list.addView(action("person_add",user.optString("name"),"@${user.optString("username")}") { confirmMatch(user,null) })
+        }
+        phoneMatches.filter { (name,user) -> q.isBlank()||name.contains(q,true)||user.optString("username").contains(q,true) }.forEach { (name,user) ->
+            list.addView(action("people",name.ifBlank {user.optString("name")},"@${user.optString("username")} · Phone match, unverified") { confirmMatch(user,name) })
+        }
         if (q.isEmpty()) {
             list.addView(action("group_add", "New group", "Choose people, then name the group") { startActivity(Intent(this, NewGroupActivity::class.java)) })
             list.addView(action("person_add", "New contact", "Find someone by @username or Rabta ID", trailing = "qr") { newContact() })
@@ -128,6 +173,14 @@ class SelectContactActivity : ThemedActivity() {
         People.lookup(this, prefill, { android.widget.Toast.makeText(this, it, android.widget.Toast.LENGTH_SHORT).show() }, {}) { id, name, _ -> openChat(id, name) }
     }
 
+    private fun confirmMatch(user:org.json.JSONObject,localName:String?) {
+        android.app.AlertDialog.Builder(this).setTitle(user.optString("name"))
+            .setMessage("@${user.optString("username")}"+(if(localName!=null) "\nPhone numbers are self-reported. Confirm this is the person you know." else "\nAdd this person to your contacts?"))
+            .setNegativeButton("Cancel",null).setPositiveButton("Add contact") { _,_ ->
+                val id=user.optString("id");val name=user.optString("name")
+                db.saveContact(id,name,user.optString("username"));Privacy.accept(this,id);load()
+            }.show()
+    }
     private fun openChat(id: String, name: String) { People.openChat(this, id, name); finish() }
 
     /** A round accent icon, a title and a quiet line: New group, New contact. */

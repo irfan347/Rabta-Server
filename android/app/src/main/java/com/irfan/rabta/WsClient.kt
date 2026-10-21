@@ -148,7 +148,9 @@ object WsClient {
                 }
                 override fun onClosing(socket:WebSocket,code:Int,reason:String)=main {
                     if(attempt!=generation)return@main
-                    socket.close(code,reason)
+                    // An empty peer close frame is reported as 1005 locally. It is not a
+                    // legal wire code: echoing it throws on the main thread and kills Rabta.
+                    if(code==1005) socket.close(1000,null) else socket.close(code,reason)
                     lost(attempt,if(code==1008)"Sign in again — session expired or rejected" else "Connection closed — retrying…",code==1008)
                 }
                 override fun onClosed(socket:WebSocket,code:Int,reason:String)=main {
@@ -180,11 +182,11 @@ object WsClient {
             "typing" -> RabtaEvents.postTyping(o.optString("from"), o.optString("kind"))
             "presence" -> RabtaEvents.postPresence(o.optString("id"), o.optBoolean("online"), o.optLong("lastSeen"))
             "read" -> RabtaEvents.postRead(o.optString("msgId"), o.optString("by"))
-            "incoming_call" -> RabtaEvents.postIncomingCall(o.optString("from"), o.optString("fromName"),o.optString("callId"))
+            "incoming_call" -> if(Privacy.allowCall(Session.context(),o.optString("from"))) RabtaEvents.postIncomingCall(o.optString("from"), o.optString("fromName"),o.optString("callId")) else rejectUnknownCall(o,false)
             "call_state" -> RabtaEvents.postCallState(o.optString("from"),o.optString("callId"),o.optString("state"))
             "call_audio" -> RabtaEvents.postCallAudio(o.optString("from"), o.optString("data"),o.optString("callId"))
             "call_end" -> RabtaEvents.postCallEnd(o.optString("from"),o.optString("callId"))
-            "video_offer"   -> RabtaEvents.postVideoOffer(o.optString("from"), o.optString("fromName"), o.optString("callId"), o.optString("sdp"))
+            "video_offer"   -> if(Privacy.allowCall(Session.context(),o.optString("from"))) RabtaEvents.postVideoOffer(o.optString("from"), o.optString("fromName"), o.optString("callId"), o.optString("sdp")) else rejectUnknownCall(o,true)
             "video_answer"  -> RabtaEvents.postVideoAnswer(o.optString("callId"), o.optString("sdp"))
             "ice_candidate" -> RabtaEvents.postIceCandidate(o.optString("callId"), o.optString("sdpMid"), o.optInt("sdpMLineIndex"), o.optString("sdp"))
             "video_end"     -> RabtaEvents.postVideoEnd(o.optString("callId"))
@@ -211,17 +213,20 @@ object WsClient {
 
     fun sendRaw(json: String): Boolean = if (connected) (ws?.send(json) == true) else false
     /** [kind] "recording" while a voice message is recorded. */
-    fun sendTyping(toId: String, kind: String = "") = sendRaw(JSONObject().put("type","typing").put("to",toId).apply { if (kind.isNotEmpty()) put("kind",kind) }.toString())
+    fun sendTyping(toId: String, kind: String = "") = Privacy.prefs(Session.context()).getBoolean("send_typing",true) && sendRaw(JSONObject().put("type","typing").put("to",toId).apply { if (kind.isNotEmpty()) put("kind",kind) }.toString())
     fun sendReceipt(toId: String, msgId: String) = sendRaw(JSONObject().put("type","receipt").put("to",toId).put("id",msgId).toString())
-    fun sendRead(toId: String, msgId: String) = sendRaw(JSONObject().put("type","read").put("to",toId).put("msgId",msgId).toString())
+    fun sendRead(toId: String, msgId: String) = Privacy.prefs(Session.context()).getBoolean("send_read",true) && sendRaw(JSONObject().put("type","read").put("to",toId).put("msgId",msgId).toString())
 
+    private fun rejectUnknownCall(o:JSONObject,video:Boolean) {
+        sendRaw(JSONObject().put("type",if(video) "video_end" else "call_end").put("to",o.optString("from")).put("callId",o.optString("callId")).toString())
+    }
     // HTTP
     /** Signs this phone's Keystore proof into [body]; a phone without a usable key store cannot sign in safely. */
     private fun withDevice(body: JSONObject, purpose: String, cb: (Boolean,String,JSONObject?)->Unit): String? =
         runCatching { body.put("device", DeviceIdentity.proof(purpose)).toString() }.getOrElse { handler.post { cb(false, "This phone can't sign in securely. Restart it and try again.", null) }; null }
-    fun register(ctx: Context, srv: String, un: String, pin: String, name: String, cb: (Boolean,String,JSONObject?)->Unit) {
+    fun register(ctx: Context, srv: String, un: String, pin: String, name: String, phoneNumber: String = "", cb: (Boolean,String,JSONObject?)->Unit) {
         // The phone's hash lets the server keep one account per phone (see PhoneId).
-        val body = withDevice(JSONObject().put("username",un).put("pin",pin).put("name",name).put("phone",PhoneId.of(ctx)), "register:$un", cb) ?: return
+        val body = withDevice(JSONObject().put("username",un).put("pin",pin).put("name",name).put("phoneNumber",phoneNumber).put("phone",PhoneId.of(ctx)), "register:$un", cb) ?: return
         post(srv, "/api/register", body, null, cb)
     }
     /** A 202 response with "pending" means a trusted phone must approve this one; see [pollLogin]. */

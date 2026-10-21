@@ -1,6 +1,6 @@
 const crypto=require('crypto');
-module.exports=function install({app,authId,users,getPool}) {
-  const statuses=new Map(),uploads=new Map(),blocks=new Set(),grants=new Map(),reports=[],photos=new Map();
+module.exports=function install({app,authId,users,getPool,onPrivacyChanged=()=>{}}) {
+  const statuses=new Map(),uploads=new Map(),blocks=new Set(),grants=new Map(),reports=[],photos=new Map(),visibility=new Map();
   // Who a file was sent to (file -> people), who has saved it on their phone (file -> person -> when), and when it was last used.
   const sharedWith=new Map(),holders=new Map(),used=new Map();
   const busy=new Set();
@@ -21,7 +21,7 @@ module.exports=function install({app,authId,users,getPool}) {
     const db=getPool(); if(!db)return;
     await db.query('CREATE TABLE IF NOT EXISTS rf_data(kind TEXT,id TEXT,data TEXT,PRIMARY KEY(kind,id))');
     for(const row of (await db.query('SELECT kind,id,data FROM rf_data')).rows) {
-      try { const value=JSON.parse(row.data);if(row.kind==='status'&&value.expires>Date.now())statuses.set(row.id,value);if(row.kind==='upload')uploads.set(row.id,value);if(row.kind==='grant'){grants.set(row.id,value);share(row.id)}if(row.kind==='got')hold(row.id,Number(value));if(row.kind==='block')blocks.add(row.id);if(row.kind==='photo')photos.set(row.id,value); }catch{}
+      try { const value=JSON.parse(row.data);if(row.kind==='status'&&value.expires>Date.now())statuses.set(row.id,value);if(row.kind==='upload')uploads.set(row.id,value);if(row.kind==='grant'){grants.set(row.id,value);share(row.id)}if(row.kind==='got')hold(row.id,Number(value));if(row.kind==='block')blocks.add(row.id);if(row.kind==='photo')photos.set(row.id,value);if(row.kind==='visibility')visibility.set(row.id,value); }catch{}
     }
   }
   async function cleanup(force=false){const now=Date.now();for(const [key,s] of statuses)if(s.expires<=now){statuses.delete(key);await remove('status',key)};for(const [key,u] of uploads)if(!u.done&&u.created<now-LIFE&&!busy.has(key)){uploads.delete(key);await remove('upload',key)};while(reports.length&&reports[0].created<now-3600000)reports.shift();
@@ -79,7 +79,21 @@ module.exports=function install({app,authId,users,getPool}) {
     ensure(/^[A-Za-z0-9+/]+={0,2}$/.test(photo),'Invalid photo');const bytes=Buffer.from(photo,'base64');
     ensure(bytes.length>0&&bytes.length<=PHOTO_MAX,'Photo must be up to 256 KB');ensure((bytes[0]===0xff&&bytes[1]===0xd8)||bytes.subarray(0,8).equals(PNG),'Photo must be JPEG or PNG');
     await persist('photo',me,photo);photos.set(me,photo);res.json({ok:true});}));
-  app.get('/api/user/photo/:id',wrap(async(req,res,me)=>{const owner=String(req.params.id||'').toUpperCase(),photo=photos.get(owner);if(!photo||blocked(owner,me))return res.status(404).json({error:'No photo'});res.json({photo});}));
+  app.get('/api/user/photo/:id',wrap(async(req,res,me)=>{const owner=String(req.params.id||'').toUpperCase(),photo=photos.get(owner);if(!photo||!visible(owner,me,'hidePhoto'))return res.status(404).json({error:'No photo'});res.json({photo});}));
+  const visibilitySettings=me=>({hideOnline:false,hideLastSeen:false,hidePhoto:false,...visibility.get(me)});
+  function visible(owner,viewer,field) {
+    if(owner===viewer)return true;
+    if(blocked(owner,viewer))return false;
+    return visibilitySettings(owner)[field]!==true;
+  }
+  app.get('/api/me/visibility',wrap(async(req,res,me)=>res.json(visibilitySettings(me))));
+  app.post('/api/me/visibility',wrap(async(req,res,me)=>exclusive('visibility:'+me,async()=>{
+    const keys=['hideOnline','hideLastSeen','hidePhoto'];
+    ensure(req.body&&Object.keys(req.body).length>0&&Object.keys(req.body).every(k=>keys.includes(k)&&typeof req.body[k]==='boolean'),'Invalid visibility settings');
+    const next={...visibilitySettings(me),...req.body};
+    await persist('visibility',me,next);visibility.set(me,next);onPrivacyChanged(me);
+    res.json(next);
+  })));
   app.get('/api/privacy',wrap(async(req,res,me)=>res.json({blocked:[...blocks].filter(x=>x.startsWith(me+':')).map(x=>x.split(':')[1])})));
   app.post('/api/block',wrap(async(req,res,me)=>{const target=String(req.body.target||'');ensure(users.has(target)&&target!==me,'Invalid contact');const key=me+':'+target;
     if(req.body.blocked===false){await remove('block',key);blocks.delete(key)}else{await persist('block',key,true);blocks.add(key)}res.json({ok:true});}));
@@ -138,7 +152,7 @@ module.exports=function install({app,authId,users,getPool}) {
     const db=getPool();
     if(db){
       await db.query("DELETE FROM rf_data WHERE kind IN ('grant','got') AND (id LIKE $2 OR split_part(id,':',1) IN (SELECT id FROM rf_data WHERE kind='upload' AND data::jsonb->>'owner'=$1))",[me,'%:'+me]);
-      await db.query("DELETE FROM rf_data WHERE (kind='upload' AND data::jsonb->>'owner'=$1) OR (kind='photo' AND id=$1) OR (kind='block' AND (id LIKE $2 OR id LIKE $3))"+
+      await db.query("DELETE FROM rf_data WHERE (kind='upload' AND data::jsonb->>'owner'=$1) OR (kind IN ('photo','visibility') AND id=$1) OR (kind='block' AND (id LIKE $2 OR id LIKE $3))"+
         " OR (kind='report' AND (data::jsonb->>'reporter'=$1 OR data::jsonb->>'target'=$1)) OR (kind='status' AND (data::jsonb->>'owner'=$1 OR (data::jsonb->>'expires')::bigint<=$4))",[me,me+':%','%:'+me,Date.now()]);
     }
     for(const [key,s] of [...statuses]){
@@ -151,8 +165,8 @@ module.exports=function install({app,authId,users,getPool}) {
     for(const key of [...grants.keys()])if(key.endsWith(':'+me)){grants.delete(key);sharedWith.get(key.slice(0,key.indexOf(':')))?.delete(me)}
     for(const people of holders.values())people.delete(me);
     for(const key of [...blocks])if(key.startsWith(me+':')||key.endsWith(':'+me))blocks.delete(key);
-    photos.delete(me);
+    photos.delete(me);visibility.delete(me);
     for(let i=reports.length-1;i>=0;i--)if(reports[i].reporter===me||reports[i].target===me)reports.splice(i,1);
   }
-  return {init,blocked,grant,tidy:()=>cleanup(true),forget};
+  return {init,blocked,visible,grant,tidy:()=>cleanup(true),forget};
 };

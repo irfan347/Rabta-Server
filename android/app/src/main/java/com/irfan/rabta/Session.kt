@@ -9,6 +9,8 @@ object Session {
 
     fun init(c: Context) { ctx = c.applicationContext; Inbox.init(ctx); Outbox.init(ctx); (ctx as? android.app.Application)?.let(OnScreen::init); if (serverUrl.isEmpty()) serverUrl = Config.SERVER }
 
+    fun context(): Context = ctx
+
     var id: String get() = prefs().getString("id", "") ?: ""; set(v) { prefs().edit().putString("id", v).apply() }
     var username: String get() = prefs().getString("username", "") ?: ""; set(v) { prefs().edit().putString("username", v).apply() }
     var name: String get() = prefs().getString("name", "") ?: ""; set(v) { prefs().edit().putString("name", v).apply() }
