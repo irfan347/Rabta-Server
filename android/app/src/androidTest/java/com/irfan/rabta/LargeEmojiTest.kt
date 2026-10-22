@@ -1,11 +1,13 @@
 package com.irfan.rabta
 
+import android.animation.ValueAnimator
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Rect
 import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
+import android.widget.EditText
 import android.widget.TextView
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -31,6 +33,7 @@ class LargeEmojiTest {
     private lateinit var db: Db
     private fun ui(block: () -> Unit) = inst.runOnMainSync(block)
     private fun all(v: View): List<View> = listOf(v) + if (v is ViewGroup) (0 until v.childCount).flatMap { all(v.getChildAt(it)) } else emptyList()
+    private fun shell(command: String) = android.os.ParcelFileDescriptor.AutoCloseInputStream(inst.uiAutomation.executeShellCommand(command)).use { String(it.readBytes()).trim() }
     private fun waitFor(message: String, check: () -> String?) {
         val end = SystemClock.elapsedRealtime() + 8000
         var last: String? = "not checked"
@@ -60,6 +63,7 @@ class LargeEmojiTest {
         ui { for (stage in listOf(Stage.RESUMED, Stage.PAUSED, Stage.STARTED, Stage.STOPPED)) ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(stage).toList().forEach { it.finish() } }
         inst.waitForIdleSync()
         clean(); Privacy.prefs(ctx).edit().clear().commit(); ctx.getSharedPreferences("drafts_$me", 0).edit().clear().commit()
+        L.prefs(ctx).edit().remove("animate_emoji").commit()
         ui { Session.id = old[0]; Session.name = old[1]; Session.username = old[2]; Session.token = old[3]; Session.serverUrl = old[4] }
     }
 
@@ -90,19 +94,60 @@ class LargeEmojiTest {
         ui { all(a.window.decorView).first { it.isShown && it.contentDescription == "Emoji" }.performClick() }
         waitFor("The panel opens") { if (all(a.window.decorView).any { it.isShown && it.contentDescription == "Keyboard" }) null else "no panel" }
         waitFor("The last emoji stays whole above the panel") { whole(lastId, lastBody) }
-        review()
+        review("emoji")
+    }
+
+    /** A large emoji sent from the chat pops in and small copies of it float up from it, then it rests whole; with Animated emoji off nothing moves. */
+    @Test fun aLargeEmojiSentFromTheChatCelebrates() {
+        // CI runs its emulators with Android's animations off; this test turns them on for itself and back afterwards.
+        val scale = shell("settings get global animator_duration_scale")
+        shell("settings put global animator_duration_scale 1")
+        try {
+            waitFor("Android's animations are on") { if (ValueAnimator.areAnimatorsEnabled()) null else "animator scale still 0" }
+            L.prefs(ctx).edit().putBoolean("animate_emoji", true).commit()
+            val a = inst.startActivitySync(Intent(ctx, ChatActivity::class.java).putExtra("peerId", peer).putExtra("peerName", "Emoji friend").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ChatActivity
+            fun sent(body: String) = all(a.window.decorView).filter { (it.tag as? String)?.startsWith("message:") == true }.flatMap { all(it) }.firstOrNull { it is TextView && it.text.toString() == body } as TextView?
+            fun send(body: String) {
+                ui { (all(a.window.decorView).first { it is EditText && it.isShown } as EditText).setText(body) }
+                waitFor("Send shows") { if (all(a.window.decorView).any { it.isShown && it.contentDescription == "Send message" }) null else "no send button" }
+                ui { all(a.window.decorView).first { it.isShown && it.contentDescription == "Send message" }.performClick() }
+            }
+            send("🎉")
+            waitFor("Small copies float up from the emoji just sent") { if (EmojiMotion.floating.keys.any { it is TextView && it.text.toString() == "🎉" }) null else "nothing floating" }
+            review("celebrate", 0)
+            waitFor("The emoji then rests whole at its full size") {
+                val v = sent("🎉") ?: return@waitFor "no sent emoji"
+                val r = Rect()
+                when {
+                    EmojiMotion.floating.isNotEmpty() -> "copies still floating"
+                    v.scaleX != 1f || v.scaleY != 1f || v.rotation != 0f -> "emoji at scale ${v.scaleX}, turned ${v.rotation}°"
+                    !v.getGlobalVisibleRect(r) || r.width() != v.width || r.height() != v.height -> "emoji shows $r of ${v.width}x${v.height}"
+                    else -> null
+                }
+            }
+            // Settings → Animated emoji off: the next one simply appears.
+            L.prefs(ctx).edit().putBoolean("animate_emoji", false).commit()
+            send("🔥")
+            waitFor("The second emoji shows") { if (sent("🔥") != null) null else "not shown" }
+            Thread.sleep(700)
+            var floating = true; var pose: Triple<Float, Float, Float>? = null
+            ui { floating = EmojiMotion.floating.isNotEmpty(); pose = sent("🔥")?.let { Triple(it.scaleX, it.scaleY, it.rotation) } }
+            assertFalse("Nothing floats with Animated emoji off", floating)
+            assertEquals("The emoji stays still with Animated emoji off", Triple(1f, 1f, 0f), pose)
+        } finally {
+            if (scale.isEmpty() || scale == "null") shell("settings delete global animator_duration_scale") else shell("settings put global animator_duration_scale $scale")
+        }
     }
 
     /** A small picture of the chat for the CI log (Rabta keeps its screens out of screenshots; see captureScreen). */
-    private fun review() {
-        Thread.sleep(600); inst.waitForIdleSync()
+    private fun review(name: String, settle: Long = 600) {
+        if (settle > 0) { Thread.sleep(settle); inst.waitForIdleSync() }
         val shot = inst.captureScreen() ?: return
         val scaled = Bitmap.createScaledBitmap(shot, 360, (shot.height * 360f / shot.width).toInt(), true)
         val bytes = java.io.ByteArrayOutputStream().apply { scaled.compress(Bitmap.CompressFormat.JPEG, 70, this) }.toByteArray()
         if (scaled !== shot) scaled.recycle(); shot.recycle()
         val dir = File(ctx.getExternalFilesDir(null), "emoji-review").apply { mkdirs() }
-        File(dir, "emoji-review.b64").writeText(android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP))
-        for (command in listOf("mkdir -p /sdcard/Download/rabta-interface", "cp ${dir.absolutePath}/emoji-review.b64 /sdcard/Download/rabta-interface/emoji-review.b64"))
-            android.os.ParcelFileDescriptor.AutoCloseInputStream(inst.uiAutomation.executeShellCommand(command)).use { it.readBytes() }
+        File(dir, "$name-review.b64").writeText(android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP))
+        for (command in listOf("mkdir -p /sdcard/Download/rabta-interface", "cp ${dir.absolutePath}/$name-review.b64 /sdcard/Download/rabta-interface/$name-review.b64")) shell(command)
     }
 }

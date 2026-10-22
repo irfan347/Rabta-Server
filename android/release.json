@@ -1,4 +1,4 @@
 {
   "minVersionCode": 0,
-  "notes": "The latest messages stay in view when the sticker and emoji panel, the reply bar or the keyboard opens, so a sticker is no longer cut in half."
+  "notes": "Large emoji you send, or that arrive while a chat is open, now pop in with small copies floating up; tap one to see it again. Settings → Animated emoji turns this off."
 }

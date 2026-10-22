@@ -450,8 +450,8 @@ jobs:
             echo
             echo 'RABTA_PREVIEW_END'
           fi
-          # Chats with stickers and with large emoji, the panel open, on every Android version.
-          for review in sticker emoji; do
+          # Chats with stickers and with large emoji, the panel open, and a sent emoji's copies floating up, on every Android version.
+          for review in sticker emoji celebrate; do
             if [ -f "interface-screenshots/$review-review.b64" ]; then
               name=$(echo "$review" | tr a-z A-Z)
               echo "RABTA_${name}_PREVIEW_BEGIN"

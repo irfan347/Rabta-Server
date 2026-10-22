@@ -733,7 +733,10 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         for((m,meta,progress) in items.subList(before.size,items.size)) {
             val day=dayKey(m.sentAt);val newDay=day!=lastDay
             if(newDay) { addDateSeparator(m.sentAt);lastDay=day }
+            // A message that just arrived while the chat is open: a large emoji in it celebrates as its bubble appears.
+            celebrate+=m.id
             addBubble(m,meta,progress,!newDay&&previous.mine==m.mine&&previous.fromId==m.fromId&&m.sentAt-previous.sentAt<10*60_000)
+            celebrate-=m.id
             previous=m
         }
         renderedHistory=items
@@ -820,7 +823,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
                     },LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(8) })
                     val text=o.optString("text")
                     // A quick emoji reply to a status shows big, like WhatsApp's.
-                    if(EmojiMotion.count(text)>0) bubble.addView(largeEmoji(text))
+                    if(EmojiMotion.count(text)>0) bubble.addView(largeEmoji(text,m.id))
                     else { bubble.addView(InlineMetaLayout(this,textLine(text),msgFooter(m)));timeInline=true }
                 } else bubble.addView(textLine("Reply could not be displayed"))
             }
@@ -877,7 +880,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             else -> {
                 val card=if(m.msgType=="text") contactCard.matchEntire(m.body) else null
                 if(card!=null) bubble.addView(contactView(card.groupValues[1],card.groupValues[2]),LinearLayout.LayoutParams(dp(250),-2))
-                else if(m.msgType=="text"&&EmojiMotion.count(m.body)>0) bubble.addView(largeEmoji(m.body))
+                else if(m.msgType=="text"&&EmojiMotion.count(m.body)>0) bubble.addView(largeEmoji(m.body,m.id))
                 else { bubble.addView(InlineMetaLayout(this,textLine(m.body),msgFooter(m)));timeInline=true }
             }
         }
@@ -919,11 +922,15 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
                     AppLock.authenticate(this) { Privacy.setChatLocked(this,peerId,!locked);recreate() }
                 }.show()
     }
-    private fun largeEmoji(text:String)=RabtaUi.text(this,text,if(EmojiMotion.count(text)==1) 54f else 42f).apply {
+    /** Messages whose large emoji celebrates when its bubble appears: sent from here or arrived while the chat is open. */
+    private val celebrate=mutableSetOf<String>()
+    private fun largeEmoji(text:String,id:String)=RabtaUi.text(this,text,if(EmojiMotion.count(text)==1) 54f else 42f).apply {
         includeFontPadding=true;setPadding(dp(12),dp(10),dp(12),dp(10))
         setLineSpacing(0f,1f);if(android.os.Build.VERSION.SDK_INT>=28) setFallbackLineSpacing(true)
+        // Tap to see it again.
+        setOnClickListener { EmojiMotion.celebrate(this) }
         addOnAttachStateChangeListener(object:View.OnAttachStateChangeListener {
-            override fun onViewAttachedToWindow(v:View) { EmojiMotion.play(v) }
+            override fun onViewAttachedToWindow(v:View) { if(celebrate.remove(id)) EmojiMotion.celebrate(this@apply) else EmojiMotion.play(v) }
             override fun onViewDetachedFromWindow(v:View) { v.animate().cancel() }
         })
     }
@@ -1156,7 +1163,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         if(msgType=="text" && body.toByteArray().size>12000) { toast("Message is too long (12 KB maximum)"); return false }
         if(msgType=="sticker") Stickers.remember(this,body)
         scrollAfterSend=true
-        Outbox.send(peerId,peerName,isGroup,body,msgType)
+        Outbox.send(peerId,peerName,isGroup,body,msgType)?.let { if(msgType=="text"&&EmojiMotion.count(body)>0) celebrate+=it }
         return true
     }
 

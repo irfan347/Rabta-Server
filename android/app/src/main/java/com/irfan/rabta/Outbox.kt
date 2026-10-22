@@ -35,8 +35,9 @@ object Outbox : RabtaEvents.Listener {
         current()
         RabtaEvents.add(this)
     }
-    fun send(peerId: String, peerName: String, group: Boolean, body: String, type: String) {
-        val (d, c) = current() ?: return
+    /** The new message's id, or null when no account is signed in. */
+    fun send(peerId: String, peerName: String, group: Boolean, body: String, type: String): String? {
+        val (d, c) = current() ?: return null
         val id = ByteArray(6).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02X".format(it) }
         val time = System.currentTimeMillis()
         // Message yourself: the note is kept on this phone and nothing is sent anywhere.
@@ -49,6 +50,7 @@ object Outbox : RabtaEvents.Listener {
             if (note) return@execute
             c.attempt(DeliveryCoordinator.Outgoing(id, peerId, group, body, type, time)); reschedule()
         }
+        return id
     }
     fun retry(message: Db.Message, group: Boolean) {
         val (d, c) = current() ?: return
