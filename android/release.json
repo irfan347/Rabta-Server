@@ -1,4 +1,4 @@
 {
   "minVersionCode": 0,
-  "notes": "Settings → Delete account deletes your Rabta account and this phone's chats for it, after your PIN.\nRabta's privacy policy is at rabta-server-1e2i.onrender.com/privacy."
+  "notes": "The latest messages stay in view when the sticker and emoji panel, the reply bar or the keyboard opens, so a sticker is no longer cut in half."
 }

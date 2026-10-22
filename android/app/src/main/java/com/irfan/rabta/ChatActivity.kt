@@ -457,6 +457,12 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         }
         chatBox = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(10),dp(6),dp(10),dp(12)) }
         chatScroll.addView(chatBox)
+        // Like WhatsApp, whatever opens under the chat (the emoji and sticker panel, the reply bar, the keyboard) keeps the
+        // latest messages in view when they were: they are not left half under its edge.
+        chatScroll.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+            val was=oldBottom-oldTop;val now=bottom-top;val content=chatBox.height
+            if(was>0&&now<was&&content<=was+chatScroll.scrollY+dp(80)) chatScroll.post { chatScroll.scrollTo(0,(chatBox.height-chatScroll.height).coerceAtLeast(0)) }
+        }
         root.addView(chatScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,0,1f))
 
         replyBar=LinearLayout(this).apply {
