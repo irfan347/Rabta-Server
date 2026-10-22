@@ -72,8 +72,8 @@ object VideoCall : RabtaEvents.Listener {
 
     private val ringTimeout = Runnable { if (active && connectedAt == 0L) { outcome = "no answer"; hangUp() } }
     // A dropped connection is not a hung-up call: once answered, the picture and voice go directly between the phones,
-    // and the server holds the call for half a minute while Rabta reconnects. Still cut off after that, it ends here.
-    private const val RECONNECT_MS = 30_000L
+    // and the server holds the call for two minutes while Rabta reconnects. Still cut off after that, it ends here.
+    private const val RECONNECT_MS = 120_000L
     private val cutOff = Runnable { cutOffPending = false; if (active && !WsClient.connected) { outcome = "disconnected"; end() } }
 
     /** Calls [peer] when [caller], otherwise answers [offerSdp]. The screen checks the camera and microphone first. */
@@ -340,7 +340,7 @@ object VideoCall : RabtaEvents.Listener {
             "calling" -> { ringback.stop(); status("Calling…") }
             "ringing" -> { ringback.ringing(); status("Ringing…") }
             "accepted" -> { ringback.stop(); status("Connecting…") }
-            "busy" -> { outcome = "busy"; toast("Busy"); end() }
+            "busy", "on_another_call" -> { outcome = "busy"; toast(if(state=="on_another_call") "Already on another call" else "Call unavailable"); end() }
         }
     }
     override fun onDisconnected() {

@@ -28,7 +28,7 @@ object EmojiMotion {
     }
     fun play(v: View) {
         if(!Experience.animate(v.context) || !ValueAnimator.areAnimatorsEnabled()) return
-        v.animate().cancel(); v.scaleX = 0.75f; v.scaleY = 0.75f
-        v.animate().scaleX(1f).scaleY(1f).setDuration(420).setInterpolator(DecelerateInterpolator()).start()
+        v.animate().cancel(); v.scaleX = 0.88f; v.scaleY = 0.88f
+        v.animate().scaleX(1f).scaleY(1f).setDuration(220).setInterpolator(DecelerateInterpolator()).start()
     }
 }

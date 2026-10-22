@@ -221,7 +221,7 @@ function beginCall(from,to,id,video,sdp) {
   if(!/^[0-9A-F]{12}$/.test(id) || !memUsers.has(to) || from===to) return;
   if(features.blocked(from,to)){sendTo(from,{type:'call_state',from:to,callId:id,state:'busy'});return;}
   const all=[...voiceCalls.values(),...videoCalls.values()];
-  if(all.some(c=>[c.from,c.to].includes(from)||[c.from,c.to].includes(to))) { sendTo(from,{type:'call_state',from:to,callId:id,state:'busy'});return; }
+  if(all.some(c=>[c.from,c.to].includes(from)||[c.from,c.to].includes(to))) { sendTo(from,{type:'call_state',from:to,callId:id,state:'busy',reason:'on_another_call'});return; }
   const call={id,from,to,video,sdp,answered:false,expires:Date.now()+45000,ice:[]};
   call.timer=setTimeout(()=>endCall(call),45000);call.timer.unref?.();
   (video?videoCalls:voiceCalls).set(id,call); callState(call,'calling'); deliverCall(call);
@@ -232,10 +232,10 @@ function beginCall(from,to,id,video,sdp) {
 // A phone whose connection drops in an answered call gets a moment to come back before the call ends: mobile networks
 // blink, and a video call's picture even goes on directly between the phones meanwhile. The other phone hears
 // 'reconnecting', then 'back' once the phone says the call goes on ('call_alive'). A call still ringing ends at once.
-const RETURN_MS=30000;
+const RETURN_MS=120000;
 function away(call,userId) {
   if(!call.answered) { endCall(call); return; }
-  call.away=call.away||{}; clearTimeout(call.away[userId]);
+  call.away=call.away||{}; if(call.away[userId]) return;
   const t=setTimeout(()=>endCall(call),RETURN_MS); t.unref?.(); call.away[userId]=t;
   sendTo(call.from===userId?call.to:call.from,{type:'call_state',from:userId,callId:call.id,state:'reconnecting'});
 }
@@ -608,7 +608,7 @@ const b=await r.json().catch(()=>({}));out.textContent=r.ok?'Your Rabta account 
 catch(_){out.textContent='No connection, please try again';}});</script>
 ${CONTACT ? `<p>Need help? <a href="mailto:${CONTACT}">${CONTACT}</a></p>` : ''}`)));
 
-app.get('/health', (req, res) => res.json({ ok: true, capabilities: ['phone-collection','contact-discovery','account-visibility'], db: !!pool, online: online.size, users: memUsers.size, push: push.enabled(), ...push.stats?.() }));
+app.get('/health', (req, res) => res.json({ ok: true, capabilities: ['phone-collection','contact-discovery','account-visibility','call-recovery-120s'], db: !!pool, online: online.size, users: memUsers.size, push: push.enabled(), ...push.stats?.() }));
 
 const features=require('./features')({app,authId,users:memUsers,getPool:()=>pool,onPrivacyChanged:presenceChanged});
 require('./discovery')({app,authId,users:memUsers,blocked:features.blocked,getPool:()=>pool});

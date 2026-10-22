@@ -17,7 +17,7 @@ async function fixture(database=false) {
   const register=async name=>{let value;await routes.get('POST /api/register')({body:{username:name,pin:'123456',name}},{json(v){value=v},status(){return this}});return value;};
   const alice=await register('alice'),bob=await register('bob'),eve=await register('eve');
   function socket(user,{broken=false,presence=false}={}){const handlers={},messages=[];const ws={readyState:1,pings:0,send(s,cb){if(broken)return cb?.(new Error('socket write failed'));messages.push(JSON.parse(s));cb?.()},close(){this.readyState=3;handlers.close?.()},terminate(){this.close()},ping(){this.pings++},on(e,f){handlers[e]=f}};connect(ws,{headers:{authorization:'Bearer '+user.token,...(presence?{'x-rabta-presence':'1'}:{})},url:'/ws'});return {messages,send:async m=>handlers.message(Buffer.from(JSON.stringify(m))),pong:()=>handlers.pong?.(),ping:()=>handlers.ping?.(),ws};}
-  return {socket,alice,bob,eve,queries,routes,register,wakes,failSql:re=>{failing=re},onSql:fn=>{responder=fn},expire:()=>{for(const t of [...timers])t.fn();},beat:()=>intervals.forEach(fn=>fn())};
+  return {socket,alice,bob,eve,queries,routes,register,wakes,failSql:re=>{failing=re},onSql:fn=>{responder=fn},expire:()=>{for(const t of [...timers])t.fn();},timerDurations:()=>[...timers].map(t=>t.ms),beat:()=>intervals.forEach(fn=>fn())};
 }
 test('large offline attachment survives intact and retries do not duplicate',async()=>{
   const f=await fixture();const a=f.socket(f.alice);const body='x'.repeat(500000);
@@ -402,4 +402,18 @@ test('invalid phone formats are rejected before creating an account; legacy clie
     assert.equal(status,400);
   }
   assert.ok((await f.register('legacy_user')).id);
+});
+
+
+test('answered calls retain a two-minute reconnect window and a busy peer is explicit',async()=>{
+  const f=await fixture();const {a,b,id}=await answeredCall(f);
+  const eve=f.socket(f.eve);
+  await eve.send({type:'call_init',to:f.bob.id,callId:'AABBCCDDEEFF'});
+  assert.equal(eve.messages.at(-1).state,'busy');
+  assert.equal(eve.messages.at(-1).reason,'on_another_call');
+  assert.equal(b.messages.filter(m=>m.type==='incoming_call').length,1,'second call never interrupts existing call');
+  a.ws.close();
+  assert.ok(f.timerDurations().includes(120000),'server keeps the answered call for two minutes');
+  const again=f.socket(f.alice);await again.send({type:'call_alive',callId:id,to:f.bob.id});
+  assert.ok(!f.timerDurations().includes(120000),'returning participant cancels the timeout');
 });

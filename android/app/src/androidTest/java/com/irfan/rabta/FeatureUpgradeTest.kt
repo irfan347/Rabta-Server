@@ -69,6 +69,20 @@ class FeatureUpgradeTest {
         }
         waitFor("Swipe selects reply") {all(a.window.decorView).filterIsInstance<TextView>().any {it.isShown&&it.text.toString().startsWith("Reply to Fixture friend")}}
     }
+    @Test fun jumpToLatestAppearsOnlyAwayFromTheBottom() {
+        val now=System.currentTimeMillis()
+        repeat(45) { i -> db.saveIfNew("FEA80000%04X".format(i),peer,peer,"Fixture friend","Older message $i",now+i,false,"received","text") }
+        val a=chat();var scroll:android.widget.ScrollView?=null;var jump:View?=null
+        waitFor("Chat and jump control load") {
+            jump=all(a.window.decorView).firstOrNull {it.contentDescription=="Jump to latest message"}
+            scroll=all(a.window.decorView).filterIsInstance<android.widget.ScrollView>().firstOrNull {v -> all(v).any {it.tag=="message:FEA80000002C"}}
+            jump!=null&&scroll!=null&&scroll!!.height>0
+        }
+        ui {scroll!!.scrollTo(0,0)}
+        waitFor("Jump is shown for older messages") {jump!!.isShown}
+        ui {jump!!.performClick()}
+        waitFor("Jump disappears at the latest message") {jump!!.visibility==View.GONE}
+    }
     @Test fun leftSwipeHighlightsWithoutReplying() {
         val a=chat();var row:View?=null
         waitFor("Message row loads") {row=all(a.window.decorView).firstOrNull {it.tag=="message:FEA700000003"};row!=null}
