@@ -47,8 +47,10 @@ async function initDb() {
     ALTER TABLE ru_messages ADD COLUMN IF NOT EXISTS group_id TEXT;
     ALTER TABLE ru_messages ADD COLUMN IF NOT EXISTS group_name TEXT;
     CREATE INDEX IF NOT EXISTS idx_rum_to ON ru_messages (to_id, delivered_at);
+    CREATE INDEX IF NOT EXISTS idx_rum_pending_to_id ON ru_messages (to_id,id) WHERE delivered_at IS NULL;
     CREATE TABLE IF NOT EXISTS rg_groups(id TEXT PRIMARY KEY, name TEXT, creator TEXT, members TEXT, created_at BIGINT);
     CREATE TABLE IF NOT EXISTS ru_receipts(msg_id TEXT NOT NULL, by_id TEXT NOT NULL, to_id TEXT NOT NULL, at BIGINT, PRIMARY KEY(msg_id, by_id, to_id));
+    CREATE INDEX IF NOT EXISTS idx_receipts_to_at ON ru_receipts (to_id,at);
   `);
   const rows = (await pool.query('SELECT id,username,pass_hash,name,phone_number,phone_discoverable FROM ru_users')).rows;
   for (const r of rows) memUsers.set(r.id, r);
@@ -221,6 +223,14 @@ function beginCall(from,to,id,video,sdp) {
   if(!/^[0-9A-F]{12}$/.test(id) || !memUsers.has(to) || from===to) return;
   if(features.blocked(from,to)){sendTo(from,{type:'call_state',from:to,callId:id,state:'busy'});return;}
   const all=[...voiceCalls.values(),...videoCalls.values()];
+  // Retried initiation is idempotent; a crossed call never creates a second session or auto-answers.
+  const duplicate=all.find(c=>c.id===id&&c.from===from&&c.to===to&&c.video===video);
+  if(duplicate) { callState(duplicate,duplicate.answered?'accepted':'calling');deliverCall(duplicate);return; }
+  const crossed=all.find(c=>c.from===to&&c.to===from&&!c.answered);
+  if(crossed) {
+    sendTo(from,{type:'call_state',from:to,callId:id,state:'busy',reason:'crossed_call'});
+    deliverCall(crossed);return;
+  }
   if(all.some(c=>[c.from,c.to].includes(from)||[c.from,c.to].includes(to))) { sendTo(from,{type:'call_state',from:to,callId:id,state:'busy',reason:'on_another_call'});return; }
   const call={id,from,to,video,sdp,answered:false,expires:Date.now()+45000,ice:[]};
   call.timer=setTimeout(()=>endCall(call),45000);call.timer.unref?.();

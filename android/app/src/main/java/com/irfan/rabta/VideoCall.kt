@@ -340,7 +340,7 @@ object VideoCall : RabtaEvents.Listener {
             "calling" -> { ringback.stop(); status("Calling…") }
             "ringing" -> { ringback.ringing(); status("Ringing…") }
             "accepted" -> { ringback.stop(); status("Connecting…") }
-            "busy", "on_another_call" -> { outcome = "busy"; toast(if(state=="on_another_call") "Already on another call" else "Call unavailable"); end() }
+            "busy", "on_another_call", "crossed_call" -> { outcome = "busy"; toast(when(state){"crossed_call"->"You both called. Answer the incoming call.";"on_another_call"->"Already on another call";else->"Call unavailable"}); end() }
         }
     }
     override fun onDisconnected() {

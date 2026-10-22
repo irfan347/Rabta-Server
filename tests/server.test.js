@@ -417,3 +417,30 @@ test('answered calls retain a two-minute reconnect window and a busy peer is exp
   const again=f.socket(f.alice);await again.send({type:'call_alive',callId:id,to:f.bob.id});
   assert.ok(!f.timerDurations().includes(120000),'returning participant cancels the timeout');
 });
+
+test('crossed voice and video calls keep the first session and require explicit answer',async()=>{
+  for(const firstVideo of [false,true])for(const secondVideo of [false,true]) {
+    const f=await fixture();const a=f.socket(f.alice),b=f.socket(f.bob);
+    const first='AA1122334455',second='BB1122334455';
+    await a.send({type:firstVideo?'video_offer':'call_init',callId:first,to:f.bob.id,sdp:'first offer'});
+    await b.send({type:secondVideo?'video_offer':'call_init',callId:second,to:f.alice.id,sdp:'second offer'});
+    assert.equal(b.messages.find(m=>m.callId===second&&m.type==='call_state')?.reason,'crossed_call');
+    assert.ok(!a.messages.some(m=>m.type==='incoming_call'||m.type==='video_offer'),'no second session');
+    assert.ok(!a.messages.some(m=>m.type==='video_answer'||m.state==='accepted'),'not auto-answered');
+    await b.send({type:firstVideo?'video_answer':'call_accept',callId:first,to:f.alice.id,sdp:'answer'});
+    assert.ok(a.messages.some(m=>m.callId===first&&(m.type==='video_answer'||m.state==='accepted')),'original is answerable');
+    assert.ok(!a.messages.some(m=>m.type==='call_end'||m.type==='video_end'),'winning call survives');
+  }
+});
+
+test('repeated call initiation does not busy or replace the original session',async()=>{
+  const f=await fixture();const a=f.socket(f.alice),b=f.socket(f.bob);
+  const start={type:'call_init',callId:'CC1122334455',to:f.bob.id};
+  await a.send(start);await a.send(start);
+  assert.ok(!a.messages.some(m=>m.state==='busy'));
+  await b.send({type:'call_accept',callId:start.callId,to:f.alice.id});
+  await a.send(start);
+  assert.equal(a.messages.at(-1).state,'accepted');
+  await a.send({type:'call_audio',callId:start.callId,to:f.bob.id,data:'AAAA'});
+  assert.equal(b.messages.at(-1).type,'call_audio');
+});

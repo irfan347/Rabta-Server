@@ -8,6 +8,9 @@ import android.database.sqlite.SQLiteOpenHelper
 /** [account] is set only by [get]; a Db constructed directly (isolated test fixtures) keeps the legacy file name. */
 class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(ctx, fileFor(account), null, 7) {
 
+    // WAL permits background message writes while the UI reads history; backup exports use a transaction.
+    init { setWriteAheadLoggingEnabled(true) }
+
     /**
      * [peerName] is the name the chat was stored under (their own Rabta name); [nickname] is yours for them, kept on
      * this phone only. Show [shownName]; store and send with [peerName].

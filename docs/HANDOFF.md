@@ -120,3 +120,11 @@ Saif said the emoji fix was done and requested continued work using the new What
 - Full backend suite: 84 passed; Python checks: 19 passed. Initial Android build/unit checks passed; final incremental build log /tmp/rabta-polish-final-build.log. No two-phone call test or device instrumentation run. Copy APK to phone Downloads/rabta after final build, without installing or changing production data.
 
 Final polish build succeeded: 104 JVM tests, device APK and instrumentation APK. Phone and computer copy: Rabta-Test-chat-call-polish-c6efc07.apk, under their respective Downloads/rabta folders. No install or device test performed. Draft PR #29 contains this batch and the emoji fix: https://github.com/irfan347/Rabta-Server/pull/29. No public release; two-minute recovery and precise busy reason need the new server deployed. User should first confirm UI in the isolated test APK, then validate calls on two updated phones after server rollout.
+
+## Storage optimizations and simultaneous calling
+
+User requested engineering/reliability improvements, stack/database explanation, simultaneous-call handling and a complete PR description. Verified Kotlin/native Views, Node/Express/ws, per-account phone SQLite, server PostgreSQL. Live health returned db=true; no database credentials accessed.
+
+Added access-ordered profile cache capped at 128 entries and 8 MiB, preserving photo revalidation/request coalescing and invalidating stale callbacks after clear. Enabled SQLite WAL; no schema bump. Added PostgreSQL pending-message and receipt indexes matching current reads. Existing encrypted manual backup remains; no standby, backup-retention guarantee or automatic failover was provisioned. See docs/ARCHITECTURE_AND_RELIABILITY.md for the actual architecture and multi-instance limits.
+
+Crossed calls: first server-accepted call wins; later outgoing attempt ends with a crossed-call reason and the existing incoming call is redelivered for explicit answer. Works across voice/video combinations; no automatic answering. Duplicate identical call initiation preserves the existing session instead of returning busy. New backend tests pass; two cache unit tests added. Full backend suite now 86, Python 19; final Android log /tmp/rabta-optimization-build.log. PR #29 to be rewritten around full combined scope.

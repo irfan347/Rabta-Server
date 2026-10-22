@@ -136,7 +136,7 @@ object VoiceCall : RabtaEvents.Listener {
     override fun onCallState(fromId: String, callId: String, state: String) {
         if (fromId != peerId || callId != id) return
         when (state) {
-            "busy", "on_another_call" -> { end(false, state); toast(if(state=="on_another_call") "Already on another call" else "Call unavailable") }
+            "busy", "on_another_call", "crossed_call" -> { end(false, state); toast(when(state){"crossed_call"->"You both called. Answer the incoming call.";"on_another_call"->"Already on another call";else->"Call unavailable"}) }
             "accepted" -> { accepted();call?.state(state) }
             // The other phone's connection dropped for a moment, and came back.
             "reconnecting" -> recover()

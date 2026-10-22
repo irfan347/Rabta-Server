@@ -183,7 +183,7 @@ object WsClient {
             "presence" -> RabtaEvents.postPresence(o.optString("id"), o.optBoolean("online"), o.optLong("lastSeen"))
             "read" -> RabtaEvents.postRead(o.optString("msgId"), o.optString("by"))
             "incoming_call" -> if(Privacy.allowCall(Session.context(),o.optString("from"))) RabtaEvents.postIncomingCall(o.optString("from"), o.optString("fromName"),o.optString("callId")) else rejectUnknownCall(o,false)
-            "call_state" -> RabtaEvents.postCallState(o.optString("from"),o.optString("callId"),if(o.optString("state")=="busy"&&o.optString("reason")=="on_another_call") "on_another_call" else o.optString("state"))
+            "call_state" -> RabtaEvents.postCallState(o.optString("from"),o.optString("callId"),if(o.optString("state")=="busy"&&o.optString("reason") in listOf("on_another_call","crossed_call")) o.optString("reason") else o.optString("state"))
             "call_audio" -> RabtaEvents.postCallAudio(o.optString("from"), o.optString("data"),o.optString("callId"))
             "call_end" -> RabtaEvents.postCallEnd(o.optString("from"),o.optString("callId"))
             "video_offer"   -> if(Privacy.allowCall(Session.context(),o.optString("from"))) RabtaEvents.postVideoOffer(o.optString("from"), o.optString("fromName"), o.optString("callId"), o.optString("sdp")) else rejectUnknownCall(o,true)
