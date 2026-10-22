@@ -450,13 +450,16 @@ jobs:
             echo
             echo 'RABTA_PREVIEW_END'
           fi
-          # The chat with stickers and the sticker panel open, on every Android version.
-          if [ -f interface-screenshots/sticker-review.b64 ]; then
-            echo 'RABTA_STICKER_PREVIEW_BEGIN'
-            cat interface-screenshots/sticker-review.b64
-            echo
-            echo 'RABTA_STICKER_PREVIEW_END'
-          fi
+          # Chats with stickers and with large emoji, the panel open, on every Android version.
+          for review in sticker emoji; do
+            if [ -f "interface-screenshots/$review-review.b64" ]; then
+              name=$(echo "$review" | tr a-z A-Z)
+              echo "RABTA_${name}_PREVIEW_BEGIN"
+              cat "interface-screenshots/$review-review.b64"
+              echo
+              echo "RABTA_${name}_PREVIEW_END"
+            fi
+          done
       - name: Upload interface screenshots
         if: always()
         uses: actions/upload-artifact@v4
