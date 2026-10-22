@@ -1,4 +1,4 @@
 {
   "minVersionCode": 0,
-  "notes": "Large emoji you send, or that arrive while a chat is open, now pop in with small copies floating up; tap one to see it again. Settings → Animated emoji turns this off."
+  "notes": "Large emoji in chat show whole again instead of cut in half, and replies with an emoji keep their quote readable. Large emoji you send, or that arrive while a chat is open, pop in with small copies floating up; tap one to see it again (Settings → Animated emoji turns this off)."
 }

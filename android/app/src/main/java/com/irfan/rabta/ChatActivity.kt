@@ -793,7 +793,18 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
                 val lp=getChildAt(i).layoutParams
                 if(lp.width>contentWidth)lp.width=contentWidth
             }
-            super.onMeasure(View.MeasureSpec.makeMeasureSpec(limit,View.MeasureSpec.AT_MOST),heightMeasureSpec)
+            // When some children fill the width and others don't, LinearLayout sizes the column by the others alone, so a quote
+            // or a sender's name above the time line was squeezed to the time's width. Such a bubble is as wide as its widest child.
+            val shown=(0 until childCount).map { getChildAt(it) }.filter { it.visibility!=View.GONE }
+            val filling=shown.count { it.layoutParams.width==ViewGroup.LayoutParams.MATCH_PARENT }
+            if(filling==0||filling==shown.size) { super.onMeasure(View.MeasureSpec.makeMeasureSpec(limit,View.MeasureSpec.AT_MOST),heightMeasureSpec);return }
+            val widest=shown.maxOf { child ->
+                val lp=child.layoutParams as ViewGroup.MarginLayoutParams
+                val room=(contentWidth-lp.leftMargin-lp.rightMargin).coerceAtLeast(0)
+                child.measure(if(lp.width>=0) View.MeasureSpec.makeMeasureSpec(lp.width,View.MeasureSpec.EXACTLY) else View.MeasureSpec.makeMeasureSpec(room,View.MeasureSpec.AT_MOST),View.MeasureSpec.makeMeasureSpec(0,View.MeasureSpec.UNSPECIFIED))
+                child.measuredWidth+lp.leftMargin+lp.rightMargin
+            }
+            super.onMeasure(View.MeasureSpec.makeMeasureSpec(minOf(limit,widest+paddingLeft+paddingRight),View.MeasureSpec.EXACTLY),heightMeasureSpec)
         }
     }.apply {
         orientation=LinearLayout.VERTICAL
@@ -925,6 +936,9 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     /** Messages whose large emoji celebrates when its bubble appears: sent from here or arrived while the chat is open. */
     private val celebrate=mutableSetOf<String>()
     private fun largeEmoji(text:String,id:String)=RabtaUi.text(this,text,if(EmojiMotion.count(text)==1) 54f else 42f).apply {
+        // As wide as its emoji. Filling the bubble, it was cut down to the time line's width and showed half; nor does a wider
+        // quote above stretch it, so it pops, and its copies rise, from the emoji itself.
+        layoutParams=LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT)
         includeFontPadding=true;setPadding(dp(12),dp(10),dp(12),dp(10))
         setLineSpacing(0f,1f);if(android.os.Build.VERSION.SDK_INT>=28) setFallbackLineSpacing(true)
         // Tap to see it again.
