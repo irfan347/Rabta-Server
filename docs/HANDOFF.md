@@ -97,3 +97,9 @@ Read existing adb crash buffer only, without launching apps or running tests. On
 ## Ongoing GitHub sync authorization
 
 Saif explicitly requested pushing the current code and keeping GitHub updated as development continues (24 percent session budget left). Push completed source batches to `feat/chat-privacy-modes`, without merging main or triggering production releases. Testing remains deferred until a larger batch is ready. Keep reporting untested changes separately from the earlier verified checkpoint.
+
+## Emoji-first hotfix after phone feedback
+
+User prioritizes clipped chat emoji before all other features. Created fix/emoji-clipping from released main b0b6f7b (v2.0.345). All message-edit/delete and call UI work remains preserved on feat/message-edit-delete. Adopted only PR #28's layout fix: largeEmoji WRAP_CONTENT and mixed full-width/wrap-content bubble children measured by widest content. Added EXACTLY guard to avoid shrinking a second measurement. No floating-animation changes included. Existing panel scroll fix retained. EmojiClippingTest is the glyph containment and panel visibility regression from PR #28, without its animation test or screenshot capture.
+
+Phone reconnected as 7a2662bf; installed production version verified 2.0.345. No com.irfan.rabta.testing package found by dumpsys. Copy the isolated Rabta Test APK to phone Downloads/rabta; do not replace production or clear any data. Physical visual confirmation remains pending. Python checks: 19 passed; Android build in /tmp/rabta-emoji-fix-build.log. Do not resume other feature work before addressing emoji acceptance.

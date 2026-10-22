@@ -784,13 +784,29 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
 
     private fun bubbleSurface(mine:Boolean,tail:Boolean)=object:LinearLayout(this) {
         override fun onMeasure(widthMeasureSpec:Int,heightMeasureSpec:Int) {
+            // LinearLayout may measure this bubble again with an exact width. Do not apply the cap twice.
+            if(View.MeasureSpec.getMode(widthMeasureSpec)==View.MeasureSpec.EXACTLY) {
+                super.onMeasure(widthMeasureSpec,heightMeasureSpec)
+                return
+            }
             val limit=minOf(dp(420),(View.MeasureSpec.getSize(widthMeasureSpec)*0.86f).toInt())
             val contentWidth=(limit-paddingLeft-paddingRight).coerceAtLeast(0)
             for(i in 0 until childCount) {
                 val lp=getChildAt(i).layoutParams
                 if(lp.width>contentWidth)lp.width=contentWidth
             }
-            super.onMeasure(View.MeasureSpec.makeMeasureSpec(limit,View.MeasureSpec.AT_MOST),heightMeasureSpec)
+            // When some children fill the width and others don't, LinearLayout sizes the column by the others alone, so a quote
+            // or a sender's name above the time line was squeezed to the time's width. Such a bubble is as wide as its widest child.
+            val shown=(0 until childCount).map { getChildAt(it) }.filter { it.visibility!=View.GONE }
+            val filling=shown.count { it.layoutParams.width==ViewGroup.LayoutParams.MATCH_PARENT }
+            if(filling==0||filling==shown.size) { super.onMeasure(View.MeasureSpec.makeMeasureSpec(limit,View.MeasureSpec.AT_MOST),heightMeasureSpec);return }
+            val widest=shown.maxOf { child ->
+                val lp=child.layoutParams as ViewGroup.MarginLayoutParams
+                val room=(contentWidth-lp.leftMargin-lp.rightMargin).coerceAtLeast(0)
+                child.measure(if(lp.width>=0) View.MeasureSpec.makeMeasureSpec(lp.width,View.MeasureSpec.EXACTLY) else View.MeasureSpec.makeMeasureSpec(room,View.MeasureSpec.AT_MOST),View.MeasureSpec.makeMeasureSpec(0,View.MeasureSpec.UNSPECIFIED))
+                child.measuredWidth+lp.leftMargin+lp.rightMargin
+            }
+            super.onMeasure(View.MeasureSpec.makeMeasureSpec(minOf(limit,widest+paddingLeft+paddingRight),View.MeasureSpec.EXACTLY),heightMeasureSpec)
         }
     }.apply {
         orientation=LinearLayout.VERTICAL
@@ -920,6 +936,9 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
                 }.show()
     }
     private fun largeEmoji(text:String)=RabtaUi.text(this,text,if(EmojiMotion.count(text)==1) 54f else 42f).apply {
+        // A MATCH_PARENT child is ignored when the vertical bubble chooses its wrap-content width;
+        // the timestamp then determines the width and cuts the emoji in half.
+        layoutParams=LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT)
         includeFontPadding=true;setPadding(dp(12),dp(10),dp(12),dp(10))
         setLineSpacing(0f,1f);if(android.os.Build.VERSION.SDK_INT>=28) setFallbackLineSpacing(true)
         addOnAttachStateChangeListener(object:View.OnAttachStateChangeListener {
