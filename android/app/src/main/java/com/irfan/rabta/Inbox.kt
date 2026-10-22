@@ -22,13 +22,15 @@ object Inbox {
                 if(msgType=="reaction") { val o=org.json.JSONObject(body);val target=o.getString("target");if(d.conversationForMessage(target)==convId){d.react(target,fromId,o.optString("emoji").take(16));RabtaEvents.postHistoryChanged(convId)};stored();return@execute }
                 if(d.hasMessage(msgId)) { stored(); return@execute }
                 if(!isGroup && d.contact(fromId)==null && fromId!=Session.id) Privacy.markRequest(context,fromId)
-                val localBody=Attachments.receive(context,body,msgType)
+                val localBody=if(d.hasPendingDeletion(msgId,fromId,convId)) "Message deleted" else Attachments.receive(context,body,msgType)
                 val isNew = d.saveIfNew(msgId, convId, fromId, fromName, localBody, sentAt, false, "received", msgType)
                 if (isNew) {
-                    val preview = when (msgType) { "image" -> "📷 Photo"; "voice" -> VoiceAudio.label(context, localBody).let { if (it.isEmpty()) "🎤 Voice message" else "🎤 Voice message · $it" }; "file" -> "File"; "video" -> "🎥 Video"; "sticker" -> "Sticker"; "rich" -> runCatching { org.json.JSONObject(body).getString("text") }.getOrDefault("Message"); else -> body }
+                    val effective=d.message(msgId)?:return@execute
+                    val shownBody=effective.body;val shownType=effective.msgType
+                    val preview = when (shownType) { "image" -> "📷 Photo"; "voice" -> VoiceAudio.label(context, shownBody).let { if (it.isEmpty()) "🎤 Voice message" else "🎤 Voice message · $it" }; "file" -> "File"; "video" -> "🎥 Video"; "sticker" -> "Sticker"; "rich" -> runCatching { org.json.JSONObject(shownBody).getString("text") }.getOrDefault("Message"); else -> shownBody }
                     val showBadge = ChatActivity.openPeer != convId
                     d.upsertConversation(convId, convName, preview, sentAt, showBadge, isGroup)
-                    RabtaEvents.postMessage(fromId, fromName, msgId, localBody, sentAt, msgType, if (isGroup) convId else "")
+                    if(shownType=="deleted")RabtaEvents.postHistoryChanged(convId) else RabtaEvents.postMessage(fromId, fromName, msgId, shownBody, sentAt, shownType, if (isGroup) convId else "")
                 }
                 stored()
             } catch (_: Exception) {}

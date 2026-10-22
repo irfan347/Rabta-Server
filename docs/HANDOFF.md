@@ -4,7 +4,7 @@
 
 ## Scope and authorization
 
-Saif requested messaging gestures/reactions/animated emoji, status reactions, phone collection (explicitly without SMS), Easy/Standard/Developer modes, capture protection, individual chat locking, wallpapers, all-chat and per-chat stars, phone-contact discovery, live username search, unknown-message/call protection, improved voice/video controls, the frozen call-bar timer fix, main-tab swipes, mesh auto-switch preservation, and Render optimization. User has warned only 8% of the session usage remains: finish essential verification, avoid optional expansion.
+Saif requested messaging gestures/reactions/animated emoji, status reactions, phone collection (explicitly without SMS), Easy/Standard/Developer modes, capture protection, individual chat locking, wallpapers, all-chat and per-chat stars, phone-contact discovery, live username search, unknown-message/call protection, improved voice/video controls, the frozen call-bar timer fix, main-tab swipes, mesh auto-switch preservation, and Render optimization. Latest preference: accumulate meaningful batches, verify them together, and continuously push completed source batches to feature branches.
 
 ## Implementation
 
@@ -97,3 +97,28 @@ Read existing adb crash buffer only, without launching apps or running tests. On
 ## Ongoing GitHub sync authorization
 
 Saif explicitly requested pushing the current code and keeping GitHub updated as development continues (24 percent session budget left). Push completed source batches to `feat/chat-privacy-modes`, without merging main or triggering production releases. Testing remains deferred until a larger batch is ready. Keep reporting untested changes separately from the earlier verified checkpoint.
+
+## Oct 22: released baseline and next feature batch
+
+Verified PR #25 and Claude PR #26 were already merged. Main `c34bd3f` successfully published 2.0.341; public update manifest and APK SHA256 matched. Render health reported phone/contact/account-visibility capabilities. User confirms 2.0.341 installed and working; released APK copied to PHONE Downloads/rabta. Do not confuse local test version 2.0.0-test with public version 2.0.341.
+
+New branch `feat/message-edit-delete` starts at c34bd3f. User explicitly asked to remember all progress and preferences; an ad hoc memory note was saved.
+
+### Latest confirmed UI feedback and implementation
+- Emoji clipping is in CHAT BUBBLES, not the picker. Bubble bottom sometimes becomes FLAT/CUT OFF (not just a missing tail). Bubble's custom measurement previously reapplied its 86-percent width cap even for the parent's exact second measurement, which can reflow content under an already-fixed height. Respect EXACTLY widths now. Large emoji get wrap-content sizing, measured minimum width and extra glyph-height space. Device regression added; actual visual result still needs phone confirmation.
+- Long-press now selects a message and opens a six-emoji reaction popup anchored above it. Removed the dedicated React toolbar/menu action. Left swipe still selects, right replies. Popup dismisses on leaving; reaction icons have fixed visual size with accessible labels.
+- Header call icons now larger with tinted button backgrounds. Voice controls 76dp, end control 88x72dp; larger icons. Video controls 64dp with separate rows in portrait and one row in landscape, enlarged icons and labels. No phone calling session run.
+
+### Message editing/deletion implementation
+- New message-changes.js records sender, original chat/type and recipient set BEFORE server delivery; record is saved in existing rf_data with no original message body. Only the sender may request changes. Edit window 15 minutes; delete-for-everyone 48 hours, using server acceptance time. Originals before deployment or nearby-only messages are not eligible.
+- Durable per-recipient changes remain for up to 30 days. WebSocket only signals availability; authenticated REST fetch/ack stores changes locally before acknowledging. Reconnect/heartbeat fetch catches missed notifications. Latest revision and operation UUID protect retries and stale acknowledgments. Pending edit text removed once everyone acknowledges; account deletion removes related data. Existing online and Nearby protocols preserved.
+- SQLite schema 8 adds edited_at and message_changes without dropping data. Author/chat checks, revision order and permanent deletion markers handle changes arriving before originals and prevent late edits from reviving deleted messages. Inbox uses effective edited/deleted content for previews and skips attachment processing for pending deletions.
+- Select one own text/reply, then More > Edit message. Edited label added. Single own-message deletion dialog offers Delete for everyone within its window. Local Delete for me remains. Updated apps needed; saved/forwarded copies cannot be erased. Existing backup format unchanged: explicit old backups/copies are not promised remote revocation.
+- Backend fixtures updated for new module import; six focused backend tests and four Android database instrumentation tests added. Emoji/bubble device regression added. Core server suite passed 89; Python checks passed 19. Final build/unit-test result pending below. No physical device tests or production deployment for this branch.
+- Pending: disappearing messages, view-once media, broader visual acceptance, true two-phone call/mesh testing. No claim those are complete.
+
+## Oct 22: concurrent work inspection
+
+User asked to inspect the friend's latest work before continuing. Remote main is b0b6f7b (merged PR #27), released publicly as v2.0.345 on 2026-10-22. PR #27 keeps latest messages visible when the keyboard, reply bar or sticker panel shrinks the chat; adds StickerBubbleTest and CI coverage. Open PR #28 at ab64026b changes largeEmoji and bubbleSurface measurement, adds animation and tests. It overlaps our local emoji fixes: review and reconcile that PR before merging this feature branch into main. Do not silently overwrite either change or publish a competing emoji fix.
+
+Current local batch: Android unit tests, device APK and instrumentation APK build succeeded (log /tmp/rabta-changes-build.log); backend 89 and Python 19 checks passed. No phone tests or visual confirmation. Preserving batch as a feature-branch checkpoint, then integrating released main. PR #28 remains separate and unmerged.

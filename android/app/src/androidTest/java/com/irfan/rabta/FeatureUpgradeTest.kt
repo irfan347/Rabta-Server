@@ -69,6 +69,23 @@ class FeatureUpgradeTest {
         }
         waitFor("Swipe selects reply") {all(a.window.decorView).filterIsInstance<TextView>().any {it.isShown&&it.text.toString().startsWith("Reply to Fixture friend")}}
     }
+    @Test fun largeEmojiBubbleHasSpaceForGlyphsAndBottomEdge() {
+        val emoji="😀😀😀"
+        db.writableDatabase.execSQL("UPDATE messages SET body=? WHERE id=?",arrayOf(emoji,"FEA700000003"))
+        val a=chat();var glyph:TextView?=null;var bubble:View?=null
+        waitFor("Emoji bubble lays out") {
+            glyph=all(a.window.decorView).filterIsInstance<TextView>().firstOrNull {it.text.toString()==emoji}
+            bubble=all(a.window.decorView).firstOrNull {it.tag=="bubble:FEA700000003"}
+            glyph!=null&&glyph!!.width>0&&bubble!=null
+        }
+        ui {
+            val text=glyph!!
+            assertTrue("Whole emoji run fits",text.width>=text.paint.measureText(emoji)+text.paddingLeft+text.paddingRight-1)
+            assertTrue("Emoji baseline has bottom space",text.height>=text.textSize*1.6f+text.paddingTop+text.paddingBottom-1)
+            val parent=bubble as ViewGroup
+            for(i in 0 until parent.childCount)assertTrue("Bubble does not cut off its children",parent.getChildAt(i).bottom<=parent.height-parent.paddingBottom)
+        }
+    }
     @Test fun leftSwipeHighlightsWithoutReplying() {
         val a=chat();var row:View?=null
         waitFor("Message row loads") {row=all(a.window.decorView).firstOrNull {it.tag=="message:FEA700000003"};row!=null}

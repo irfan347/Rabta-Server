@@ -62,6 +62,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     private lateinit var replyBar:LinearLayout
     private lateinit var replyPreview:TextView
     private lateinit var offlineBanner:TextView
+    private var reactionPopup:android.widget.PopupWindow?=null
     private var draftReplyId:String?=null
     private var draftAccount=""
     private val saveDraftTask=Runnable { saveDraft() }
@@ -253,6 +254,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         if (!isGroup && !self) { WsClient.sendRead(peerId, "all"); WsClient.watch(peerId) }
     }
     override fun onPause() {
+        reactionPopup?.dismiss();reactionPopup=null
         uiHandler.removeCallbacks(saveDraftTask);saveDraft()
         // A voice message playing goes on, as in WhatsApp; the bar in the chats shows it.
         super.onPause()
@@ -362,8 +364,8 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         subRow.addView(statusTv); subRow.addView(typingTv)
         hdrCol.addView(subRow)
         hdr.addView(hdrCol, LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
-        if (!isGroup && !self) hdr.addView(headerAction("phone","Voice call") { startCall(true) })
-        if (!isGroup && !self) hdr.addView(headerAction("video","Video call") { startVideoCall() })
+        if (!isGroup && !self) hdr.addView(callHeaderAction("phone","Voice call") { startCall(true) })
+        if (!isGroup && !self) hdr.addView(callHeaderAction("video","Video call") { startVideoCall() })
         if(!isGroup) {
             hdrCol.setOnClickListener { openContactProfile() }
             headerAvatar.setOnClickListener { openContactProfile() }
@@ -630,17 +632,22 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     // Shared call controls
     private fun callBtn(icon: String, label: String, onClick: (TextView) -> Unit): LinearLayout {
         val col = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; gravity=Gravity.CENTER }
-        val btn = TextView(this).apply { UiIcons.set(this,UiIcons.fromSymbol(icon) ?: "phone",Color.WHITE,26,label); textSize=24f; gravity=Gravity.CENTER; background=RabtaUi.ripple(this@ChatActivity,0xFF2C3B4D.toInt(),20); isClickable=true;isFocusable=true }
+        val btn = TextView(this).apply { UiIcons.set(this,UiIcons.fromSymbol(icon) ?: "phone",Color.WHITE,32,label); textSize=24f; gravity=Gravity.CENTER; background=RabtaUi.ripple(this@ChatActivity,0xFF2C3B4D.toInt(),20); isClickable=true;isFocusable=true }
         btn.setOnClickListener { onClick(btn) }
-        col.addView(btn, LinearLayout.LayoutParams(dp(60),dp(60)))
+        col.addView(btn, LinearLayout.LayoutParams(dp(76),dp(76)))
         col.addView(TextView(this).apply { this.text=label; textSize=12f; setTextColor(0xCCFFFFFF.toInt()); gravity=Gravity.CENTER; setPadding(0,dp(6),0,0) })
         return col
     }
     private fun callBtnRed(icon: String, label: String, onClick: () -> Unit): LinearLayout {
         val col = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; gravity=Gravity.CENTER }
-        col.addView(TextView(this).apply { UiIcons.set(this,"end",Color.WHITE,28,label); textSize=24f; gravity=Gravity.CENTER; background=oval(RED); isClickable=true; setOnClickListener{onClick()} }, LinearLayout.LayoutParams(dp(68),dp(68)))
+        col.addView(TextView(this).apply { UiIcons.set(this,"end",Color.WHITE,34,label); textSize=24f; gravity=Gravity.CENTER; background=oval(RED); isClickable=true; setOnClickListener{onClick()} }, LinearLayout.LayoutParams(dp(88),dp(72)))
         col.addView(TextView(this).apply { this.text=label; textSize=12f; setTextColor(0xCCFFFFFF.toInt()); gravity=Gravity.CENTER; setPadding(0,dp(6),0,0) })
         return col
+    }
+    private fun callHeaderAction(icon:String,label:String,action:()->Unit)=UiIcons.image(this,icon,AppTheme.accent(this),28,label).apply {
+        isClickable=true;isFocusable=true;setOnClickListener {action()}
+        background=RabtaUi.ripple(this@ChatActivity,AppTheme.sent(this@ChatActivity),16)
+        layoutParams=LinearLayout.LayoutParams(dp(48),dp(48)).apply {marginStart=dp(4)}
     }
     /** Header actions share one size and sit exactly centred: drawn icons, not text glyphs resting on a baseline. */
     private fun headerAction(icon: String, label: String, onClick: () -> Unit) = UiIcons.image(this,icon,TXT,24,L.t(this,label)).apply {
@@ -778,13 +785,15 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
 
     private fun bubbleSurface(mine:Boolean,tail:Boolean)=object:LinearLayout(this) {
         override fun onMeasure(widthMeasureSpec:Int,heightMeasureSpec:Int) {
-            val limit=minOf(dp(420),(View.MeasureSpec.getSize(widthMeasureSpec)*0.86f).toInt())
+            val size=View.MeasureSpec.getSize(widthMeasureSpec)
+            // A parent's exact second measurement must not shrink the bubble a second time.
+            val limit=if(View.MeasureSpec.getMode(widthMeasureSpec)==View.MeasureSpec.EXACTLY) size else minOf(dp(420),(size*0.86f).toInt())
             val contentWidth=(limit-paddingLeft-paddingRight).coerceAtLeast(0)
             for(i in 0 until childCount) {
                 val lp=getChildAt(i).layoutParams
                 if(lp.width>contentWidth)lp.width=contentWidth
             }
-            super.onMeasure(View.MeasureSpec.makeMeasureSpec(limit,View.MeasureSpec.AT_MOST),heightMeasureSpec)
+            super.onMeasure(View.MeasureSpec.makeMeasureSpec(limit,if(View.MeasureSpec.getMode(widthMeasureSpec)==View.MeasureSpec.EXACTLY) View.MeasureSpec.EXACTLY else View.MeasureSpec.AT_MOST),heightMeasureSpec)
         }
     }.apply {
         orientation=LinearLayout.VERTICAL
@@ -884,7 +893,12 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         // Only the bubble and what is tappable in it listen: a held view takes every touch, so a picture given a listener
         // would keep taps from the photo or video it is part of.
         fun actions(v:View) {
-            if(v===bubble||v.isClickable) v.setOnLongClickListener { it.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);toggleSelected(m.id);true }
+            if(v===bubble||v.isClickable) v.setOnLongClickListener {
+                it.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                clearSelection();toggleSelected(m.id);reactionPopup?.dismiss()
+                if(m.msgType!="deleted"&&m.body!="Message deleted")reactionPopup=MessageActions.react(this,m,isGroup,bubble) { clearSelection();loadHistory() }
+                true
+            }
             if(v is ViewGroup)for(i in 0 until v.childCount)actions(v.getChildAt(i))
         }
         actions(bubble)
@@ -914,7 +928,11 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
                 }.show()
     }
     private fun largeEmoji(text:String)=RabtaUi.text(this,text,if(EmojiMotion.count(text)==1) 54f else 42f).apply {
-        includeFontPadding=true;setPadding(dp(12),dp(10),dp(12),dp(10))
+        includeFontPadding=true;setPadding(dp(16),dp(12),dp(16),dp(12))
+        layoutParams=LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT)
+        minWidth=kotlin.math.ceil(paint.measureText(text)+paddingLeft+paddingRight).toInt()
+        minHeight=kotlin.math.ceil(textSize*1.6f+paddingTop+paddingBottom).toInt()
+        gravity=Gravity.CENTER
         setLineSpacing(0f,1f);if(android.os.Build.VERSION.SDK_INT>=28) setFallbackLineSpacing(true)
         addOnAttachStateChangeListener(object:View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(v:View) { EmojiMotion.play(v) }
@@ -993,7 +1011,6 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         starAction=headerAction("star","Star") { selectionAction("star") }.also { addView(it) }
         addView(headerAction("trash","Delete") { selectionAction("delete") })
         addView(headerAction("share_forward","Forward") { selectionAction("forward") })
-        addView(headerAction("emoji","React") { shownMessages.values.filter { it.id in selectedIds }.singleOrNull()?.let { m -> clearSelection();MessageActions.react(this@ChatActivity,m,isGroup) { loadHistory() } } })
         addView(headerAction("more","More options") { selectionAction("more") })
     }
     private fun toggleSelected(id:String) {
@@ -1035,7 +1052,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             "forward" -> MessageActions.forward(this,chosen) { clearSelection() }
             "more" -> {
                 val items=mutableListOf<Pair<String,()->Unit>>()
-                chosen.singleOrNull()?.let { m -> items+=L.t(this,"React") to { clearSelection();MessageActions.react(this,m,isGroup) { loadHistory() } } }
+                chosen.singleOrNull()?.takeIf { MessageActions.canEdit(it) }?.let {m -> items+="Edit message" to {clearSelection();MessageActions.edit(this,m) {loadHistory()}}}
                 items+=L.t(this,"Copy") to { MessageActions.copy(this,chosen);clearSelection() }
                 if(chosen.any { Transfers.progress.containsKey(it.id) }) items+=L.t(this,"Cancel transfer") to { chosen.forEach { Transfers.cancel(it.id) };clearSelection() }
                 if(selectedIds.size<shownMessages.size) items+=L.t(this,"Select all") to { selectedIds.addAll(shownMessages.keys);shownMessages.keys.forEach { paintSelection(it) };updateSelection() }
@@ -1104,7 +1121,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     private fun fillFooter(view:TextView,m:Db.Message,onMedia:Boolean) {
         val plain=if(onMedia) Color.WHITE else SUB
         view.setTextColor(plain)
-        val line=android.text.SpannableStringBuilder(fmtTime(m.sentAt))
+        val line=android.text.SpannableStringBuilder((if(m.editedAt>0) "Edited · " else "")+fmtTime(m.sentAt))
         if(m.mine) {
             val color=when { m.status==MessageDelivery.READ -> AppTheme.readTick(this); MessageDelivery.retryable(m.status) -> AppTheme.error(this); else -> plain }
             line.append(" ").append(UiIcons.inline(this,MessageDelivery.tickIcon(m.status),color,16))
@@ -1341,9 +1358,9 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     }
     private fun updateCallControls() {
         val muted=VoiceCall.muted;val speaker=VoiceCall.speaker
-        UiIcons.set(muteControl,if(muted) "muted" else "mic",Color.WHITE,26,label=if(muted) "Unmute microphone" else "Mute microphone")
+        UiIcons.set(muteControl,if(muted) "muted" else "mic",Color.WHITE,32,label=if(muted) "Unmute microphone" else "Mute microphone")
         muteControl.background=RabtaUi.ripple(this,if(muted) 0xFF256D5C.toInt() else 0xFF2C3B4D.toInt(),20); muteControl.isSelected=muted
-        UiIcons.set(speakerControl,"speaker",Color.WHITE,26,label=if(speaker) "Speaker on" else "Speaker off")
+        UiIcons.set(speakerControl,"speaker",Color.WHITE,32,label=if(speaker) "Speaker on" else "Speaker off")
         speakerControl.background=RabtaUi.ripple(this,if(speaker) 0xFF256D5C.toInt() else 0xFF2C3B4D.toInt(),20); speakerControl.isSelected=speaker
     }
     /** The call screen for this chat's call; the chat stays underneath. */

@@ -377,6 +377,8 @@ wss.on('connection', (ws, req) => {
       if (!memUsers.has(to)) { ws.send(JSON.stringify({type:'ack',id:msgId,status:'error'})); return; }
       if(features.blocked(userId,to)){ws.send(JSON.stringify({type:"ack",id:msgId,status:"error"}));return;}
       try { await features.grant(body,userId,to); } catch(_) { ws.send(JSON.stringify({type:"ack",id:msgId,status:"error"}));return; }
+      try { await messageChanges.record({id:msgId,from:userId,to,type:msgType,recipients:[to]}); }
+      catch (_) {ws.send(JSON.stringify({type:'ack',id:msgId,status:'error'}));return;}
       const sentAt = Number(t) || Date.now();
       if (await sendFrame(online.get(to), { type: 'msg', id: msgId, from: userId, fromName: user.name, body, msgType, t: sentAt })) {
         ws.send(JSON.stringify({ type: 'ack', id: msgId, status: 'delivered' }));
@@ -435,6 +437,8 @@ wss.on('connection', (ws, req) => {
     } else if (msg.type === 'group_msg') {
       const g = groups.get(String(msg.to||'').toUpperCase());
       if (!g || !g.members.has(userId)) { ws.send(JSON.stringify({ type:'ack', id:msg.id, status:'error' })); return; }
+      try { await messageChanges.record({id:msg.id,from:userId,to:g.id,type:msg.msgType||'text',group:true,recipients:[...g.members].filter(mid=>mid!==userId&&!features.blocked(userId,mid))}); }
+      catch (_) {ws.send(JSON.stringify({type:'ack',id:msg.id,status:'error'}));return;}
       const now = Date.now();
       const out = { type:'group_msg', id:msg.id, groupId:g.id, groupName:g.name, from:userId, fromName:user.name, body:msg.body, msgType:msg.msgType||'text', t:now };
       for (const mid of g.members) {
@@ -485,7 +489,7 @@ async function tidy() {
     await pool.query('UPDATE ru_messages SET body=NULL WHERE delivered_at IS NOT NULL AND body IS NOT NULL');
     await pool.query('DELETE FROM ru_messages WHERE body IS NULL AND delivered_at < $1', [Date.now() - MARKER_MS]);
   }
-  await features.tidy();
+  await features.tidy(); await messageChanges.tidy();
 }
 setInterval(() => tidy().catch(e => console.error('Clean-up failed:', e.message)), TIDY_MS).unref?.();
 
@@ -533,7 +537,7 @@ async function deleteAccount(userId) {
     await pool.query('DELETE FROM ru_receipts WHERE by_id=$1 OR to_id=$1', [userId]);
     for (const g of groups.values()) if (g.members.has(userId)) await pool.query('UPDATE rg_groups SET members=$1 WHERE id=$2', [[...g.members].filter(m => m !== userId).join(','), g.id]);
   }
-  await features.forget(userId); await push.forgetUser(userId); await account.forget(userId);
+  await messageChanges.forget(userId); await features.forget(userId); await push.forgetUser(userId); await account.forget(userId);
   if (pool) await pool.query('DELETE FROM ru_users WHERE id=$1', [userId]);
   memUsers.delete(userId); loginFails.delete(user.username);
   for (const g of groups.values()) g.members.delete(userId);
@@ -608,12 +612,13 @@ const b=await r.json().catch(()=>({}));out.textContent=r.ok?'Your Rabta account 
 catch(_){out.textContent='No connection, please try again';}});</script>
 ${CONTACT ? `<p>Need help? <a href="mailto:${CONTACT}">${CONTACT}</a></p>` : ''}`)));
 
-app.get('/health', (req, res) => res.json({ ok: true, capabilities: ['phone-collection','contact-discovery','account-visibility'], db: !!pool, online: online.size, users: memUsers.size, push: push.enabled(), ...push.stats?.() }));
+app.get('/health', (req, res) => res.json({ ok: true, capabilities: ['phone-collection','contact-discovery','account-visibility','message-changes'], db: !!pool, online: online.size, users: memUsers.size, push: push.enabled(), ...push.stats?.() }));
 
 const features=require('./features')({app,authId,users:memUsers,getPool:()=>pool,onPrivacyChanged:presenceChanged});
+const messageChanges=require('./message-changes')({app,authId,users:memUsers,getPool:()=>pool,blocked:features.blocked,notify:id=>sendTo(id,{type:'message_changes'})});
 require('./discovery')({app,authId,users:memUsers,blocked:features.blocked,getPool:()=>pool});
 const push=require('./push')({app,authId,getPool:()=>pool});
 const PORT = process.env.PORT || 3000;
-initDb().then(()=>features.init()).then(()=>push.init()).then(() => server.listen(PORT, () => console.log('Rabta server on', PORT)))
+initDb().then(()=>features.init()).then(()=>messageChanges.init()).then(()=>push.init()).then(() => server.listen(PORT, () => console.log('Rabta server on', PORT)))
   .catch(e => { console.error('Database initialization failed:', e.message); process.exitCode=1; });
 

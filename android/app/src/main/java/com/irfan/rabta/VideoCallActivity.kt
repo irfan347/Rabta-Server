@@ -247,12 +247,12 @@ class VideoCallActivity : ThemedActivity(), CallWatcher {
         root.addView(effectsBtn, FrameLayout.LayoutParams(dp(44), dp(44)).apply { gravity = Gravity.TOP or Gravity.END; topMargin = dp(226); marginEnd = dp(49) })
         effects = buildEffects()
         root.addView(effects, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            gravity = Gravity.BOTTOM; bottomMargin = dp(116); marginStart = dp(8); marginEnd = dp(8) })
+            gravity = Gravity.BOTTOM; bottomMargin = dp(if(resources.configuration.orientation==android.content.res.Configuration.ORIENTATION_LANDSCAPE) 128 else 224); marginStart = dp(8); marginEnd = dp(8) })
 
         // Controls
-        controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER;setPadding(dp(6),dp(14),dp(6),dp(12));background=RabtaUi.shape(this@VideoCallActivity,0xEE111B27.toInt(),28,0xFF334155.toInt()) }
+        controls = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER;setPadding(dp(6),dp(14),dp(6),dp(12));background=RabtaUi.shape(this@VideoCallActivity,0xEE111B27.toInt(),28,0xFF334155.toInt()) }
         fun cBtn(icon: String, bg: Int, act: () -> Unit) = TextView(this).apply {
-            UiIcons.set(this,UiIcons.fromSymbol(icon) ?: icon,Color.WHITE,24); textSize = 24f; gravity = Gravity.CENTER; background = oval(bg)
+            UiIcons.set(this,UiIcons.fromSymbol(icon) ?: icon,Color.WHITE,30); textSize = 30f; gravity = Gravity.CENTER; background = oval(bg)
             isClickable = true; isFocusable = true; setOnClickListener { act() }
         }
         muteBtn = cBtn("🎤", 0xEE172230.toInt()) { VideoCall.toggleMute() }
@@ -260,11 +260,21 @@ class VideoCallActivity : ThemedActivity(), CallWatcher {
         val flipBtn = cBtn("🔄", 0xEE172230.toInt()) { VideoCall.flipCamera(this) }
         speakerBtn = cBtn("🔊", AppTheme.ACCENT) { VideoCall.toggleSpeaker() }
         shareBtn = cBtn("screen_share", 0xEE172230.toInt()) { toggleShare() }
-        listOf(muteBtn to "Mute", flipBtn to "Flip", shareBtn to "Share", speakerBtn to "Speaker", endBtn to "End").forEach { (button,label) ->
-            val cell=LinearLayout(this).apply {orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER}
-            cell.addView(button,LinearLayout.LayoutParams(dp(48),dp(48)))
-            cell.addView(RabtaUi.text(this,label,11f,color=Color.WHITE).apply {gravity=Gravity.CENTER;setPadding(0,dp(6),0,0)})
-            controls.addView(cell,LinearLayout.LayoutParams(0,-2,1f))
+        fun controlRow(items:List<Pair<TextView,String>>) {
+            val row=LinearLayout(this).apply {gravity=Gravity.CENTER;setPadding(0,dp(4),0,dp(8))}
+            items.forEach { (button,label) ->
+                val cell=LinearLayout(this).apply {orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER}
+                cell.addView(button,LinearLayout.LayoutParams(dp(if(button===endBtn) 88 else 64),dp(64)))
+                cell.addView(RabtaUi.text(this,label,13f,color=Color.WHITE).apply {gravity=Gravity.CENTER;setPadding(0,dp(6),0,0)})
+                row.addView(cell,LinearLayout.LayoutParams(0,-2,1f))
+            }
+            controls.addView(row,LinearLayout.LayoutParams(-1,-2))
+        }
+        if(resources.configuration.orientation==android.content.res.Configuration.ORIENTATION_LANDSCAPE)
+            controlRow(listOf(muteBtn to "Mute",speakerBtn to "Speaker",flipBtn to "Flip",shareBtn to "Share",endBtn to "End call"))
+        else {
+            controlRow(listOf(muteBtn to "Mute",speakerBtn to "Speaker",flipBtn to "Flip"))
+            controlRow(listOf(shareBtn to "Share screen",endBtn to "End call"))
         }
         endBtn.contentDescription = "End call"; flipBtn.contentDescription = "Switch camera"
         root.addView(controls, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
@@ -352,7 +362,7 @@ class VideoCallActivity : ThemedActivity(), CallWatcher {
         if (connected && !infoForConnected) { infoForConnected = true; peekInfo() }
         else if (!connected) { infoForConnected = false; handler.removeCallbacks(fadeInfo); showInfo(true) }
         val muted = VideoCall.muted
-        UiIcons.set(muteBtn, if (muted) "muted" else "mic", Color.WHITE,24,label = if (muted) "Unmute microphone" else "Mute microphone")
+        UiIcons.set(muteBtn, if (muted) "muted" else "mic", Color.WHITE,30,label = if (muted) "Unmute microphone" else "Mute microphone")
         muteBtn.background = oval(if (muted) AppTheme.ACCENT else 0xEE172230.toInt()); muteBtn.isSelected = muted
         speakerBtn.background = oval(if (VideoCall.speakerOn) AppTheme.ACCENT else 0xEE172230.toInt()); speakerBtn.isSelected = VideoCall.speakerOn
         speakerBtn.contentDescription = if (VideoCall.speakerOn) "Speaker on" else "Speaker off"

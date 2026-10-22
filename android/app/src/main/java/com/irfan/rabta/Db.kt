@@ -6,7 +6,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
 /** [account] is set only by [get]; a Db constructed directly (isolated test fixtures) keeps the legacy file name. */
-class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(ctx, fileFor(account), null, 7) {
+class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(ctx, fileFor(account), null, 8) {
 
     /**
      * [peerName] is the name the chat was stored under (their own Rabta name); [nickname] is yours for them, kept on
@@ -16,7 +16,7 @@ class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(
                             val pinned: Long = 0, val archived: Boolean = false, val nickname: String = "") {
         val shownName get() = nickname.ifBlank { peerName }
     }
-    data class Message(val id: String, val convId: String, val fromId: String, val fromName: String, val body: String, val sentAt: Long, val mine: Boolean, val status: String, val msgType: String)
+    data class Message(val id: String, val convId: String, val fromId: String, val fromName: String, val body: String, val sentAt: Long, val mine: Boolean, val status: String, val msgType: String, val editedAt:Long=0)
     data class Group(val id: String, val name: String, val members: List<String>)
     /** Someone you have connected with; kept when their chat is cleared or deleted. */
     data class Contact(val peerId: String, val name: String, val username: String, val addedAt: Long, val nickname: String = "") {
@@ -36,6 +36,10 @@ class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(
         db.execSQL("CREATE TABLE IF NOT EXISTS calls(id INTEGER PRIMARY KEY AUTOINCREMENT, peer_id TEXT, peer_name TEXT, type TEXT, duration INTEGER DEFAULT 0, started_at INTEGER)")
         }
         createAll(db)
+        if(o<8) {
+            val hasEdited=db.rawQuery("PRAGMA table_info(messages)",null).use {c->var found=false;while(c.moveToNext())if(c.getString(1)=="edited_at")found=true;found}
+            if(!hasEdited)db.execSQL("ALTER TABLE messages ADD COLUMN edited_at INTEGER DEFAULT 0")
+        }
         // Additive: everyone you already chat with one-to-one becomes a contact; chats and messages are untouched.
         if (o < 6) db.execSQL("INSERT OR IGNORE INTO contacts(peer_id,name,added_at) SELECT peer_id,peer_name,last_time FROM conversations WHERE is_group=0")
         // Additive: pinned and archived chats, and your own names for contacts. Existing rows keep their data.
@@ -44,9 +48,10 @@ class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(
     }
 
     private fun createAll(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS message_changes(id TEXT,from_id TEXT,conv_id TEXT,revision INTEGER,action TEXT,text TEXT,changed_at INTEGER,PRIMARY KEY(id,from_id,conv_id))")
         db.execSQL("CREATE TABLE IF NOT EXISTS message_meta(id TEXT PRIMARY KEY, starred INTEGER DEFAULT 0, reactions TEXT DEFAULT '{}')")
         db.execSQL("CREATE TABLE IF NOT EXISTS conversations(peer_id TEXT PRIMARY KEY, peer_name TEXT, last_msg TEXT, last_time INTEGER DEFAULT 0, unread INTEGER DEFAULT 0, is_group INTEGER DEFAULT 0, pinned INTEGER DEFAULT 0, archived INTEGER DEFAULT 0)")
-        db.execSQL("CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY, conv_id TEXT, from_id TEXT, from_name TEXT DEFAULT '', body TEXT, sent_at INTEGER, mine INTEGER DEFAULT 0, status TEXT DEFAULT 'sent', msg_type TEXT DEFAULT 'text')")
+        db.execSQL("CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY, conv_id TEXT, from_id TEXT, from_name TEXT DEFAULT '', body TEXT, sent_at INTEGER, mine INTEGER DEFAULT 0, status TEXT DEFAULT 'sent', msg_type TEXT DEFAULT 'text', edited_at INTEGER DEFAULT 0)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_msg_conv ON messages(conv_id, sent_at)")
         db.execSQL("CREATE TABLE IF NOT EXISTS groups(id TEXT PRIMARY KEY, name TEXT, members TEXT)")
         db.execSQL("CREATE TABLE IF NOT EXISTS calls(id INTEGER PRIMARY KEY AUTOINCREMENT, peer_id TEXT, peer_name TEXT, type TEXT, duration INTEGER DEFAULT 0, started_at INTEGER)")
@@ -187,23 +192,63 @@ class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(
         return list
     }
 
-    fun saveIfNew(id: String, convId: String, fromId: String, fromName: String, body: String, sentAt: Long, mine: Boolean, status: String, msgType: String = "text"): Boolean {
+    @Synchronized fun saveIfNew(id: String, convId: String, fromId: String, fromName: String, body: String, sentAt: Long, mine: Boolean, status: String, msgType: String = "text"): Boolean {
         val cv = ContentValues().apply {
             put("id",id);put("conv_id",convId);put("from_id",fromId);put("from_name",fromName)
             put("body",body);put("sent_at",sentAt);put("mine",if(mine)1 else 0);put("status",status);put("msg_type",msgType)
         }
-        return writableDatabase.insertWithOnConflict("messages", null, cv, SQLiteDatabase.CONFLICT_IGNORE) != -1L
+        val inserted=writableDatabase.insertWithOnConflict("messages", null, cv, SQLiteDatabase.CONFLICT_IGNORE) != -1L
+        if(inserted)applyPendingChange(id,fromId,convId)
+        return inserted
+    }
+
+    fun hasPendingDeletion(id:String,from:String,conv:String)=readableDatabase.rawQuery("SELECT 1 FROM message_changes WHERE id=? AND from_id=? AND conv_id=? AND action='delete'",arrayOf(id,from,conv)).use {it.moveToFirst()}
+    fun message(id:String):Message?=readableDatabase.rawQuery("SELECT id,conv_id,from_id,from_name,body,sent_at,mine,status,msg_type,edited_at FROM messages WHERE id=?",arrayOf(id)).use {c->
+        if(c.moveToFirst())Message(c.getString(0),c.getString(1),c.getString(2),c.getString(3)?:"",c.getString(4),c.getLong(5),c.getInt(6)==1,c.getString(7),c.getString(8),c.getLong(9)) else null
+    }
+    /** Only server-authenticated changes enter this path. The original author/chat must match. */
+    @Synchronized fun receiveChange(change:org.json.JSONObject):String {
+        val id=change.getString("id");val from=change.getString("from");val conv=change.getString("convId")
+        val revision=change.getLong("revision");val action=change.getString("action")
+        require(Regex("[0-9A-F]{12}").matches(id)&&Regex("[0-9A-F]{12}").matches(from)&&conv.isNotEmpty()&&revision>0&&action in listOf("edit","delete"))
+        val database=writableDatabase;database.beginTransaction()
+        try {
+            val old=database.rawQuery("SELECT revision,action FROM message_changes WHERE id=? AND from_id=? AND conv_id=?",arrayOf(id,from,conv)).use {if(it.moveToFirst())it.getLong(0) to it.getString(1) else 0L to ""}
+            if(revision>old.first&&old.second!="delete") {
+                database.execSQL("INSERT OR REPLACE INTO message_changes(id,from_id,conv_id,revision,action,text,changed_at) VALUES(?,?,?,?,?,?,?)",arrayOf(id,from,conv,revision,action,change.optString("text"),change.getLong("changedAt")))
+                applyPendingChange(id,from,conv)
+            }
+            database.setTransactionSuccessful()
+        } finally {database.endTransaction()}
+        return conv
+    }
+    private fun applyPendingChange(id:String,from:String,conv:String) {
+        val m=message(id)?:return
+        if(m.fromId!=from||m.convId!=conv)return
+        writableDatabase.rawQuery("SELECT action,text,changed_at FROM message_changes WHERE id=? AND from_id=? AND conv_id=?",arrayOf(id,from,conv)).use {c->
+            if(!c.moveToFirst())return
+            val deleted=c.getString(0)=="delete"
+            // Local deletion is also final: a later edit must not uncover it again.
+            if(!deleted&&(m.msgType=="deleted"||(m.msgType=="text"&&m.body=="Message deleted")))return
+            if(!deleted&&m.msgType !in listOf("text","rich"))return
+            val body=if(deleted)"Message deleted" else if(m.msgType=="rich")org.json.JSONObject(m.body).put("text",c.getString(1)).toString() else c.getString(1)
+            val values=ContentValues().apply {put("body",body);put("edited_at",if(deleted)0L else c.getLong(2));if(deleted){put("msg_type","deleted");if(m.mine&&MessageDelivery.pending(m.status))put("status","canceled")}}
+            writableDatabase.update("messages",values,"id=? AND from_id=? AND conv_id=?",arrayOf(id,from,conv))
+            if(deleted)writableDatabase.delete("message_meta","id=?",arrayOf(id))
+            val latest=readableDatabase.rawQuery("SELECT id FROM messages WHERE conv_id=? ORDER BY sent_at DESC LIMIT 1",arrayOf(conv)).use {if(it.moveToFirst())it.getString(0) else ""}
+            if(latest==id)writableDatabase.execSQL("UPDATE conversations SET last_msg=? WHERE peer_id=?",arrayOf(if(deleted)body else if(m.msgType=="rich")org.json.JSONObject(body).optString("text") else body,conv))
+        }
     }
 
     fun meta(id:String):Pair<Boolean,String> = readableDatabase.rawQuery("SELECT starred,reactions FROM message_meta WHERE id=?",arrayOf(id)).use { if(it.moveToFirst()) (it.getInt(0)==1) to it.getString(1) else false to "{}" }
     fun star(id:String) { val m=meta(id);writableDatabase.execSQL("INSERT OR REPLACE INTO message_meta(id,starred,reactions) VALUES(?,?,?)",arrayOf(id,if(m.first)0 else 1,m.second)) }
     fun react(id:String,from:String,emoji:String) { val m=meta(id);val r=org.json.JSONObject(m.second).put(from,emoji);writableDatabase.execSQL("INSERT OR REPLACE INTO message_meta(id,starred,reactions) VALUES(?,?,?)",arrayOf(id,if(m.first)1 else 0,r.toString())) }
     fun deleteMessage(id:String) { writableDatabase.execSQL("UPDATE messages SET body='Message deleted',msg_type='text' WHERE id=?",arrayOf(id)) }
-    private fun selected(where:String):List<Message> { val out=mutableListOf<Message>();readableDatabase.rawQuery("SELECT id,conv_id,from_id,from_name,body,sent_at,mine,status,msg_type FROM messages WHERE "+where+" ORDER BY sent_at DESC",null).use { c -> while(c.moveToNext())out.add(Message(c.getString(0),c.getString(1),c.getString(2),c.getString(3)?:"",c.getString(4),c.getLong(5),c.getInt(6)==1,c.getString(7),c.getString(8))) };return out }
+    private fun selected(where:String):List<Message> { val out=mutableListOf<Message>();readableDatabase.rawQuery("SELECT id,conv_id,from_id,from_name,body,sent_at,mine,status,msg_type,edited_at FROM messages WHERE "+where+" ORDER BY sent_at DESC",null).use { c -> while(c.moveToNext())out.add(Message(c.getString(0),c.getString(1),c.getString(2),c.getString(3)?:"",c.getString(4),c.getLong(5),c.getInt(6)==1,c.getString(7),c.getString(8),c.getLong(9))) };return out }
     fun pausedMessages()=selected("mine=1 AND status='paused'")
     /** Outgoing messages AutoSwitch still has to place on a transport (see [MessageDelivery.pending]). */
     fun pendingOutgoing()=selected("mine=1 AND status IN ('queued','sending','mesh','mesh_wait')")
-    fun outgoing(id:String):Message?=readableDatabase.rawQuery("SELECT id,conv_id,from_id,from_name,body,sent_at,mine,status,msg_type FROM messages WHERE id=? AND mine=1",arrayOf(id)).use { c -> if(c.moveToFirst())Message(c.getString(0),c.getString(1),c.getString(2),c.getString(3)?:"",c.getString(4),c.getLong(5),true,c.getString(7),c.getString(8)) else null }
+    fun outgoing(id:String):Message?=readableDatabase.rawQuery("SELECT id,conv_id,from_id,from_name,body,sent_at,mine,status,msg_type,edited_at FROM messages WHERE id=? AND mine=1",arrayOf(id)).use { c -> if(c.moveToFirst())Message(c.getString(0),c.getString(1),c.getString(2),c.getString(3)?:"",c.getString(4),c.getLong(5),true,c.getString(7),c.getString(8),c.getLong(9)) else null }
     fun deliveryStates(account:String):Map<String,Int> = readableDatabase.rawQuery(
         "SELECT status,COUNT(*) FROM messages WHERE mine=1 AND from_id=? GROUP BY status",arrayOf(account)
     ).use { c -> buildMap { while(c.moveToNext())put(c.getString(0),c.getInt(1)) } }
@@ -214,8 +259,8 @@ class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(
     ).use { if(it.moveToFirst()) (it.getInt(0)==1) to (it.getString(1)?:"") else null }
     /** Photos, videos and files shared in one conversation, newest first. */
     fun media(convId:String,limit:Int=60):List<Message> { val out=mutableListOf<Message>()
-        readableDatabase.rawQuery("SELECT id,conv_id,from_id,from_name,body,sent_at,mine,status,msg_type FROM messages WHERE conv_id=? AND msg_type IN ('image','video','file') ORDER BY sent_at DESC LIMIT ?",arrayOf(convId,limit.toString())).use { c ->
-            while(c.moveToNext())out.add(Message(c.getString(0),c.getString(1),c.getString(2),c.getString(3)?:"",c.getString(4),c.getLong(5),c.getInt(6)==1,c.getString(7),c.getString(8)))
+        readableDatabase.rawQuery("SELECT id,conv_id,from_id,from_name,body,sent_at,mine,status,msg_type,edited_at FROM messages WHERE conv_id=? AND msg_type IN ('image','video','file') ORDER BY sent_at DESC LIMIT ?",arrayOf(convId,limit.toString())).use { c ->
+            while(c.moveToNext())out.add(Message(c.getString(0),c.getString(1),c.getString(2),c.getString(3)?:"",c.getString(4),c.getLong(5),c.getInt(6)==1,c.getString(7),c.getString(8),c.getLong(9)))
         }
         return out
     }
@@ -229,9 +274,9 @@ class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(
 
     fun messages(convId: String, limit: Int = 200): List<Message> {
         val list = mutableListOf<Message>()
-        readableDatabase.rawQuery("SELECT id,conv_id,from_id,from_name,body,sent_at,mine,status,msg_type FROM messages WHERE conv_id=? ORDER BY sent_at DESC LIMIT ?",
+        readableDatabase.rawQuery("SELECT id,conv_id,from_id,from_name,body,sent_at,mine,status,msg_type,edited_at FROM messages WHERE conv_id=? ORDER BY sent_at DESC LIMIT ?",
             arrayOf(convId, limit.toString())).use { c ->
-            while (c.moveToNext()) list.add(Message(c.getString(0), c.getString(1), c.getString(2), c.getString(3) ?: "", c.getString(4), c.getLong(5), c.getInt(6)==1, c.getString(7), c.getString(8) ?: "text"))
+            while (c.moveToNext()) list.add(Message(c.getString(0), c.getString(1), c.getString(2), c.getString(3) ?: "", c.getString(4), c.getLong(5), c.getInt(6)==1, c.getString(7), c.getString(8) ?: "text",c.getLong(9)))
         }
         return list.asReversed()
     }
@@ -277,8 +322,8 @@ class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(
     fun searchMessages(convId: String, query: String): List<Message> {
         if (query.isBlank()) return messages(convId)
         val result = mutableListOf<Message>()
-        readableDatabase.rawQuery("SELECT id,conv_id,from_id,from_name,body,sent_at,mine,status,msg_type FROM messages WHERE conv_id=? AND msg_type='text' AND instr(lower(body),lower(?))>0 ORDER BY sent_at DESC LIMIT 200",arrayOf(convId,query.trim())).use { c ->
-            while(c.moveToNext()) result.add(Message(c.getString(0),c.getString(1),c.getString(2),c.getString(3) ?: "",c.getString(4),c.getLong(5),c.getInt(6)==1,c.getString(7),c.getString(8)))
+        readableDatabase.rawQuery("SELECT id,conv_id,from_id,from_name,body,sent_at,mine,status,msg_type,edited_at FROM messages WHERE conv_id=? AND msg_type='text' AND instr(lower(body),lower(?))>0 ORDER BY sent_at DESC LIMIT 200",arrayOf(convId,query.trim())).use { c ->
+            while(c.moveToNext()) result.add(Message(c.getString(0),c.getString(1),c.getString(2),c.getString(3) ?: "",c.getString(4),c.getLong(5),c.getInt(6)==1,c.getString(7),c.getString(8),c.getLong(9)))
         }
         return result.asReversed()
     }
