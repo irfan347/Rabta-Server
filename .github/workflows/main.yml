@@ -441,14 +441,21 @@ jobs:
                       print(case.get('classname'),case.get('name'),(failure.text or '')[:6000])
           PYTHON
       - name: Review rendered premium screens
-        if: always() && matrix.api == 34
+        if: always()
         shell: bash
         run: |
-          if [ -f interface-screenshots/premium-review.b64 ]; then
+          if [ "${{ matrix.api }}" = 34 ] && [ -f interface-screenshots/premium-review.b64 ]; then
             echo 'RABTA_PREVIEW_BEGIN'
             cat interface-screenshots/premium-review.b64
             echo
             echo 'RABTA_PREVIEW_END'
+          fi
+          # The chat with stickers and the sticker panel open, on every Android version.
+          if [ -f interface-screenshots/sticker-review.b64 ]; then
+            echo 'RABTA_STICKER_PREVIEW_BEGIN'
+            cat interface-screenshots/sticker-review.b64
+            echo
+            echo 'RABTA_STICKER_PREVIEW_END'
           fi
       - name: Upload interface screenshots
         if: always()
