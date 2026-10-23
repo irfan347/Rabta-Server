@@ -19,6 +19,7 @@ class DevicesActivity : ThemedActivity(), RabtaEvents.Listener {
         if (!Session.loggedIn) { finish(); return }
         content = FeatureUi.page(this, "Phones & recovery")
         content.addView(FeatureUi.text(this, "Only these phones can use your account. A new phone needs your approval here, or your recovery code, even if someone knows your PIN."))
+        content.addView(RabtaUi.row(this,"Linked browsers","Use Rabta Web while this phone stays connected","devices") { startActivity(android.content.Intent(this,WebLinksActivity::class.java)) })
         list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         content.addView(list)
         content.addView(RabtaUi.section(this, "Recovery code"))

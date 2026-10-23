@@ -140,6 +140,8 @@ jobs:
           if [ -d "$ANDROID_PROJECT_DIR/tests" ]; then
             python3 -m unittest discover -s "$ANDROID_PROJECT_DIR/tests" -v
           fi
+      - name: Install server test dependencies
+        run: npm ci --ignore-scripts
       - name: Test server attachment storage and signaling
         run: |
           if [ -f tests/server.test.js ]; then node --test tests/*.test.js; fi

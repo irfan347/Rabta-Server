@@ -23,6 +23,13 @@ class CompanionLinks {
     this.links.set(this.hash(secret), link);
     return { secret, code, id: link.id, expires: link.expires };
   }
+  preview(code) {
+    this.prune();
+    if (!/^[a-f0-9]{32}$/.test(String(code))) return null;
+    const hash = this.hash(code);
+    const link = [...this.links.values()].find(item => item.codeHash === hash && !item.owner);
+    return link ? { id: link.id, name: link.name, expires: link.expires } : null;
+  }
   // Caller must authenticate the phone AND show explicit confirmation before approval.
   approve(code, owner, device) {
     this.prune();

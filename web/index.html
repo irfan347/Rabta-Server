@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>Rabta Web</title><link rel="stylesheet" href="/web/app.css"><script src="/web/app.js" defer></script></head>
+<body>
+<header class="brand"><span class="mark">r</span><strong>rabta<span>web</span></strong><span class="badge">Phone companion</span></header>
+<main id="pair" class="pair-card">
+ <section><p class="eyebrow">YOUR CONVERSATIONS, A LITTLE MORE ROOM</p><h1>Keep the conversation going.</h1><p class="intro">Link your phone and pick up your text chats here. Your phone stays connected and keeps your messages.</p>
+ <ol><li>Open Rabta on your phone.</li><li>Go to Profile → Connected Devices → Linked browsers.</li><li>Scan this code and approve your browser.</li></ol>
+ <p class="small">First version: recent one-to-one text chats. Groups, calls and attachments are available on your phone. Locked chats stay on your phone.</p></section>
+ <section class="qr-panel"><label for="browserName">Name this browser</label><input id="browserName" maxlength="80" value="My computer" autocomplete="off"><button id="pairButton">Create a linking code</button><img id="qr" alt="Scan this QR code with Rabta" hidden><p id="pairStatus" role="status">Approve only browsers you own.</p><details id="manual" hidden><summary>Link with a code instead</summary><code id="code"></code></details></section>
+</main>
+<main id="app" class="workspace" hidden>
+ <aside><div class="sidebar-head"><h1>Chats</h1><button id="logout" class="quiet">Unlink</button></div><input id="search" placeholder="Search your chats" aria-label="Search chats" autocomplete="off"><p class="small">Recent text chats from your phone</p><nav id="chats" aria-label="Conversations"></nav></aside>
+ <section class="conversation"><header class="chat-head"><button id="back" class="quiet">‹ Chats</button><strong id="chatTitle">Your conversations</strong><span id="connection" role="status">Connecting to phone…</span></header>
+ <div id="messages" class="messages" role="log" aria-label="Messages"><div class="welcome"><span class="mark">r</span><h2>A familiar conversation.<br>A bigger screen.</h2><p>Choose a chat to start. Keep Rabta connected on your phone.</p></div></div>
+ <p id="notice" class="notice" role="status"></p><form id="composer"><textarea id="text" rows="1" maxlength="12000" placeholder="Write a message" aria-label="Message" disabled></textarea><button id="send" disabled>Send</button></form>
+ </section>
+</main>
+<footer>Rabta Web · Your phone must stay connected · Browser access expires after 8 hours</footer>
+</body></html>

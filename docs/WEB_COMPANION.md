@@ -1,37 +1,32 @@
-# Rabta Web implementation brief
+# Rabta Web: phone-connected first version
 
-Requested: use owned rabta.tech domain for a browser companion linked from Android.
-Proposed app address: web.rabta.tech. No DNS or hosting changes performed.
+User selected a browser companion that requires the phone to remain connected. Worktree: `/home/saif/rabta/Rabta-Web`, branch `feat/web-companion`. Production 2.0.371 and Render commit 2576249 are separate and do not include this feature.
 
-## Verified current constraints
-- Node/Express/ws on Render; Neon PostgreSQL; Android Kotlin with local SQLite.
-- index.js holds one WebSocket per account and closes the previous connection. A browser cannot safely reuse this path unchanged.
-- Trusted phone approval and device revocation already exist in account.js. QR browser pairing is not implemented.
-- Delivered messages are not a complete server chat archive. Existing phone history needs explicit sync.
-- Current DNS lookup returned no A/CNAME answer for the apex or web subdomain; registrar ownership and authoritative configuration not verified.
+## Implemented scope
 
-## Required implementation
-1. Short-lived, single-use browser pairing challenge; QR contains pairing reference, never a phone session token. Phone shows browser details and explicitly approves linking.
-2. Separate browser device credentials, expiry and phone-controlled revocation. Protect browser session endpoints against cross-site requests; enforce origin checks and secure transport.
-3. Account/device-aware socket routing; browser login cannot evict the phone. Message delivery and acknowledgments track device sync independently from recipient read/delivery receipts.
-4. Browser conversation UI, text messaging, search, reconnect state and logout. Sync the user's outgoing messages across their own devices too.
-5. Explicit bounded history sync; respect locked chats and privacy settings, avoid copying hidden chat content without approval. No bulk upload of all phone history by default.
-6. Define attachments, groups, calls, reactions and offline behavior as separately testable acceptance items. Do not present visual placeholders as working features.
-7. Serve the first version using current infrastructure where feasible; no new paid service, replica or plan increase. Validate current hosting terms before promising zero extra hosting costs.
-8. Configure domain and TLS only once a working, tested deployment target exists. Preserve existing DNS records, mail configuration and Android API endpoint.
+- `/web/` responsive browser UI; QR and code-based linking, explicit approval in Android Profile → Connected Devices → Linked browsers.
+- Existing one-to-one chat list (up to 100), search, recent history (up to 80 messages, bounded to 180 KB), text sending through the phone. Media placeholders direct the user to the phone; no media is uploaded by this feature. Very long text is visibly truncated at 4000 characters in snapshots.
+- Phone stays authoritative. Browser requests use a separate HTTP companion protocol, never the phone's WebSocket login. No browser can replace the phone connection.
+- Phone-side privacy checks exclude locked/archived chats, blocked users and message requests. Groups are excluded from this first version. Snapshots are checked again before replying; already viewed data cannot be remotely erased or made screenshot-proof.
+- Text is durably saved into the existing phone outbox before confirmation. Retries reuse one message ID and reject conflicting content. Browser distinguishes saved/queued from delivered. No offline browser outbox.
+- Browser traffic uses same-origin POST APIs, a custom request header, HttpOnly/SameSite=Strict cookies (Secure on HTTPS), no-store responses, CSP and frame protection. It has no phone account token or account-management permission.
+- Pairing expires in two minutes. Codes are single-use. Links expire after eight hours, are bound to the approving account AND device, and can be revoked from that phone. The phone maintains its own allow-list as well. Phone trust revocation invalidates browser access.
+- Session state is deliberately bounded and in memory. A Render restart requires pairing again. No database archive, additional service or paid plan is introduced.
+- Only visible browser tabs poll, every four seconds after the previous request finishes. One in-flight phone command per link, bounded global pending requests, and eight-second command timeouts. Pairing/approval/session request limits prevent unbounded memory. The pairing IP limit may be shared by clients behind Render's proxy; no global proxy trust setting has been changed.
 
-## Confirmed first-release behavior
-User selected phone-connected operation. Android remains authoritative for history and sending. Browser commands relay to the approved phone through a separate companion channel; the existing phone socket must not be replaced. Browser shows Phone disconnected and disables sending when the phone cannot respond. Do not report a message sent until the phone has durably queued it. Use request IDs and phone-side deduplication to prevent retry duplicates. No offline browser outbox in version one.
+## Enablement (not performed)
 
-Use a separate browser companion protocol rather than introducing independent device delivery into the existing message protocol for this release. Phone approval, revocation and bounded history snapshots remain required. Sessions should expire and must not grant account recovery or phone-management privileges.
+The web routes are disabled unless `RABTA_WEB_ORIGIN` is set to the exact HTTPS origin, e.g. `https://web.rabta.tech`. Local development permits `http://localhost:PORT`. Use one existing server instance; sessions and pending requests are process-local.
 
-## Required acceptance
-Pair expiry/replay, approval identity, revoke active browser, cross-account isolation, phone+browser simultaneous use, offline catch-up, duplicate suppression, correct receipts, outgoing sync, locked-chat protection, logout/local cleanup, reconnect and existing Android call/message regression checks.
+Both the server from this branch and updated Android APK are necessary. Test with a disposable account first, without opening Rabta Test under the regular app's account. The phone can link browsers only after its trusted-device login is established.
 
-This is a design brief, not a completed web client or a deployment.
+Add the exact custom hostname in Render and configure Get.tech DNS `CNAME web` to the existing Render hostname, then verify TLS. Existing API `onrender.com` address must remain enabled for installed apps. No nameserver change or domain transfer is required for a normal subdomain record. Check existing Render custom-domain allowance before adding any charged domain. No DNS or custom domain changes have been made.
 
-## Implementation checkpoint
+## Validation and remaining acceptance
 
-A standalone CompanionLinks state component now exists in web-companion.js, covered by five Node tests. It creates a short-lived single-use pairing code separate from a browser secret, binds approval to one authenticated account and phone, expires links, supports revocation, and limits memory. Secrets are stored as hashes. HTTP routes, browser UI, QR presentation, Android approval, command relay, history privacy filtering and durable send deduplication are NOT implemented yet. The component is intentionally not imported by index.js; no new production endpoints are exposed. Deployment/restart requires re-pairing for this initial in-memory design. HTTP integration must add request throttling, origin checks, secure cookies and explicit phone confirmation before exposing it.
-
-Production release is separate: user authorized PR #29 merge and Render/public Android release. Merge commit 2576249; Render confirmed live. Public release workflow verification still ongoing at this checkpoint. Rabta Web remains a development branch, not part of that deployment.
+- Node suite: 96 tests passed, including 10 new pairing/HTTP cases for expiry, replay, wrong origin, wrong device/account, revocation during a request, unsupported operations, offline phone and session isolation.
+- Headless Chrome smoke covers QR generation, phone approval (simulated phone), history, text send, literal rendering of script-like content, 390px mobile layout, disconnected/reconnected phone and unlink. Screenshots contain disposable fixture content only.
+- Android regressions added for privacy exclusion, expiry/revocation and durable idempotent web sends. Build/device CI status is recorded in HANDOFF.md.
+- Physical Android-to-browser acceptance, actual QR camera scan, background/locked phone behavior and simultaneous calling still require validation. Browser tests use a simulated phone, not proof of Android integration.
+- No browser calls, attachments, groups, old-history pagination, persistent browser history or independent operation with the phone offline in this release.
+- No end-to-end encryption claim: the existing server can see routed payloads; HTTPS protects transport. No chat content is added to server logging.
