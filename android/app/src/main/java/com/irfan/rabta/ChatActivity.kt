@@ -81,6 +81,9 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     private var renderedQuery:String?=null
     private var renderedCalls:List<Db.CallRecord>?=null
     private lateinit var chatBox: LinearLayout
+    private var reactionPopup:android.widget.PopupWindow?=null
+    private lateinit var chatArea:FrameLayout
+    private lateinit var jumpLatest:View
     private lateinit var chatScroll: ScrollView
     private lateinit var input: EditText
     private lateinit var sendBtn: TextView
@@ -253,6 +256,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         if (!isGroup && !self) { WsClient.sendRead(peerId, "all"); WsClient.watch(peerId) }
     }
     override fun onPause() {
+        reactionPopup?.dismiss();reactionPopup=null
         uiHandler.removeCallbacks(saveDraftTask);saveDraft()
         // A voice message playing goes on, as in WhatsApp; the bar in the chats shows it.
         super.onPause()
@@ -362,8 +366,8 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         subRow.addView(statusTv); subRow.addView(typingTv)
         hdrCol.addView(subRow)
         hdr.addView(hdrCol, LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
-        if (!isGroup && !self) hdr.addView(headerAction("phone","Voice call") { startCall(true) })
-        if (!isGroup && !self) hdr.addView(headerAction("video","Video call") { startVideoCall() })
+        if (!isGroup && !self) hdr.addView(callHeaderAction("phone","Voice call") { startCall(true) })
+        if (!isGroup && !self) hdr.addView(callHeaderAction("video","Video call") { startVideoCall() })
         if(!isGroup) {
             hdrCol.setOnClickListener { openContactProfile() }
             headerAvatar.setOnClickListener { openContactProfile() }
@@ -461,7 +465,17 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             val was=oldBottom-oldTop;val now=bottom-top;val content=chatBox.height
             if(was>0&&now<was&&content<=was+chatScroll.scrollY+dp(80)) chatScroll.post { chatScroll.scrollTo(0,(chatBox.height-chatScroll.height).coerceAtLeast(0)) }
         }
-        root.addView(chatScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,0,1f))
+        chatArea=FrameLayout(this)
+        chatArea.addView(chatScroll,FrameLayout.LayoutParams(-1,-1))
+        jumpLatest=UiIcons.image(this,"chevron_down",TXT,26,"Jump to latest message").apply {
+            background=RabtaUi.ripple(this@ChatActivity,RECV,999);elevation=dp(4).toFloat();visibility=View.GONE
+            isClickable=true;isFocusable=true
+            setOnClickListener { scrollBottom(true) }
+        }
+        chatArea.addView(jumpLatest,FrameLayout.LayoutParams(dp(44),dp(44),Gravity.BOTTOM or Gravity.END).apply { marginEnd=dp(12);bottomMargin=dp(12) })
+        chatScroll.setOnScrollChangeListener { _,_,_,_,_ -> updateJumpLatest();reactionPopup?.dismiss() }
+        chatBox.addOnLayoutChangeListener { _,_,_,_,_,_,_,_,_ -> chatScroll.post { updateJumpLatest() } }
+        root.addView(chatArea, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,0,1f))
 
         replyBar=LinearLayout(this).apply {
             orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL;visibility=View.GONE
@@ -636,17 +650,22 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     // Shared call controls
     private fun callBtn(icon: String, label: String, onClick: (TextView) -> Unit): LinearLayout {
         val col = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; gravity=Gravity.CENTER }
-        val btn = TextView(this).apply { UiIcons.set(this,UiIcons.fromSymbol(icon) ?: "phone",Color.WHITE,26,label); textSize=24f; gravity=Gravity.CENTER; background=RabtaUi.ripple(this@ChatActivity,0xFF2C3B4D.toInt(),20); isClickable=true;isFocusable=true }
+        val btn = TextView(this).apply { UiIcons.set(this,UiIcons.fromSymbol(icon) ?: "phone",Color.WHITE,32,label); textSize=24f; gravity=Gravity.CENTER; background=RabtaUi.ripple(this@ChatActivity,0xFF2C3B4D.toInt(),20); isClickable=true;isFocusable=true }
         btn.setOnClickListener { onClick(btn) }
-        col.addView(btn, LinearLayout.LayoutParams(dp(60),dp(60)))
+        col.addView(btn, LinearLayout.LayoutParams(dp(76),dp(76)))
         col.addView(TextView(this).apply { this.text=label; textSize=12f; setTextColor(0xCCFFFFFF.toInt()); gravity=Gravity.CENTER; setPadding(0,dp(6),0,0) })
         return col
     }
     private fun callBtnRed(icon: String, label: String, onClick: () -> Unit): LinearLayout {
         val col = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; gravity=Gravity.CENTER }
-        col.addView(TextView(this).apply { UiIcons.set(this,"end",Color.WHITE,28,label); textSize=24f; gravity=Gravity.CENTER; background=oval(RED); isClickable=true; setOnClickListener{onClick()} }, LinearLayout.LayoutParams(dp(68),dp(68)))
+        col.addView(TextView(this).apply { UiIcons.set(this,"end",Color.WHITE,34,label); textSize=24f; gravity=Gravity.CENTER; background=oval(RED); isClickable=true; setOnClickListener{onClick()} }, LinearLayout.LayoutParams(dp(88),dp(72)))
         col.addView(TextView(this).apply { this.text=label; textSize=12f; setTextColor(0xCCFFFFFF.toInt()); gravity=Gravity.CENTER; setPadding(0,dp(6),0,0) })
         return col
+    }
+    private fun callHeaderAction(icon:String,label:String,action:()->Unit)=UiIcons.image(this,icon,AppTheme.accent(this),28,label).apply {
+        isClickable=true;isFocusable=true;setOnClickListener {action()}
+        background=RabtaUi.ripple(this@ChatActivity,AppTheme.sent(this@ChatActivity),16)
+        layoutParams=LinearLayout.LayoutParams(dp(48),dp(48)).apply {marginStart=dp(4)}
     }
     /** Header actions share one size and sit exactly centred: drawn icons, not text glyphs resting on a baseline. */
     private fun headerAction(icon: String, label: String, onClick: () -> Unit) = UiIcons.image(this,icon,TXT,24,L.t(this,label)).apply {
@@ -655,6 +674,9 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     }
 
     // Existing Db/Outbox and receipt states remain the source of truth.
+    private fun updateJumpLatest() {
+        if(::jumpLatest.isInitialized)jumpLatest.visibility=if(!callShown&&!nearBottom()) View.VISIBLE else View.GONE
+    }
     private fun nearBottom() = chatScroll.getChildAt(0).height <= chatScroll.height+chatScroll.scrollY+dp(80)
 
     private fun loadHistory(forceScroll:Boolean=false) {
@@ -906,7 +928,13 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         // Only the bubble and what is tappable in it listen: a held view takes every touch, so a picture given a listener
         // would keep taps from the photo or video it is part of.
         fun actions(v:View) {
-            if(v===bubble||v.isClickable) v.setOnLongClickListener { it.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);toggleSelected(m.id);true }
+            if(v===bubble||v.isClickable) v.setOnLongClickListener {
+                it.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                val firstSelection=selectedIds.isEmpty()
+                reactionPopup?.dismiss();toggleSelected(m.id)
+                if(firstSelection&&m.body!="Message deleted")reactionPopup=MessageActions.react(this,m,isGroup,bubble) { clearSelection();loadHistory() }
+                true
+            }
             if(v is ViewGroup)for(i in 0 until v.childCount)actions(v.getChildAt(i))
         }
         actions(bubble)
@@ -936,13 +964,15 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
                 }.show()
     }
     private fun largeEmoji(text:String)=RabtaUi.text(this,text,if(EmojiMotion.count(text)==1) 54f else 42f).apply {
+        val animateOnArrival=scrollAfterSend
         // A MATCH_PARENT child is ignored when the vertical bubble chooses its wrap-content width;
         // the timestamp then determines the width and cuts the emoji in half.
         layoutParams=LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT)
         includeFontPadding=true;setPadding(dp(12),dp(10),dp(12),dp(10))
+        setOnClickListener { if(selectedIds.isEmpty()) EmojiMotion.play(this) }
         setLineSpacing(0f,1f);if(android.os.Build.VERSION.SDK_INT>=28) setFallbackLineSpacing(true)
         addOnAttachStateChangeListener(object:View.OnAttachStateChangeListener {
-            override fun onViewAttachedToWindow(v:View) { EmojiMotion.play(v) }
+            override fun onViewAttachedToWindow(v:View) { if(animateOnArrival) EmojiMotion.play(v) }
             override fun onViewDetachedFromWindow(v:View) { v.animate().cancel() }
         })
     }
@@ -1018,7 +1048,6 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         starAction=headerAction("star","Star") { selectionAction("star") }.also { addView(it) }
         addView(headerAction("trash","Delete") { selectionAction("delete") })
         addView(headerAction("share_forward","Forward") { selectionAction("forward") })
-        addView(headerAction("emoji","React") { shownMessages.values.filter { it.id in selectedIds }.singleOrNull()?.let { m -> clearSelection();MessageActions.react(this@ChatActivity,m,isGroup) { loadHistory() } } })
         addView(headerAction("more","More options") { selectionAction("more") })
     }
     private fun toggleSelected(id:String) {
@@ -1060,7 +1089,6 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             "forward" -> MessageActions.forward(this,chosen) { clearSelection() }
             "more" -> {
                 val items=mutableListOf<Pair<String,()->Unit>>()
-                chosen.singleOrNull()?.let { m -> items+=L.t(this,"React") to { clearSelection();MessageActions.react(this,m,isGroup) { loadHistory() } } }
                 items+=L.t(this,"Copy") to { MessageActions.copy(this,chosen);clearSelection() }
                 if(chosen.any { Transfers.progress.containsKey(it.id) }) items+=L.t(this,"Cancel transfer") to { chosen.forEach { Transfers.cancel(it.id) };clearSelection() }
                 if(selectedIds.size<shownMessages.size) items+=L.t(this,"Select all") to { selectedIds.addAll(shownMessages.keys);shownMessages.keys.forEach { paintSelection(it) };updateSelection() }
@@ -1366,9 +1394,9 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
     }
     private fun updateCallControls() {
         val muted=VoiceCall.muted;val speaker=VoiceCall.speaker
-        UiIcons.set(muteControl,if(muted) "muted" else "mic",Color.WHITE,26,label=if(muted) "Unmute microphone" else "Mute microphone")
+        UiIcons.set(muteControl,if(muted) "muted" else "mic",Color.WHITE,32,label=if(muted) "Unmute microphone" else "Mute microphone")
         muteControl.background=RabtaUi.ripple(this,if(muted) 0xFF256D5C.toInt() else 0xFF2C3B4D.toInt(),20); muteControl.isSelected=muted
-        UiIcons.set(speakerControl,"speaker",Color.WHITE,26,label=if(speaker) "Speaker on" else "Speaker off")
+        UiIcons.set(speakerControl,"speaker",Color.WHITE,32,label=if(speaker) "Speaker on" else "Speaker off")
         speakerControl.background=RabtaUi.ripple(this,if(speaker) 0xFF256D5C.toInt() else 0xFF2C3B4D.toInt(),20); speakerControl.isSelected=speaker
     }
     /** The call screen for this chat's call; the chat stays underneath. */
@@ -1380,7 +1408,7 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
             if(panelOpen()) hidePanel()
             headerBar.visibility=View.GONE; (headerBar.parent as View).setBackgroundColor(DARK); RabtaUi.systemBars(this,true)
             VoicePlayer.stop();replyBar.visibility=View.GONE;offlineBanner.visibility=View.GONE
-            callOverlay.visibility=View.VISIBLE; chatScroll.visibility=View.GONE; composerBar.visibility=View.GONE; searchField.visibility=View.GONE
+            callOverlay.visibility=View.VISIBLE; chatArea.visibility=View.GONE; composerBar.visibility=View.GONE; searchField.visibility=View.GONE
         }
         syncCall()
     }
@@ -1390,13 +1418,18 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         callShown=false; earpiece(false); uiHandler.removeCallbacks(callTick)
         headerBar.visibility=View.VISIBLE; (headerBar.parent as View).setBackgroundColor(BEIGE); RabtaUi.systemBars(this,AppTheme.dark(this))
         callOverlay.visibility=View.GONE;updateStatus();if(replyTo!=null)replyBar.visibility=View.VISIBLE
-        chatScroll.visibility=View.VISIBLE; composerBar.visibility=View.VISIBLE; searchField.visibility=if(searchQuery.isBlank()) View.GONE else View.VISIBLE
+        chatArea.visibility=View.VISIBLE; composerBar.visibility=View.VISIBLE; searchField.visibility=if(searchQuery.isBlank()) View.GONE else View.VISIBLE
         callBar.refresh()
     }
     /** Shows [VoiceCall]'s state: its status or time, mute and speaker; the call ending closes the call screen. */
     private fun syncCall() {
         uiHandler.removeCallbacks(callTick)
-        if(callShown && !VoiceCall.with(peerId)) { hideCallScreen(); return }
+        if(callShown && !VoiceCall.with(peerId)) {
+            hideCallScreen()
+            if(VoiceCall.lastOutcome=="on_another_call"&&!isFinishing)android.app.AlertDialog.Builder(this)
+                .setTitle("Already on another call").setMessage("$peerName is on another call. Try again later.").setPositiveButton("OK",null).show()
+            return
+        }
         if(!callShown) return
         callStatusTv.text=if(VoiceCall.connectedAt>0 && VoiceCall.status.startsWith("Connected")) "Connected · ${duration(VoiceCall.seconds())}" else VoiceCall.status
         updateCallControls()

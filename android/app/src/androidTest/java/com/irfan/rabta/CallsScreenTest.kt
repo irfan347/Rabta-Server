@@ -110,11 +110,14 @@ class CallsScreenTest {
         repeat(105) { db.logCallStart("bulk-$it","Other contact $it","outgoing") }
         db.logCallStart("CA1100000003","Video contact","outgoing video")
         db.logCallStart("CA1100000004","Missed contact","missed")
+        // Fast devices can insert many records in one clock tick. Newest IDs must win ties.
+        db.writableDatabase.execSQL("UPDATE calls SET started_at=1000 WHERE id<>?",arrayOf(old))
+        assertEquals("Missed contact",db.calls(1).single().peerName)
         assertFalse(db.calls().any { it.id==old })
         val a=launch()
         try {
             ui { nav(a,"Calls").performClick() }
-            waitUi { search(a).isShown&&text(a,"Video contact") }
+            waitUi { search(a).isShown&&text(a,"Missed contact")&&!text(a,"Video contact") }
             waitUi { search(a).height>0 }
             ui {
                 assertEquals(RabtaUi.dp(a,44),(search(a).parent as View).height)
@@ -130,7 +133,9 @@ class CallsScreenTest {
                 assertTrue(search(a).isShown)
                 all(a.window.decorView).first { it.contentDescription=="Clear call search" }.performClick()
             }
-            waitUi { text(a,"Video contact")&&text(a,"Missed contact") }
+            waitUi { text(a,"Missed contact")&&!text(a,"Video contact") }
+            ui { all(a.window.decorView).first { it.contentDescription=="Video calls" }.performClick() }
+            waitUi { text(a,"Video contact")&&!text(a,"Missed contact") }
             ui {
                 assertFalse(all(a.window.decorView).first { it.contentDescription=="Clear call search" }.isShown)
                 search(a).setText("VIDEO")
@@ -140,6 +145,24 @@ class CallsScreenTest {
             ui { search(a).requestFocus();a.onBackPressedDispatcher.onBackPressed();assertFalse(search(a).hasFocus());assertTrue(nav(a,"Calls").isSelected) }
             ui { a.onBackPressedDispatcher.onBackPressed();assertEquals("",search(a).text.toString());assertTrue(nav(a,"Calls").isSelected) }
             assertEquals(108,db.calls(Int.MAX_VALUE).size)
+        } finally { ui { a.finish() } }
+    }
+
+    @Test fun callModesSeparateHistoryAndWalkieDoesNotShowInternetCalls()=fixture { db ->
+        db.logCallStart("voice-peer","Voice person","incoming")
+        db.logCallStart("video-peer","Video person","missed · video")
+        val a=launch()
+        fun mode(label:String)=all(a.window.decorView).first { it.contentDescription=="$label calls" }.performClick()
+        try {
+            ui { nav(a,"Calls").performClick() }
+            waitUi { text(a,"Voice person")&&!text(a,"Video person") }
+            ui { mode("Video") }
+            waitUi { text(a,"Video person")&&!text(a,"Voice person") }
+            ui { mode("Walkie-Talkie") }
+            waitUi { text(a,"Walkie-Talkie is coming soon")&&!text(a,"Voice person")&&!text(a,"Video person") }
+            ui { assertFalse(search(a).isShown);mode("Voice") }
+            waitUi { text(a,"Voice person")&&!text(a,"Video person") }
+            assertEquals(2,db.calls(Int.MAX_VALUE).size)
         } finally { ui { a.finish() } }
     }
 
@@ -352,6 +375,11 @@ class CallsScreenTest {
             sockets.last().close(1001,"Going away")
             waitUi { !WsClient.connected&&VoiceCall.active&&shows(c,"Reconnecting") }
             assertTrue("Rabta connects again and says the call goes on",alive.await(20,TimeUnit.SECONDS))
+            // Signaling alone is not recovered audio: keep Reconnecting until the peer sends media again.
+            waitUi { WsClient.connected&&VoiceCall.active&&shows(c,"Reconnecting") }
+            val resumedAudio=JSONObject().put("type","call_audio").put("from","CA1100000002")
+                .put("callId",VoiceCall.id).put("data",android.util.Base64.encodeToString(ByteArray(640),android.util.Base64.NO_WRAP))
+            sockets.last().send(resumedAudio.toString())
             waitUi { WsClient.connected&&VoiceCall.active&&shows(c,"Connected") }
             assertEquals("Nobody hung up",1L,ended.count)
             assertEquals("Connected again once",2,sockets.size)

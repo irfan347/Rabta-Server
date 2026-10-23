@@ -8,6 +8,9 @@ import android.database.sqlite.SQLiteOpenHelper
 /** [account] is set only by [get]; a Db constructed directly (isolated test fixtures) keeps the legacy file name. */
 class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(ctx, fileFor(account), null, 7) {
 
+    // WAL permits background message writes while the UI reads history; backup exports use a transaction.
+    init { setWriteAheadLoggingEnabled(true) }
+
     /**
      * [peerName] is the name the chat was stored under (their own Rabta name); [nickname] is yours for them, kept on
      * this phone only. Show [shownName]; store and send with [peerName].
@@ -304,12 +307,12 @@ class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(
     fun callOutcome(id:Long,outcome:String)=writableDatabase.execSQL("UPDATE calls SET type=? WHERE id=?",arrayOf(outcome,id))
     fun logCallEnd(callId: Long, durationSec: Int) = writableDatabase.execSQL("UPDATE calls SET duration=? WHERE id=?", arrayOf(durationSec, callId))
     /** One contact's calls, oldest first, for the chat timeline. */
-    fun callsWith(peerId: String): List<CallRecord> = readableDatabase.rawQuery("SELECT id,peer_id,peer_name,type,duration,started_at FROM calls WHERE peer_id=? ORDER BY started_at", arrayOf(peerId)).use { c ->
+    fun callsWith(peerId: String): List<CallRecord> = readableDatabase.rawQuery("SELECT id,peer_id,peer_name,type,duration,started_at FROM calls WHERE peer_id=? ORDER BY started_at,id", arrayOf(peerId)).use { c ->
         generateSequence { if (c.moveToNext()) CallRecord(c.getLong(0),c.getString(1),c.getString(2),c.getString(3),c.getInt(4),c.getLong(5)) else null }.toList()
     }
     fun calls(limit: Int = 100): List<CallRecord> {
         val list = mutableListOf<CallRecord>()
-        readableDatabase.rawQuery("SELECT id,peer_id,peer_name,type,duration,started_at FROM calls ORDER BY started_at DESC LIMIT ?", arrayOf(limit.toString())).use { c ->
+        readableDatabase.rawQuery("SELECT id,peer_id,peer_name,type,duration,started_at FROM calls ORDER BY started_at DESC,id DESC LIMIT ?", arrayOf(limit.toString())).use { c ->
             while (c.moveToNext()) list.add(CallRecord(c.getLong(0),c.getString(1),c.getString(2),c.getString(3),c.getInt(4),c.getLong(5)))
         }
         return list

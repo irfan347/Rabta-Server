@@ -60,10 +60,11 @@ class EmojiPanel(
 
     init {
         orientation = VERTICAL; setBackgroundColor(AppTheme.surface(a)); isClickable = true
+        addView(View(a).apply { background=RabtaUi.shape(a,AppTheme.sub(a),99);alpha=0.4f },LayoutParams(dp(32),dp(4)).apply { gravity=Gravity.CENTER_HORIZONTAL;topMargin=dp(6);bottomMargin=dp(2) })
         // Top: search · Emoji | GIF | Sticker · backspace
         top.gravity = Gravity.CENTER_VERTICAL; top.setPadding(dp(4), dp(6), dp(4), dp(4))
         top.addView(icon("search", "Search emoji") { startSearch() }, LayoutParams(dp(48), dp(44)))
-        tabs.background = RabtaUi.shape(a, AppTheme.raised(a), 999); tabs.setPadding(dp(3), dp(3), dp(3), dp(3))
+        tabs.background = RabtaUi.shape(a, AppTheme.raised(a), 14); tabs.setPadding(dp(3), dp(3), dp(3), dp(3))
         listOf("emoji" to "Emoji", "gif" to "GIF", "sticker" to "Stickers").forEachIndexed { i, (name, label) ->
             tabs.addView(UiIcons.image(a, name, sub, 22, label).apply { isFocusable = true; setOnClickListener { select(i) } }, LayoutParams(0, dp(36), 1f))
         }
@@ -104,7 +105,7 @@ class EmojiPanel(
             orientation = VERTICAL; gravity = Gravity.CENTER; visibility = View.GONE
             addView(UiIcons.image(a, "gif", AppTheme.accent(a), 40, "GIF"), LayoutParams(dp(56), dp(56)))
             addView(RabtaUi.text(a, "GIFs are coming soon", 16f, true).apply { gravity = Gravity.CENTER; setPadding(0, dp(8), 0, dp(4)) })
-            addView(RabtaUi.text(a, "Searching GIFs needs an online GIF service that Rabta doesn't have yet.", 13f, color = sub).apply { gravity = Gravity.CENTER; setPadding(dp(32), 0, dp(32), 0) })
+            addView(RabtaUi.text(a, "Choose an emoji or sticker to send.", 13f, color = sub).apply { gravity = Gravity.CENTER; setPadding(dp(32), 0, dp(32), 0) })
         }
         pages.addView(gifPage, FrameLayout.LayoutParams(-1, -1))
         stickerPage.visibility = View.GONE; stickerPage.isVerticalScrollBarEnabled = false
@@ -189,7 +190,7 @@ class EmojiPanel(
 
     private fun cell(emoji: String, label: String) = TextView(a).apply {
         includeFontPadding = true; if(android.os.Build.VERSION.SDK_INT>=28) setFallbackLineSpacing(true); setPadding(0, 0, 0, 0)
-        text = emoji; textSize = 26f; gravity = Gravity.CENTER; isFocusable = true; contentDescription = label
+        text = emoji; textSize = 30f; gravity = Gravity.CENTER; isFocusable = true; contentDescription = label
         background = RabtaUi.ripple(a, Color.TRANSPARENT, 12); setOnClickListener { use(emoji) }
     }
 
@@ -201,7 +202,7 @@ class EmojiPanel(
         override fun getItemViewType(position: Int) = if (rows[position] is Header) 0 else 1
         override fun isEnabled(position: Int) = false
         override fun getView(position: Int, convert: View?, parent: ViewGroup): View = when (val row = rows[position]) {
-            is Header -> ((convert as? TextView) ?: RabtaUi.text(a, "", 14f, true, sub).apply { setPadding(dp(14), dp(14), dp(14), dp(6)) }).apply {
+            is Header -> ((convert as? TextView) ?: RabtaUi.text(a, "", 14f, true, sub).apply { setPadding(dp(14), dp(8), dp(14), dp(4)) }).apply {
                 text = row.title; androidx.core.view.ViewCompat.setAccessibilityHeading(this, true)
             }
             is Line -> ((convert as? LinearLayout)?.takeIf { it.childCount == columns } ?: LinearLayout(a).apply {

@@ -13,7 +13,8 @@ object ProfileHelper {
     private const val RETRY_MS = 60_000L
 
     private class Entry(val bmp: Bitmap?, val tag: String, val next: Long)
-    private val cache = HashMap<String, Entry>()
+    private val cache = BoundedCache<String, Entry>(128,8L*1024*1024) { it.bmp?.allocationByteCount?.toLong() ?: 1L }
+    private var generation=0L
 
     /** Time source; device tests move it forward instead of waiting minutes. */
     var clock: () -> Long = SystemClock::elapsedRealtime
@@ -32,6 +33,7 @@ object ProfileHelper {
      * is checked hears again only if the photo changed or went away (hidden or removed).
      */
     fun loadIfNeeded(userId: String, serverUrl: String, token: String, onLoaded: (Bitmap?) -> Unit) {
+        val requestGeneration=generation
         val accountKey=key(userId)
         val held = cache[accountKey]
         if (held != null && clock() < held.next) { onLoaded(held.bmp); return }
@@ -40,6 +42,7 @@ object ProfileHelper {
         waiting[accountKey]?.let { it.add(onLoaded); return }
         waiting[accountKey] = mutableListOf(onLoaded)
         WsClient.fetchPhoto(serverUrl, token, userId, held?.tag.orEmpty()) { answer ->
+            if(requestGeneration!=generation)return@fetchPhoto
             val entry = when {
                 answer == null -> Entry(held?.bmp, held?.tag.orEmpty(), later(RETRY_MS))
                 answer.unchanged -> Entry(held?.bmp, answer.tag, later(RECHECK_MS))
@@ -53,5 +56,5 @@ object ProfileHelper {
         }
     }
 
-    fun clear() { cache.clear() }
+    fun clear() { generation++;cache.clear();waiting.clear() }
 }
