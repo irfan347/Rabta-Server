@@ -138,3 +138,11 @@ PR #29 latest CI at 8039739: build passed; interface jobs on APIs 29/34/36 each 
 User reported Voice, Video and Walkie-Talkie all showing the same history. The mode selector only controlled starting calls. History and search now filter existing records by selected voice/video mode (including missed video outcomes); Walkie-Talkie shows its existing coming-soon state with no internet call records. Switching modes resets pagination. No stored history or schema changed. Updated search/navigation regression and added mode-switch/history-preservation device coverage. Validation is recorded below after the build.
 
 Validation: Android JVM tests and device/instrumentation APK builds succeeded (log /tmp/rabta-call-filter-build.log). New device regression compiled but not run locally; USB phone unavailable. CI will rerun on the pushed commit. No production release.
+
+## Oct 23: PR failure versus manual deployment
+
+Read-only investigation: PR #29 head 6f12fa0 builds successfully; API 29 and 34 device jobs pass. API 36 ran 107 cases with one failure in CallsScreenTest.searchFiltersRealHistoryIncludingOlderRecordsAndSurvivesNavigation at line 117 (initial recent missed-call row). The call-mode regression and call-media cases did not fail. SQLite call queries ordered only by timestamps, leaving tied rows unspecified; a local SQLite reproduction shows newest records absent from the first eight under equal timestamps. Add ID tie-breakers (descending for recents, ascending for chat timeline), and force timestamp ties in the existing regression instead of extending waits or removing assertions.
+
+Fetched main remains a779960 (PR #30); the subsequent fetched commits are our feature work. Tag v2.0.361 points to a779960. Render lists manual deployment of 6f88485 as live at 2026-10-23 10:50 UTC, replacing a779960. Compared index.js/account.js/features.js/package.json between those commits: no diff. This deployment occurred after the failing CI run and did not cause it. No infrastructure mutation, rollback, merge or release performed during investigation.
+
+Follow-up validation: 106 JVM tests and 19 Python checks passed; device and instrumentation APKs built successfully. Equal-timestamp SQLite reproduction confirms the query change; updated emulator regression awaits GitHub CI. No USB device available. Build log: /tmp/rabta-call-order-build.log.

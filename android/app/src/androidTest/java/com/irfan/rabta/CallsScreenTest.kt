@@ -110,6 +110,9 @@ class CallsScreenTest {
         repeat(105) { db.logCallStart("bulk-$it","Other contact $it","outgoing") }
         db.logCallStart("CA1100000003","Video contact","outgoing video")
         db.logCallStart("CA1100000004","Missed contact","missed")
+        // Fast devices can insert many records in one clock tick. Newest IDs must win ties.
+        db.writableDatabase.execSQL("UPDATE calls SET started_at=1000 WHERE id<>?",arrayOf(old))
+        assertEquals("Missed contact",db.calls(1).single().peerName)
         assertFalse(db.calls().any { it.id==old })
         val a=launch()
         try {
