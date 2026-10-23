@@ -146,3 +146,11 @@ Read-only investigation: PR #29 head 6f12fa0 builds successfully; API 29 and 34 
 Fetched main remains a779960 (PR #30); the subsequent fetched commits are our feature work. Tag v2.0.361 points to a779960. Render lists manual deployment of 6f88485 as live at 2026-10-23 10:50 UTC, replacing a779960. Compared index.js/account.js/features.js/package.json between those commits: no diff. This deployment occurred after the failing CI run and did not cause it. No infrastructure mutation, rollback, merge or release performed during investigation.
 
 Follow-up validation: 106 JVM tests and 19 Python checks passed; device and instrumentation APKs built successfully. Equal-timestamp SQLite reproduction confirms the query change; updated emulator regression awaits GitHub CI. No USB device available. Build log: /tmp/rabta-call-order-build.log.
+
+## Oct 23: release authorization and web continuation
+
+PR #29 final head 218acf8 passed build and all API 29/34/36 interface jobs. The user's real voice/video calls on 2.0.361 rang then ended. Both regular and test apps were running; after force-stopping ONLY com.irfan.rabta.testing (no data cleared), the user confirmed regular calls work. This strongly implicates competing sessions but account equality was not independently verified. Use a separate account for test app sessions; do not restart Rabta Test with the production account.
+
+User explicitly authorized merging PR #29 and deploying/releasing its changes. Merged as 2576249 on main. Render autoDeploy is off; one manual API deployment dep-dbdpidcs728c7382u4p0 was started and verified live at that commit. Live health now advertises call-recovery-120s and returns ok=true. Public Android release run 39995231379 is still being monitored. No instance/plan/database changes.
+
+Rabta Web uses a separate worktree /home/saif/rabta/Rabta-Web, branch feat/web-companion. First standalone pairing state and five tests committed as 0f51c82, pushed. Not mounted in index.js; no production web interface. User confirmed phone-connected first version. Detailed requirements and remaining work: docs/WEB_COMPANION.md. rabta.tech currently delegates to Orderbox/Get.tech nameservers. No DNS change or domain transfer performed. A web subdomain CNAME can be configured when the actual frontend is ready.
