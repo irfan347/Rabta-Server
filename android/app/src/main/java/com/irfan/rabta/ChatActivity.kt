@@ -930,8 +930,9 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
         fun actions(v:View) {
             if(v===bubble||v.isClickable) v.setOnLongClickListener {
                 it.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-                clearSelection();toggleSelected(m.id);reactionPopup?.dismiss()
-                if(m.body!="Message deleted")reactionPopup=MessageActions.react(this,m,isGroup,bubble) { clearSelection();loadHistory() }
+                val firstSelection=selectedIds.isEmpty()
+                reactionPopup?.dismiss();toggleSelected(m.id)
+                if(firstSelection&&m.body!="Message deleted")reactionPopup=MessageActions.react(this,m,isGroup,bubble) { clearSelection();loadHistory() }
                 true
             }
             if(v is ViewGroup)for(i in 0 until v.childCount)actions(v.getChildAt(i))

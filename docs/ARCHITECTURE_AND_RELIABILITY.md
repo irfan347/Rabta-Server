@@ -1,13 +1,13 @@
 # Rabta stack and reliability
 
-Verified from repository source and the live health endpoint on 22 October 2026.
+Verified from repository source, live health and read-only Render configuration on 22 October 2026 UTC. The database URL was inspected only to identify the provider; credentials were not printed or saved.
 
 | Layer | Current implementation | Role |
 |---|---|---|
 | Android app | Kotlin, native Android Views, Gradle/AGP | Chat, calls, device integration |
 | Phone database | SQLite through SQLiteOpenHelper, separate database per account | Local history, contacts, drafts/metadata and outgoing message state (some preferences live in SharedPreferences) |
 | Server | Node.js, Express, ws | HTTP APIs, authentication, delivery, call signaling and voice relay |
-| Server database | PostgreSQL through node-postgres when DATABASE_URL is configured | Accounts, pending messages/receipts, groups and feature records |
+| Server database | Neon PostgreSQL via a pooled endpoint and node-postgres | Accounts, pending messages/receipts, groups and feature records |
 | Live hosting | Render | Live health reports database enabled; no secrets were read |
 | Video | WebRTC | Peer media with STUN/TURN support |
 | Voice | PCM frames over authenticated WebSocket | Existing server-relayed voice transport |
@@ -40,3 +40,5 @@ Automated tests cover cache eviction and server call collisions/recovery behavio
 The owner reports $200 of Render credit and no additional provider budget. Keep the existing single Render service and database arrangement. This PR adds no paid services or subscription dependencies. Do not provision paid replicas, Redis, larger instances or new storage without explicit budget approval. Render credits must not be assumed to fund a separate Neon account.
 
 Verify actual Render credit balance/expiry, current service billing, database host/plan, storage and egress before projecting runway. The reported $200 is not a measured current balance. Avoid synthetic keep-alive traffic to a serverless database; current health checks do not query PostgreSQL. Existing cleanup runs every 30 minutes, not continuously. Code optimizations do not guarantee a monthly bill or an unlimited free tier.
+
+The connected Render service DATABASE_URL confirms a Neon pooled endpoint. Neon billing tier/allowance, Render credit balance/expiry and monthly usage remain unverified; the existing connection is not proof of a free plan.

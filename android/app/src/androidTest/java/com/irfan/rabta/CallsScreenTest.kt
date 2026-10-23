@@ -352,6 +352,11 @@ class CallsScreenTest {
             sockets.last().close(1001,"Going away")
             waitUi { !WsClient.connected&&VoiceCall.active&&shows(c,"Reconnecting") }
             assertTrue("Rabta connects again and says the call goes on",alive.await(20,TimeUnit.SECONDS))
+            // Signaling alone is not recovered audio: keep Reconnecting until the peer sends media again.
+            waitUi { WsClient.connected&&VoiceCall.active&&shows(c,"Reconnecting") }
+            val resumedAudio=JSONObject().put("type","call_audio").put("from","CA1100000002")
+                .put("callId",VoiceCall.id).put("data",android.util.Base64.encodeToString(ByteArray(640),android.util.Base64.NO_WRAP))
+            sockets.last().send(resumedAudio.toString())
             waitUi { WsClient.connected&&VoiceCall.active&&shows(c,"Connected") }
             assertEquals("Nobody hung up",1L,ended.count)
             assertEquals("Connected again once",2,sockets.size)
