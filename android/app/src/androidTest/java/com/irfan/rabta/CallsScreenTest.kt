@@ -114,7 +114,7 @@ class CallsScreenTest {
         val a=launch()
         try {
             ui { nav(a,"Calls").performClick() }
-            waitUi { search(a).isShown&&text(a,"Video contact") }
+            waitUi { search(a).isShown&&text(a,"Missed contact")&&!text(a,"Video contact") }
             waitUi { search(a).height>0 }
             ui {
                 assertEquals(RabtaUi.dp(a,44),(search(a).parent as View).height)
@@ -130,7 +130,9 @@ class CallsScreenTest {
                 assertTrue(search(a).isShown)
                 all(a.window.decorView).first { it.contentDescription=="Clear call search" }.performClick()
             }
-            waitUi { text(a,"Video contact")&&text(a,"Missed contact") }
+            waitUi { text(a,"Missed contact")&&!text(a,"Video contact") }
+            ui { all(a.window.decorView).first { it.contentDescription=="Video calls" }.performClick() }
+            waitUi { text(a,"Video contact")&&!text(a,"Missed contact") }
             ui {
                 assertFalse(all(a.window.decorView).first { it.contentDescription=="Clear call search" }.isShown)
                 search(a).setText("VIDEO")
@@ -140,6 +142,24 @@ class CallsScreenTest {
             ui { search(a).requestFocus();a.onBackPressedDispatcher.onBackPressed();assertFalse(search(a).hasFocus());assertTrue(nav(a,"Calls").isSelected) }
             ui { a.onBackPressedDispatcher.onBackPressed();assertEquals("",search(a).text.toString());assertTrue(nav(a,"Calls").isSelected) }
             assertEquals(108,db.calls(Int.MAX_VALUE).size)
+        } finally { ui { a.finish() } }
+    }
+
+    @Test fun callModesSeparateHistoryAndWalkieDoesNotShowInternetCalls()=fixture { db ->
+        db.logCallStart("voice-peer","Voice person","incoming")
+        db.logCallStart("video-peer","Video person","missed · video")
+        val a=launch()
+        fun mode(label:String)=all(a.window.decorView).first { it.contentDescription=="$label calls" }.performClick()
+        try {
+            ui { nav(a,"Calls").performClick() }
+            waitUi { text(a,"Voice person")&&!text(a,"Video person") }
+            ui { mode("Video") }
+            waitUi { text(a,"Video person")&&!text(a,"Voice person") }
+            ui { mode("Walkie-Talkie") }
+            waitUi { text(a,"Walkie-Talkie is coming soon")&&!text(a,"Voice person")&&!text(a,"Video person") }
+            ui { assertFalse(search(a).isShown);mode("Voice") }
+            waitUi { text(a,"Voice person")&&!text(a,"Video person") }
+            assertEquals(2,db.calls(Int.MAX_VALUE).size)
         } finally { ui { a.finish() } }
     }
 

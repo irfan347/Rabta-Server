@@ -943,16 +943,25 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
 
     private fun renderCalls() {
         if(activeTab!=3)return
-        callSearchRow.visibility=if(callRecords.isEmpty()) View.GONE else View.VISIBLE
+        val records=when(callKind) {
+            0 -> callRecords.filterNot { it.type.contains("video",true) }
+            1 -> callRecords.filter { it.type.contains("video",true) }
+            else -> emptyList()
+        }
+        callSearchRow.visibility=if(records.isEmpty()) View.GONE else View.VISIBLE
         callsList.removeAllViews()
         callsList.addView(callStarter())
-        if(callRecords.isEmpty()) {
+        if(records.isEmpty()) {
             if(callSearch.hasFocus())hideKeyboard()
-            callsList.addView(callState("phone","No calls yet","Your call history will appear here."))
+            callsList.addView(when(callKind) {
+                2 -> callState("walkie","Walkie-Talkie is coming soon","Push-to-talk history will appear here when available.")
+                1 -> callState("video","No video calls yet","Your video call history will appear here.")
+                else -> callState("phone","No calls yet","Your call history will appear here.")
+            })
             return
         }
         val query=callQuery.trim()
-        val matches=callRecords.filter { it.peerName.contains(query,true)||it.peerId.contains(query,true)||Names.nickname(this,it.peerId).contains(query,true) }
+        val matches=records.filter { it.peerName.contains(query,true)||it.peerId.contains(query,true)||Names.nickname(this,it.peerId).contains(query,true) }
         val head=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL;setPadding(dp(4),dp(8),0,dp(4)) }
         head.addView(RabtaUi.text(this,"Recent calls",17f,true).apply { androidx.core.view.ViewCompat.setAccessibilityHeading(this,true) },LinearLayout.LayoutParams(0,-2,1f))
         if(query.isEmpty()&&!showAllCalls&&matches.size>RECENT_CALLS)
@@ -982,7 +991,7 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
             modes.addView(RabtaUi.text(ctx,label,13f,true,if(selected) AppTheme.onPrimary(ctx) else SUB).apply {
                 gravity=Gravity.CENTER;maxLines=1;isFocusable=true;isSelected=selected;contentDescription="$label calls"
                 background=android.graphics.drawable.InsetDrawable(RabtaUi.ripple(ctx,if(selected) AppTheme.primary(ctx) else Color.TRANSPARENT,999),0,dp(4),0,dp(4))
-                setOnClickListener { callKind=index;renderCalls() }
+                setOnClickListener { callKind=index;showAllCalls=false;visibleCalls=100;renderCalls() }
             },LinearLayout.LayoutParams(0,dp(48),1f))
         }
         addView(modes,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(4) })
