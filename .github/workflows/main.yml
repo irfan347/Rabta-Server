@@ -424,7 +424,7 @@ jobs:
             adb shell run-as com.irfan.rabta ls files/rabta-ci-preservation-check
             bash -c 'if adb shell run-as com.irfan.rabta.testing ls files/rabta-ci-preservation-check >/dev/null 2>&1; then echo "Test package unexpectedly sees original private fixture"; exit 1; fi'
             adb shell run-as com.irfan.rabta rm files/rabta-ci-preservation-check
-            bash -c 'result=0; gradle --project-dir android :app:connectedDebugAndroidTest --no-daemon || result=$?; adb pull /sdcard/Download/rabta-interface interface-screenshots || true; exit "$result"'
+            bash android/scripts/device-tests-ci.sh
       - name: Summarize instrumented test results
         if: always()
         shell: bash
@@ -471,7 +471,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Rabta-device-tests-api-${{ matrix.api }}
-          path: android/app/build/reports/androidTests/
+          path: |
+            android/app/build/reports/androidTests/
+            android/app/build/outputs/androidTest-results/
+            device-diagnostics/
           if-no-files-found: ignore
 
   # Google Play signs installs with Rabta's own key, so phones that installed it from GitHub update from Play. Play
