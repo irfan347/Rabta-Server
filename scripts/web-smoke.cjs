@@ -5,7 +5,10 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const mount=require('../web-http');
 (async()=>{
- const app=express();app.use(express.json());const server=await new Promise(resolve=>{const s=app.listen(0,'127.0.0.1',()=>resolve(s));});
+ const app=express();app.use(express.json());
+ // Hold the first session lookup until the browser proves linking is visibly disabled.
+ let releaseState;const firstState=new Promise(resolve=>{releaseState=resolve;});let stateHeld=false;
+ app.use('/web/api/state',async(req,res,next)=>{if(!stateHeld){stateHeld=true;await firstState;}next();});const server=await new Promise(resolve=>{const s=app.listen(0,'127.0.0.1',()=>resolve(s));});
  const origin='http://localhost:'+server.address().port;
  const records=[{id:'ABCDEF000001',text:'Hey! Good to see you here 👋',mine:false,at:Date.now(),status:'received'}];
  let relay;const phone={readyState:1,rabtaWebReady:true,send(raw){const c=JSON.parse(raw);let data={};
@@ -18,7 +21,10 @@ const mount=require('../web-http');
  const browser=await chromium.launch({executablePath:process.env.CHROME_BIN||'/usr/bin/google-chrome-stable',headless:true,args:['--no-sandbox']});
  try {
   const page=await browser.newPage({viewport:{width:1440,height:950}});const errors=[];page.on('pageerror',e=>errors.push(String(e)));
-  await page.goto(origin+'/web/');await page.getByRole('button',{name:'Create a linking code'}).click();
+  await page.goto(origin+'/web/');
+  const pairButton=page.getByRole('button',{name:'Create a linking code'});
+  assert.equal(await pairButton.isDisabled(),true,'Pending session lookup must not silently swallow a linking click');
+  releaseState();await pairButton.click();
   await page.locator('#qr').waitFor({state:'visible'});
   const dir=process.env.RABTA_SCREENSHOTS||'/tmp/rabta-web-screenshots';fs.mkdirSync(dir,{recursive:true});
   await page.screenshot({path:dir+'/pairing-desktop.png',fullPage:true});

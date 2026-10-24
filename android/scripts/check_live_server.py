@@ -1,7 +1,11 @@
 """Read-only reachability check. Never signs up, sends messages or prints tokens."""
 import base64, hashlib, json, os, re, socket, ssl, struct, urllib.request, urllib.parse
 from pathlib import Path
-url = re.search(r'const val SERVER = "([^"]+)"', Path(__file__).resolve().parents[1].joinpath('app/src/main/java/com/irfan/rabta/Config.kt').read_text()).group(1)
+from server_origin import production_origin
+project = Path(__file__).resolve().parents[1]
+url = production_origin(
+    project.joinpath('app/src/main/java/com/irfan/rabta/Config.kt').read_text(),
+    project.joinpath('app/build.gradle.kts').read_text())
 print('Checking configured server:', url)
 try:
     with urllib.request.urlopen(url+'/health', timeout=90) as r:
