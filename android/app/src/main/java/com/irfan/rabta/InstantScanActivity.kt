@@ -25,8 +25,9 @@ class InstantScanActivity:ThemedActivity() {
     private var checking=false
     override fun onCreate(state:Bundle?) {
         super.onCreate(state)
-        val body=FeatureUi.page(this,"Scan to connect")
-        body.addView(RabtaUi.text(this,"Scan an invitation, pairing reply or confirmation. You will review the identity before approving.",15f,color=AppTheme.sub(this)))
+        val web=intent.getBooleanExtra("web_pairing",false)
+        val body=FeatureUi.page(this,if(web) "Scan Rabta Web" else "Scan to connect")
+        body.addView(RabtaUi.text(this,if(web) "Scan the QR code in your browser. You will approve access on the next screen." else "Scan an invitation, pairing reply or confirmation. You will review the identity before approving.",15f,color=AppTheme.sub(this)))
         val frame=FrameLayout(this).apply { background=RabtaUi.shape(this@InstantScanActivity,AppTheme.raised(this@InstantScanActivity));clipToOutline=true }
         camera=BarcodeView(this).apply { decoderFactory=InstantQrDecoderFactory() }
         frame.addView(camera,FrameLayout.LayoutParams(-1,-1))
@@ -71,7 +72,12 @@ class InstantScanActivity:ThemedActivity() {
                 checking=true;camera.pause();status.text="Checking invitation signature and expiry…"
                 Thread {
                     val raw=result.text.orEmpty()
-                    val verified=runCatching { InstantInvitation.verify(raw,System.currentTimeMillis()) }
+                    val verified=runCatching {
+                        if(intent.getBooleanExtra("web_pairing",false)) {
+                            val o=org.json.JSONObject(raw)
+                            require(o.optString("kind")=="rabta-web" && o.optInt("v")==1 && o.optString("code").matches(Regex("[a-f0-9]{32}"))) {"Not a Rabta Web code"}
+                        } else InstantInvitation.verify(raw,System.currentTimeMillis())
+                    }
                     runOnUiThread {
                         checking=false
                         if(!visible||isDestroyed)return@runOnUiThread

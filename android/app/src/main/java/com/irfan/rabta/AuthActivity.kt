@@ -72,6 +72,10 @@ class AuthActivity : ThemedActivity() {
             setPadding(0, dp(8), 0, dp(20))
         })
 
+        if (BuildConfig.BUILD_TYPE == "staging") root.addView(RabtaUi.text(this,
+            "Preview environment · Create a test account here. Your regular Rabta account belongs to a different server.",
+            13f, color=AppTheme.accent(this)).apply { setPadding(0,dp(8),0,dp(12)) })
+
         // ---- Form ----
         val form = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -276,8 +280,14 @@ class AuthActivity : ThemedActivity() {
             if (ok && data != null) { saveAndGo(data); return@register }
             // One account per phone: this phone already has one, so sign-in opens with its username filled in.
             val existing = Regex("\\(@([a-z0-9_]{3,20})\\)").find(msg)?.groupValues?.get(1)
-            if (existing != null) { setMode(false); usernameField.setText(existing); pinField.setText("") }
-            statusText.text = msg; statusText.setTextColor(AppTheme.error(this))
+            statusText.text = "Account not created. $msg"; statusText.setTextColor(AppTheme.error(this))
+            if (existing != null && !isFinishing) android.app.AlertDialog.Builder(this)
+                .setTitle("Account not created")
+                .setMessage("This phone already uses @$existing. Your new username and PIN were not registered. Sign in with the existing account's PIN.")
+                .setNegativeButton("Stay here", null)
+                .setPositiveButton("Sign in to @$existing") { _, _ ->
+                    setMode(false); usernameField.setText(existing); pinField.setText("")
+                }.show()
         }
     }
 

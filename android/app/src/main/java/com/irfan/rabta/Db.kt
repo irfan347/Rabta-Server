@@ -8,6 +8,22 @@ import android.database.sqlite.SQLiteOpenHelper
 /** [account] is set only by [get]; a Db constructed directly (isolated test fixtures) keeps the legacy file name. */
 class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(ctx, fileFor(account), null, 7) {
 
+    @Volatile private var deleted = false
+
+    // A worker may still hold this helper after sign-out. Never let it recreate deleted history.
+    @Synchronized override fun getWritableDatabase(): SQLiteDatabase {
+        check(!deleted) { "Account history has been deleted" }
+        return super.getWritableDatabase()
+    }
+    @Synchronized override fun getReadableDatabase(): SQLiteDatabase {
+        check(!deleted) { "Account history has been deleted" }
+        return super.getReadableDatabase()
+    }
+    @Synchronized private fun retire() {
+        deleted = true
+        close()
+    }
+
     // WAL permits background message writes while the UI reads history; backup exports use a transaction.
     init { setWriteAheadLoggingEnabled(true) }
 
@@ -59,27 +75,31 @@ class Db(ctx: Context, internal val account: String? = null) : SQLiteOpenHelper(
     companion object {
         private const val LEGACY = "rabta.db"
         @Volatile private var INST: Db? = null
+        private val helpers = mutableListOf<java.lang.ref.WeakReference<Db>>()
 
         /** Each account has its own history file; signed out, nothing is written to disk. */
         private fun fileFor(account: String?) = when { account == null -> LEGACY; account.isEmpty() -> null; else -> "rabta_$account.db" }
         private fun current(db: Db?, account: String) = db?.takeIf { it.account == null || it.account == account }
 
-        fun get(ctx: Context): Db {
+        fun get(ctx: Context): Db = synchronized(this) {
+            // Read identity under the same lock as deletion; a waiting reader must see sign-out.
             val account = runCatching { Session.id }.getOrDefault("")
-            current(INST, account)?.let { return it }
-            return synchronized(this) {
-                current(INST, account) ?: run {
-                    val app = ctx.applicationContext
-                    if (account.isNotEmpty()) adoptLegacy(app, account)
-                    Db(app, account).also { INST = it }
-                }
+            current(INST, account)?.takeUnless { it.deleted } ?: run {
+                val app = ctx.applicationContext
+                if (account.isNotEmpty()) adoptLegacy(app, account)
+                helpers.removeAll { it.get() == null }
+                Db(app, account).also { INST = it; helpers.add(java.lang.ref.WeakReference(it)) }
             }
         }
 
-        /** Delete account: closes [account]'s history and deletes its file (the phone is already signed out of it). */
-        fun delete(ctx: Context, account: String) {
-            synchronized(this) { INST?.takeIf { it.account == account }?.let { runCatching { it.close() }; INST = null } }
+        /** Retire every live helper, including ones retained by workers across account switches. */
+        fun delete(ctx: Context, account: String) = synchronized(this) {
+            val live = (helpers.mapNotNull { it.get() } + listOfNotNull(INST)).distinct()
+            live.filter { it.account == account }.forEach { it.retire() }
+            if (INST?.account == account) INST = null
+            helpers.removeAll { it.get() == null || it.get()?.account == account }
             fileFor(account)?.let { ctx.applicationContext.deleteDatabase(it) }
+            Unit
         }
 
         /**

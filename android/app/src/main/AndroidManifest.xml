@@ -62,6 +62,7 @@
         <activity android:name=".InstantScanActivity" android:exported="false" />
         <activity android:name=".NetworkVisionActivity" android:exported="false" />
         <activity android:name=".DropActivity" android:exported="false" />
+        <activity android:name=".WebLinksActivity" android:exported="false" />
         <activity android:name=".DevicesActivity" android:exported="false" />
         <activity android:name=".ConnectivityDiagnosticsActivity" android:exported="false" />
         <activity android:name=".LockedChatsActivity" android:exported="false" />

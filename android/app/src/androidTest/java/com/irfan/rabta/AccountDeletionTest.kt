@@ -35,7 +35,17 @@ class AccountDeletionTest {
             ctx.getSharedPreferences("privacy_$gone", 0).edit().putBoolean("hide_previews", true).commit()
             ctx.getSharedPreferences("downloads_$gone", 0).edit().putString("remote-file", mine).commit()
 
+            val stale = Db.get(ctx)
+            // A worker can retain a helper while the singleton follows a different account.
+            Session.id = stays
+            Db.get(ctx)
+            Session.id = gone
+            val latest = Db.get(ctx)
             AccountDeletion.wipe(ctx, gone)
+            for (helper in listOf(stale, latest)) {
+                assertTrue("Retained writer cannot recreate deleted chats", runCatching { helper.writableDatabase }.isFailure)
+                assertTrue("Retained reader cannot recreate deleted chats", runCatching { helper.readableDatabase }.isFailure)
+            }
 
             assertFalse("Signed out", Session.loggedIn)
             assertFalse("Its chats are deleted", ctx.getDatabasePath("rabta_$gone.db").exists())

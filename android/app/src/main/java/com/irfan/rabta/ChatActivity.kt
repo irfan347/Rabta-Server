@@ -946,7 +946,14 @@ class ChatActivity : ThemedActivity(), RabtaEvents.Listener {
                 background=RabtaUi.ripple(this@ChatActivity,Color.TRANSPARENT);layoutParams=LinearLayout.LayoutParams(-1,-2)
             })
         }
-        val wrap=MessageRow(m.id).apply { orientation=LinearLayout.HORIZONTAL;gravity=(if(m.mine) Gravity.END else Gravity.START) or Gravity.CENTER_VERTICAL;tag="message:${m.id}" }
+        val wrap=MessageRow(m.id).apply {
+            orientation=LinearLayout.HORIZONTAL
+            gravity=(if(m.mine) Gravity.END else Gravity.START) or Gravity.CENTER_VERTICAL
+            tag="message:${m.id}"
+            // Keep one-character messages easy to reach: blank space belongs to this message too.
+            isClickable=true
+            setOnLongClickListener { bubble.performLongClick() }
+        }
         // Photos, videos, voice messages and files get WhatsApp's round forward button beside them.
         val forward=if(m.msgType in setOf("image","video","voice","file")) forwardButton(m) else null
         if(forward!=null&&m.mine) wrap.addView(forward,LinearLayout.LayoutParams(dp(36),dp(36)).apply { marginEnd=dp(8);topMargin=if(continued) dp(2) else dp(8) })

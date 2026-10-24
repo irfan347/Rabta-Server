@@ -143,7 +143,7 @@ object WsClient {
                         readyTimeout?.let {handler.removeCallbacks(it)};readyTimeout=null
                         protocol=o.optInt("protocol",1);answersPing=o.optBoolean("receipts");connected=true;status="Online";reconnectDelay=2000L
                         tellShown();if(watching.isNotEmpty())tellWatching()
-                        RabtaEvents.postConnected();settled?.invoke()
+                        sendRaw("{\"type\":\"web_ready\"}");RabtaEvents.postConnected();settled?.invoke()
                     } else if(connected)handle(o)
                 }
                 override fun onClosing(socket:WebSocket,code:Int,reason:String)=main {
@@ -167,6 +167,7 @@ object WsClient {
 
     private fun handle(o: JSONObject) {
         when (o.optString("type")) {
+            "web_command" -> WebCompanion.handle(o)
             "msg" -> {
                 val id = o.optString("id"); val from = o.optString("from")
                 // Confirm only after the message (or an earlier copy with the same ID) is stored on this phone.

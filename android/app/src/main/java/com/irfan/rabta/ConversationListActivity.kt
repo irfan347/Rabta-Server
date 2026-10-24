@@ -198,6 +198,14 @@ class ConversationListActivity : ThemedActivity(), RabtaEvents.Listener {
         header.addView(RabtaUi.iconButton(this,"qr","QR Connect") { startActivity(Intent(this,InstantConnectActivity::class.java)) }.apply {
             UiIcons.set(this,"qr",TXT,22,L.t(this@ConversationListActivity,"QR Connect"))
         })
+        header.addView(RabtaUi.iconButton(this,"more","More options") {}.apply { setOnClickListener { anchor ->
+            android.widget.PopupMenu(this@ConversationListActivity,anchor).apply {
+                menu.add("Linked devices").setOnMenuItemClickListener {
+                    startActivity(Intent(this@ConversationListActivity,WebLinksActivity::class.java));true
+                }
+                show()
+            }
+        } })
         myAvatarView=FrameLayout(this).apply {
             contentDescription="My profile, ${Session.name}";isFocusable=true;background=RabtaUi.ripple(this@ConversationListActivity,Color.TRANSPARENT,999)
             setOnClickListener { startActivity(Intent(this@ConversationListActivity,ProfileActivity::class.java)) }

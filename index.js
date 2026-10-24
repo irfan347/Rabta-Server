@@ -6,6 +6,7 @@ const express = require('express');
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 
+let webCompanion = null;
 const app = express();
 app.use(express.json({ limit: '2mb' }));
 const server = http.createServer(app);
@@ -371,6 +372,8 @@ wss.on('connection', (ws, req) => {
   ws.on('message', async (raw) => {
     ws.rabtaAlive = true; ws.rabtaHeard = Date.now();
     let msg; try { msg = JSON.parse(raw.toString()); } catch { return; }
+    if (msg.type === 'web_ready') { ws.rabtaWebReady = true; return; }
+    if (msg.type === 'web_reply') { webCompanion?.reply(userId,ws.rabtaDevice,msg); return; }
     if (msg.type === 'msg' || msg.type === 'group_msg') {
       if (!/^[0-9A-F]{12}$/.test(String(msg.id || '')) || typeof msg.body !== 'string' || !msg.body || Buffer.byteLength(msg.body) > MAX_BODY || !['text','image','voice','video','file','sticker','rich','reaction'].includes(msg.msgType || 'text')) {
         ws.send(JSON.stringify({type:'ack',id:msg.id,status:'error'})); return;
@@ -624,6 +627,14 @@ const features=require('./features')({app,authId,users:memUsers,getPool:()=>pool
 require('./discovery')({app,authId,users:memUsers,blocked:features.blocked,getPool:()=>pool});
 const push=require('./push')({app,authId,getPool:()=>pool});
 const PORT = process.env.PORT || 3000;
-initDb().then(()=>features.init()).then(()=>push.init()).then(() => server.listen(PORT, () => console.log('Rabta server on', PORT)))
+initDb().then(()=>features.init()).then(()=>push.init()).then(() => server.listen(PORT, process.env.HOST, () => console.log('Rabta server on', PORT)))
   .catch(e => { console.error('Database initialization failed:', e.message); process.exitCode=1; });
 
+
+// Opt-in until the linked browser and updated phone have passed acceptance.
+if (process.env.RABTA_WEB_ORIGIN) webCompanion = require('./web-http')({
+  app, origin: process.env.RABTA_WEB_ORIGIN,
+  authPhone: req => readTokenFull(bearer(req)),
+  deviceAllowed: (user,device) => memUsers.has(user) && account.tokenAllowed(user,device),
+  phoneSocket: (user,device) => { const socket=online.get(user); return socket?.rabtaDevice===device ? socket : null; }
+});

@@ -50,6 +50,40 @@ object Outbox : RabtaEvents.Listener {
             c.attempt(DeliveryCoordinator.Outgoing(id, peerId, group, body, type, time)); reschedule()
         }
     }
+    /** A browser retry uses the same ID; acknowledgment means persisted on this phone, not delivered. */
+    fun sendFromWeb(peer:String,name:String,body:String,id:String,guard:()->Boolean,done:(Boolean)->Unit) {
+        val pair=current() ?: run {done(false);return}
+        val (d,c)=pair
+        worker.execute {
+            val stored=runCatching {
+                require(guard() && Db.get(context)===d)
+                if(d.hasMessage(id)) {
+                    val old=d.outgoing(id)
+                    require(old!=null && old.convId==peer && old.body==body && old.msgType=="text")
+                } else {
+                    val time=System.currentTimeMillis();val account=d.account ?: error("Missing account")
+                    d.writableDatabase.beginTransaction()
+                    try {
+                        require(guard())
+                        d.saveMessage(id,peer,account,body,time,true,if(peer==account)MessageDelivery.READ else MessageDelivery.QUEUED,"text")
+                        d.upsertConversation(peer,name,body,time,false,false)
+                        d.writableDatabase.setTransactionSuccessful()
+                    } finally {d.writableDatabase.endTransaction()}
+                }
+            }.isSuccess
+            if(stored) {
+                RabtaEvents.postHistoryChanged(peer)
+                if(guard() && peer!=d.account)runCatching {
+                    if(d.status(id)==MessageDelivery.QUEUED)d.outgoing(id)?.let {
+                        c.attempt(DeliveryCoordinator.Outgoing(it.id,it.convId,false,it.body,it.msgType,it.sentAt))
+                    }
+                    reschedule()
+                }
+            }
+            done(stored)
+        }
+    }
+
     fun retry(message: Db.Message, group: Boolean) {
         val (d, c) = current() ?: return
         worker.execute {
