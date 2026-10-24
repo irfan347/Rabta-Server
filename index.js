@@ -627,7 +627,7 @@ const features=require('./features')({app,authId,users:memUsers,getPool:()=>pool
 require('./discovery')({app,authId,users:memUsers,blocked:features.blocked,getPool:()=>pool});
 const push=require('./push')({app,authId,getPool:()=>pool});
 const PORT = process.env.PORT || 3000;
-initDb().then(()=>features.init()).then(()=>push.init()).then(() => server.listen(PORT, () => console.log('Rabta server on', PORT)))
+initDb().then(()=>features.init()).then(()=>push.init()).then(() => server.listen(PORT, process.env.HOST, () => console.log('Rabta server on', PORT)))
   .catch(e => { console.error('Database initialization failed:', e.message); process.exitCode=1; });
 
 

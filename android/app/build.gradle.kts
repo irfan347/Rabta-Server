@@ -6,8 +6,10 @@ android {
     namespace = "com.irfan.rabta"
     // Google Play takes new apps and updates only when they target Android 16 (API 36).
     compileSdk = 36
+    buildFeatures { buildConfig = true }
     defaultConfig {
         applicationId = "com.irfan.rabta"
+        buildConfigField("String", "API_ORIGIN", "\"https://rabta-server-1e2i.onrender.com\"")
         minSdk = 26
         targetSdk = 36
         // Every CI run numbers its build, so a published Rabta is always newer than the one it updates.
@@ -58,6 +60,18 @@ android {
             matchingFallbacks += listOf("debug")
         }
     }
+    // Separate storage and identity: preview accounts never share the production application's session.
+    buildTypes.create("staging") {
+        initWith(buildTypes.getByName("device"))
+        applicationIdSuffix = ".staging"
+        manifestPlaceholders["appLabel"] = "Rabta Preview"
+        val origin = providers.gradleProperty("rabtaStagingOrigin").getOrElse("http://localhost:38731")
+        require(origin.matches(Regex("https://[a-zA-Z0-9.-]+(:[0-9]+)?|http://localhost:[0-9]+"))) { "Invalid staging origin" }
+        buildConfigField("String", "API_ORIGIN", "\"$origin\"")
+        matchingFallbacks += listOf("device", "debug")
+    }
+    sourceSets.getByName("staging").manifest.srcFile("src/debug/AndroidManifest.xml")
+    sourceSets.getByName("staging").res.srcDir("src/debug/res")
     testBuildType = providers.gradleProperty("rabtaTestBuildType").getOrElse("debug")
     // Reuse the existing debug network configuration for the isolated device-test build.
     sourceSets.getByName("device").manifest.srcFile("src/debug/AndroidManifest.xml")

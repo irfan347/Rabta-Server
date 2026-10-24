@@ -100,7 +100,9 @@ class ConversationTest {
                 assertTrue("Stored server acceptance reads as Sent, not Delivered",described("convo-sent").any { it.contains("Sent") }&&described("convo-sent").none { it.contains("Delivered") })
                 assertTrue(views().filterIsInstance<TextView>().any { it.text=="Yesterday" })
                 for(v in views().filter { it.tag?.toString()?.startsWith("bubble:")==true })assertTrue(v.width<=(v.parent as View).width)
-                incoming().performLongClick()
+                val row=views().first { it.tag=="message:convo-incoming" }
+                assertTrue("Blank row space accepts touch gestures",row.isClickable)
+                assertTrue("Holding beside the bubble opens its actions",row.performLongClick())
             }
             // Holding a message selects it, and the header offers its actions, as in WhatsApp.
             waitUi { views().any { it.isShown&&it.contentDescription=="Cancel selection" } }

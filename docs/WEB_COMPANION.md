@@ -30,3 +30,9 @@ Add the exact custom hostname in Render and configure Get.tech DNS `CNAME web` t
 - Physical Android-to-browser acceptance, actual QR camera scan, background/locked phone behavior and simultaneous calling still require validation. Browser tests use a simulated phone, not proof of Android integration.
 - No browser calls, attachments, groups, old-history pagination, persistent browser history or independent operation with the phone offline in this release.
 - No end-to-end encryption claim: the existing server can see routed payloads; HTTPS protects transport. No chat content is added to server logging.
+
+## Disposable Cloudflare preview
+
+A `staging` Android build installs as **Rabta Preview** (`com.irfan.rabta.staging`), independently of regular Rabta and Rabta Test. Supply `-PrabtaStagingOrigin=https://NAME.trycloudflare.com` when building `:app:assembleStaging`. The normal device/release/Play variants keep their production API address. Verify package identity with `aapt dump badging` before copying/installing; `assembleDebug` is NOT the isolated Rabta Test variant (`assembleDevice` is).
+
+For a temporary preview, start `cloudflared tunnel --url http://127.0.0.1:38731`, then `node scripts/preview-server.cjs https://NAME.trycloudflare.com`. The launcher deliberately excludes inherited database, push and production signing secrets. It binds the Node server to loopback and uses in-memory disposable accounts. Accounts/messages vanish when that server restarts; the tunnel URL changes when the tunnel restarts. The computer and tunnel must remain running. This is temporary testing access, not Cloudflare-hosted persistent compute. Use test data only. No paid plan or DNS change is required.
